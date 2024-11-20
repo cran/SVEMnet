@@ -1,0 +1,63 @@
+# CITATION file for the SVEMnet package
+
+citHeader("If you use the SVEMnet package, please cite the following works:")
+
+# Package Manual Citation
+citation_package <- bibentry(
+  bibtype = "Manual",
+  title = "SVEMnet: Self-Validated Ensemble Models with Elastic Net Regression",
+  author = person("Andrew T.", "Karl"),
+  year = "2024",
+  note = "R package version 1.0.1",
+)
+
+# First Article Citation
+citation1 <- bibentry(
+  bibtype = "Article",
+  title = "A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM)",
+  author = person("Andrew T.", "Karl"),
+  journal = "Chemometrics and Intelligent Laboratory Systems",
+  year = "2024",
+  volume = "249",
+  pages = "105122",
+  doi = "10.1016/j.chemolab.2024.105122",
+  keywords = c("Formulation optimization", "Joint optimization", "Mixture experiment", "Multiple response experiment", "SVEM")
+)
+
+# Second Article Citation
+citation2 <- bibentry(
+  bibtype = "Article",
+  title = "Self-validated ensemble models for design of experiments",
+  author = c(
+    person("Trent", "Lemkus"),
+    person("Christopher", "Gotwalt"),
+    person("Philip", "Ramsey"),
+    person("Maria L.", "Weese")
+  ),
+  journal = "Chemometrics and Intelligent Laboratory Systems",
+  year = "2021",
+  volume = "219",
+  pages = "104439",
+  doi = "10.1016/j.chemolab.2021.104439",
+  keywords = c("Box-Behnken designs", "Definitive screening designs", "Forward selection", "Fractional weighted bootstrap", "Lasso")
+)
+
+# Third Article Citation
+citation3 <- bibentry(
+  bibtype = "Article",
+  title = "Regularization Paths for Generalized Linear Models via Coordinate Descent",
+  author = c(
+    person("Jerome", "Friedman"),
+    person("Robert", "Tibshirani"),
+    person("Trevor", "Hastie")
+  ),
+  journal = "Journal of Statistical Software",
+  year = "2010",
+  volume = "33",
+  number = "1",
+  pages = "1--22",
+  doi = "10.18637/jss.v033.i01"
+)
+
+# Combine all citations into a list
+citation <- list(citation_package, citation1, citation2, citation3)
