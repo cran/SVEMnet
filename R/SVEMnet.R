@@ -6,13 +6,14 @@
 #' @param formula A formula specifying the model to be fitted.
 #' @param data A data frame containing the variables in the model.
 #' @param nBoot Number of bootstrap iterations (default is 200).
-#' @param glmnet_alpha Elastic Net mixing parameter(s) (default is \code{c(0, 0.25, 0.5, 0.75, 1)}).
+#' @param glmnet_alpha Elastic Net mixing parameter(s) (default is \code{c(0, 0.5, 1)}).
 #' Can be a vector of alpha values, where \code{alpha = 1} corresponds to Lasso and \code{alpha = 0} corresponds to Ridge regression.
 #' @param weight_scheme Weighting scheme for SVEM (default is "SVEM"). Valid options are "SVEM", "FWR", and "Identity".
 #' "FWR" calculates the Fractional Weight Regression (Xu et al., 2020) and is included for demonstration;
 #' "SVEM" generally provides better performance."Identity" simply sets the training and validation weights to 1. Use with \code{nBoot = 1} and \code{objective = "wAIC"} to get an elastic net fit on the training data using AIC.
-#' @param objective Objective function for selecting lambda (default is "wSSE"). Valid options are "wAIC" and "wSSE".
+#' @param objective Objective function for selecting lambda (default is "wAIC"). Valid options are "wAIC" and "wSSE".
 #' The "w" refers to "weighted" validation.
+#' @param standardize logical. Passed to \code{glmnet} to control standardization (default is \code{TRUE}).
 #' @param ... Additional arguments passed to the underlying \code{glmnet()} function.
 #' @return An object of class \code{svem_model}.
 #' @details
@@ -24,18 +25,18 @@
 #'
 #'objective options:
 #' \describe{
-#'   \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n \* log(wSSE / n) + 2 \* k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
-#'   \item{\code{"wSSE"}}{Weighted Sum of Squared Errors. Selects the lambda that minimizes the weighted validation error without penalizing model complexity. While this may lead to models that overfit when the number of parameters is large relative to the number of observations, SVEM mitigates overfitting (high prediction variance) by averaging over multiple bootstrap models. Typically used with \code{weight_scheme="SVEM"}}
+#'   \item{\code{"wSSE"}}{Weighted Sum of Squared Errors. Selects the lambda that minimizes the weighted validation error without penalizing model complexity. While this may lead to models that overfit when the number of parameters is large relative to the number of observations, SVEM mitigates overfitting (high prediction variance) by averaging over multiple bootstrap models. This is the objective function used by Lemkus et al. (2021) with \code{weight_scheme="SVEM"}}
+#'   \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n \* log(wSSE / n) + 2 \* k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters with nonzero coefficients. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
 #' }
 #'
 #'weight_scheme options:
 #' \describe{
-#'   \item{\code{"SVEM"}}{Uses anti-correlated fractional weights for training and validation sets, improving model generalization by effectively simulating multiple training-validation splits (Lemkus et al. (2021)). Typically used with \code{objective="wSSE"}.}
-#'   \item{\code{"FWR"}}{Fractional Weight Regression as described by Xu et al. (2020). Weights are the same for both training and validation sets. This method does not provide the self-validation benefits of SVEM but is included for comparison.  Typically used with \code{objective="wAIC"}.}
+#'   \item{\code{"SVEM"}}{Uses anti-correlated fractional weights for training and validation sets, improving model generalization by effectively simulating multiple training-validation splits (Lemkus et al. (2021)). Published results (Lemkus et al. (2021), Karl (2024)) utilize \code{objective="wSSE"}. However, unpublished simulation results suggest improved performance from using \code{objective="wAIC"} with \code{weight_scheme="SVEM"}. See the SVEMnet Vignette for details.}
+#'   \item{\code{"FWR"}}{Fractional Weight Regression as described by Xu et al. (2020). Weights are the same for both training and validation sets. This method does not provide the self-validation benefits of SVEM but is included for comparison.  Used with \code{objective="wAIC"}.}
 #'   \item{\code{"Identity"}}{Uses weights of 1 for both training and validation. This uses the full dataset for both training and validation, effectively disabling the self-validation mechanism. Use with \code{objective="wAIC"} and \code{nBoot=1} to fit the Elastic Net on the AIC of the training data.}
 #' }
 #'
-#'A debiased fit is output (along with the standard fit). This is provided to allow the user to match the output of JMP, which returns a debiased fit whenever \code{nBoot>=10}.? \code{https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml}. The debiasing coefficients are always calculated by SVEMnet(), and the predict() function determines whether the raw or debiased predictions are returned via its \code{debias} argument.
+#'A debiased fit is output (along with the standard fit). This is provided to allow the user to match the output of JMP, which returns a debiased fit whenever \code{nBoot>=10}. \\ https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml. The debiasing coefficients are always calculated by SVEMnet(), and the predict() function determines whether the raw or debiased predictions are returned via its \code{debias} argument. The default is \code{debias=FALSE}, based on performance on unpublished simulation results.
 #'
 #' The output includes:
 #' **Model Output:**
@@ -66,9 +67,11 @@
 #'
 #' Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
 #'
+#' Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+#'
 #' Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
 #'
-#' Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). General Applications of the Fractional-Random-Weight Bootstrap. \emph{Technometrics}, 62(3), 345–358. \doi{10.1080/00031305.2020.1731599}
+#' Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
 #'
 #' Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{ https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
 #'
@@ -103,9 +106,9 @@
 #' @importFrom stats runif rbinom rbeta lm predict coef sd var model.frame model.matrix
 #' @importFrom glmnet glmnet
 #' @export
-SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0, 0.25, 0.5, 0.75, 1),
+SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0, 0.5, 1),
                     weight_scheme = c("SVEM", "FWR","Identity"),
-                    objective = c("wSSE","wAIC"),...) {
+                    objective = c("wAIC","wSSE"),standardize=TRUE,...) {
   objective <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
 
@@ -173,11 +176,9 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0, 0.25, 0.5, 0
           alpha = alpha,
           weights = w_train,
           intercept = TRUE,
-          standardize = TRUE,
+          standardize = standardize,
           maxit = 1e6,
-          nlambda = 500,
-          ...
-
+          nlambda = 500
         )
       }, warning = function(w) {
         warning(paste("Warning in glmnet for alpha", alpha, ":", w$message))

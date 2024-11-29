@@ -1,0 +1,274 @@
+---
+title: "SVEMnet Vignette"
+author: 
+  - Andrew T. Karl
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{SVEMnet Vignette}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+# Version
+version `r utils::packageVersion("SVEMnet")`
+
+# Summary
+
+`SVEMnet` implements Self-Validated Ensemble Models (SVEM, Lemkus et al. 2021) and the SVEM whole model test (Karl 2024) using Elastic Net regression via the `glmnet` package Friedman et al. (2010). This vignette provides an overview of the package's functionality and usage.
+
+# Preface - Note from the author
+
+The motivation to create the `SVEMnet` package was primarily to have a personal sandbox to explore SVEM performance in different scenarios and with various modifications to its structure. I did not originally intend to publish it, but after having used it for a while I believe it could be useful to others. 
+
+As noted in the documentation, I used `GPT o1-preview` to help form the code structure of the package and to code the Roxygen structure of the documentation. The SVEM significance test R code comes from the supplementary material of Karl (2024). I wrote that code by hand and validated each step (not including the creation of the SVEM predictions) against corresponding results in JMP (the supplementary material of Karl (2024) provides the matching JSL script). For the `SVEMnet()` code, assuming only a single value of alpha for `glmnet` is being tested, the heart of the SVEM code is simply
+
+
+```r
+#partial code for illustration of the SVEM loop
+coef_matrix <- matrix(NA, nrow = nBoot, ncol = p + 1)
+ for (i in 1:nBoot) {
+      U <- runif(n)
+      w_train <- -log(U)
+      w_valid <- -log(1 - U)
+      #match glmnet normalization of training weight vector
+      w_train <- w_train * (n / sum(w_train))
+      w_valid <- w_valid * (n / sum(w_valid))
+      glmnet(
+          X, y_numeric,
+          alpha = alpha,
+          weights = w_train,
+          intercept = TRUE,
+          standardize = standardize,
+          maxit = 1e6,
+          nlambda = 500
+      )
+      predict(fit, newx = X)
+      val_errors <- colSums(w_valid * (y_numeric - pred_valid)^2)
+      k_values <- fit$df
+      n_obs <- length(y_numeric)
+      aic_values <- n_obs * log(val_errors / n_obs) + 2 * k_values
+         # Choose lambda
+      if (objective == "wSSE") {
+        idx_min <- which.min(val_errors)
+        lambda_opt <- fit$lambda[idx_min]
+        val_error <- val_errors[idx_min]
+      } else if (objective == "wAIC") {
+        idx_min <- which.min(aic_values)
+        lambda_opt <- fit$lambda[idx_min]
+        val_error <- aic_values[idx_min]
+      }
+      coef_matrix[i, ] <- as.vector(coef(fit, s = lambda_opt))
+}
+```
+However, to get this to a stable implementation that includes error and warning handling and structure to pass to S3 methods for `predict()`, `coef()`, `plot()`, etc, it was only practical for me to utilize help from GPT o1-preview. I simply would not have taken the time to add that structure otherwise, and my implementation would have been inferior. I reviewed any of the code that was generated from this tool before integrating it, and corrected its occasional mistakes. If someone would like to create a purely human-written set of code for a similar purpose, let me know and I will be happy to add links to your package and a description to the `SVEMnet` documentation.
+
+
+# SVEMnet Example 1
+
+```{r,fig.width=6, fig.height=4}
+library(SVEMnet)
+
+# Example data
+data <- iris
+svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 100)
+coef(svem_model)
+```
+
+
+Generate a plot of actual versus predicted values:
+
+```{r,fig.width=6, fig.height=4}
+plot(svem_model)
+```
+
+
+Predict outcomes for new data using the `predict()` function:
+
+```{r}
+predictions <- predict(svem_model, data)
+print(predictions)
+```
+
+
+## Whole Model Significance Testing
+
+
+
+```r
+test_result <- svem_significance_test(Sepal.Length ~ ., data = data)
+print(test_result)
+plot(test_result)
+SVEM Significance Test p-value:
+[1] 1.393363e-09
+```
+
+```{r, echo=FALSE, out.width='100%', fig.cap="Whole model test result"}
+knitr::include_graphics("figures/whole_model_test.png")
+```
+
+# SVEMnet Example 2
+```r
+# Simulate data
+set.seed(0)
+n <- 21
+X1 <- runif(n)
+X2 <- runif(n)
+X3 <- runif(n)
+X4 <- runif(n)
+X5 <- runif(n)
+
+#y only depends on X1 and X2
+y <- 1 + X1 +  X2 + X1 * X2 + X1^2 + rnorm(n)
+data <- data.frame(y, X1, X2, X3, X4, X5)
+
+# Perform the SVEM significance test
+test_result <- svem_significance_test(
+  y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2) + I(X3^2),
+  data = data,
+  nPoint = 2000,
+  nSVEM = 5,
+  nPerm = 125,
+  nBoot = 200
+
+)
+
+# View the p-value
+print(test_result)
+SVEM Significance Test p-value:
+[1] 5.425884e-05
+
+test_result2 <- svem_significance_test(
+  y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
+  data = data,
+  nPoint = 2000,
+  nSVEM = 5,
+  nPerm = 125,
+  nBoot = 200
+)
+
+# View the p-value
+print(test_result2)
+SVEM Significance Test p-value:
+[1] 0.0009796392
+
+#note that the response does not depend on X4 or X5
+test_result3 <- svem_significance_test(
+  y ~ (X4 + X5)^2 + I(X4^2) + I(X5^2),
+  data = data,
+  nPoint = 2000,
+  nSVEM = 5,
+  nPerm = 125,
+  nBoot = 200
+)
+
+# View the p-value
+print(test_result3)
+SVEM Significance Test p-value:
+[1] 0.7653206
+
+# Plot the Mahalanobis distances
+plot(test_result,test_result2,test_result3)
+```
+```{r, echo=FALSE, out.width='100%', fig.cap="Whole Model Test Results for Example 2"}
+knitr::include_graphics("figures/whole_model_2.png")
+```
+
+# Simulations to select SVEMnet settings
+There are many particular scenarios that we might be interested in focusing on in order to optimize SVEMnet settings. Perhaps a certain number of factors with a certain number of interactions, etc. However, when setting a default for a software, we want it to work well over a wide range of scenarios that might be encountered. 
+
+Our simulations target a response surface model in p factors. For a selected density $d\in[0,1]$, `n_active <- max(1, floor(p * d))` of the $\frac{(p+1)(p+2)}{2}$ parameters in the RSM are set to `rexp(1)-rexp(1)`. There are `n` points in the Latin hypercube design. This is not an endorsement of the Latin hypercube method for designed experiments: it is merely used as a quick way to generate space filling points for the simulation. It would also be possible to run the simulation using optimal designs or other space filling approaches (such as Fast Flexible Filling, Jones and Lekivetz (2014)). However, for supersaturated settings (where $n<\frac{(p+1)(p+2)}{2}$) the optimal designs would require additional work to specify, and that is not needed for this simulation.
+
+The models are trained on `n` observations and compared to an independent test set with `n_holdout` observations.
+
+```r
+# Define vectors for p, d, n, sd
+p_values <- seq(3, 6, 1)        # Number of parameters
+d_values <- seq(0.1, 0.9, 0.1)  # Density (proportion of active parameters)
+n_values <- seq(15, 50, 5)      # Number of design points
+sd_values <- c(.25,0.5, 1, 1.5)       # Standard deviations of noise
+
+nSim <- 20                  # Number of simulations per setting
+n_holdout <- 1000               # Number of holdout points
+
+# Create a grid of all combinations of p, d, n, sd
+param_grid <- expand.grid(p = p_values, d = d_values, n = n_values, sd = sd_values)
+```
+
+## Simulation 1
+First we compare the log root mean squared error (LRMSE) on the holdout set for four different models corresponding to the combinations of `objective={"wAIC","wSSE"}` and `debias={TRUE,FALSE}`. Lemkus (2021) uses `objective={"wSSE"}` and `debias=FALSE`. JMP uses `objective={"wSSE"}` and `debias=TRUE`. Based on the simulations below, `SVEMnet` defaults to `objective={"wAIC"}` and `debias=FALSE`. Note that this is not a commentary on JMP's settings or a statement about globally optimal SVEM settings. These are simply the combinations that `SVEMnet` seems to work best with over the tested scenarios.
+
+The script for this simulation is available [here](../inst/scripts/svemnet_sim.R). Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the four models.
+```{r, echo=FALSE, out.width='100%', fig.cap="LRMSE for {debias}x{objective}"}
+knitr::include_graphics("figures/lrmse.png")
+```
+
+The next plot shows the residuals of LRMSE after removing the mean LRMSE of the four models over each simulation. This generates a paired comparison. Notice that the model using `objective="wAIC"` and `debias=FALSE` performs best in `SVEMnet`.
+```{r, echo=FALSE, out.width='100%', fig.cap="Paired LRMSE for {debias}x{objective}"}
+knitr::include_graphics("figures/paired_lrmse.png")
+```
+
+## Simulation 2
+The second simulation compares performance across the `weight_scheme` argument of `SVEMnet`. `weight_scheme="Identity"` corresponds to the single-shot (traditional) Lasso (when `glmnet_alpha=1`) fit on the training data. It is fit with `nBoot=1`. `weight_scheme="FWR"` corresponds to fractional weight regression (Xu et al. (2020)) and uses the same exponential weights for the training data as `weight_scheme="SVEM"`, but it uses the exact same weights for validation and does not compute anti-correlated validation weights as SVEM does (Lemkus et al. (2021)). `SVEM` and `Identity` are used with `nBoot=200` and all models are fit with `objective="wAIC"` and `debias=FALSE`.
+
+The script for this simulation is available [here](../inst/scripts/svemnet_sim_identity.R.R). Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the three models.
+
+```{r, echo=FALSE, out.width='100%', fig.cap="LRMSE for different weight_scheme"}
+knitr::include_graphics("figures/lrmse_identity.png")
+```
+The next plot shows the residuals of LRMSE after removing the mean LRMSE of the three models over each simulation. This generates a paired comparison. Notice that SVEM outperforms the single-shot AIC lasso and fractional weight regression. It is somewhat surprising that the single-shot AIC lasso outperforms the FWR lasso, but this could have to do with the wide range of settings included in the simulation. For example, when `p=6` there are 28 parameters in the RSM, and when `d=0.9`, 25 of them are active. Some of the simulations include as few as 15 runs, so this is an extreme case of fitting a supersaturated design where a larger-than-expected proportion of the parameters are active. Interested readers are encouraged to modify the simulation code to focus on scenarios of more personal interest, perhaps focusing on less extreme situations.
+```{r, echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different weight_scheme"}
+knitr::include_graphics("figures/paired_lmrse_identity.png")
+```
+
+
+
+## References and Citations
+
+
+1. **Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021).** *Self-Validated Ensemble Models for Elastic Net Regression*.  
+   *Chemometrics and Intelligent Laboratory Systems*, 219, 104439.  
+   DOI: [10.1016/j.chemolab.2021.104439](https://doi.org/10.1016/j.chemolab.2021.104439)
+
+2. **Karl, A. T. (2024).** *A Randomized Permutation Whole-Model Test for SVEM*.  
+   *Chemometrics and Intelligent Laboratory Systems*, 249, 105122.  
+   DOI: [10.1016/j.chemolab.2024.105122](https://doi.org/10.1016/j.chemolab.2024.105122)
+
+3. **Friedman, J. H., Hastie, T., & Tibshirani, R. (2010).** *Regularization Paths for Generalized Linear Models via Coordinate Descent*.  
+   *Journal of Statistical Software*, 33(1), 1–22.  
+   DOI: [10.18637/jss.v033.i01](https://doi.org/10.18637/jss.v033.i01)
+
+4. **Gotwalt, C., & Ramsey, P. (2018).** *Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals*.  
+   *JMP Discovery Conference*.  
+   [Link](https://community.jmp.com/t5/Discovery-Summit-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/73730)
+
+5. **Ramsey, P., Gaudard, M., & Levin, W. (2021).** *Accelerating Innovation with Space-Filling Mixture Designs, Neural Networks, and SVEM*.  
+   *JMP Discovery Conference*.  
+   [Link](https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841)
+
+6. **Ramsey, P., & Gotwalt, C. (2018).** *Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals*.  
+   *JMP Discovery Summit Europe*.  
+   [Link](https://community.jmp.com/t5/Discovery-Summit-Europe-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/51286)
+
+7. **Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021).** *SVEM: A Paradigm Shift in Design and Analysis of Experiments*.  
+   *JMP Discovery Summit Europe*.  
+   [Link](https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634)
+
+8. **Ramsey, P., & McNeill, P. (2023).** *CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction*.  
+   *JMP Discovery Conference*.
+
+9. **Karl, A., Wisnowski, J., & Rushing, H. (2022).** *JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments*.  
+   *JMP Discovery Conference*.  
+  [Link](https://doi.org/10.13140/RG.2.2.34598.40003/1)
+
+10. **Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020).** *Applications of the Fractional-Random-Weight Bootstrap*.  
+    *The American Statistician*, 74(4), 345–358.  
+   [Link](https://doi.org/10.1080/00031305.2020.1731599)
+
+11. **Karl, A. T. (2024).** *SVEMnet: Self-Validated Ensemble Models with Elastic Net Regression*.  
+    R package version 1.1.1.
+
+12. **JMP Help Documentation** *Overview of Self-Validated Ensemble Models*.  
+    [Link](https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml)
+
+
+

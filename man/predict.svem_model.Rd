@@ -4,14 +4,14 @@
 \alias{predict.svem_model}
 \title{Predict Method for SVEM Models}
 \usage{
-\method{predict}{svem_model}(object, newdata, debias = TRUE, se.fit = FALSE, ...)
+\method{predict}{svem_model}(object, newdata, debias = FALSE, se.fit = FALSE, ...)
 }
 \arguments{
 \item{object}{An object of class \code{svem_model}.}
 
 \item{newdata}{A data frame of new predictor values.}
 
-\item{debias}{Logical; default is \code{TRUE}.}
+\item{debias}{Logical; default is \code{FALSE}.}
 
 \item{se.fit}{Logical; if \code{TRUE}, returns standard errors (default is \code{FALSE}).}
 
@@ -24,7 +24,7 @@ Predictions or a list containing predictions and standard errors.
 Generates predictions from a fitted \code{svem_model}.
 }
 \details{
-A debiased fit is output (along with the standard fit). This is provided to allow the user to match the output of JMP. \code{https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml}. The debiasing coefficients are always calculated by SVEMnet(), and the predict() function determines whether the raw or debiased predictions are returned via the \code{debias} argument.
+A debiased fit is available (along with the standard fit). This is provided to allow the user to match the output of JMP.\\ https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml. The debiasing coefficients are always calculated by SVEMnet(), and the predict() function determines whether the raw or debiased predictions are returned via the \code{debias} argument. Default is \code{FALSE} based on performance on unpublished simulation studies.
 }
 \section{Acknowledgments}{
 

@@ -7,21 +7,22 @@
 #' @param nPoint The number of random points to generate in the factor space (default: 2000).
 #' @param nSVEM The number of SVEM models to fit to the original data (default: 5).
 #' @param nPerm The number of SVEM models to fit to permuted data for reference distribution (default: 125).
-#' @param percent The percentage of variance to capture in the SVD (default: 90).
+#' @param percent The percentage of variance to capture in the SVD (default: 85).
 #' @param nBoot The number of bootstrap iterations within SVEM (default: 200).
 #' @param glmnet_alpha The alpha parameter(s) for glmnet (default: \code{c(1)}).
-#' @param weight_scheme The weight scheme to use in SVEM (default: "SVEM"). Valid options are "SVEM" and "FWR".
-#' @param debias Logical; debiasing option passed to \code{\link{SVEMnet}} (default: \code{FALSE}).
-#' @param objective Character; the objective function to use in \code{\link{SVEMnet}}. Options are "wAIC" or "wSSE" (default: "wSSE").
-#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{FALSE}).
+#' @param weight_scheme The weight scheme to use in SVEM (default: "SVEM").
+#' @param objective Character; the objective function to use in \code{\link{SVEMnet}}. Options are "wAIC" or "wSSE" (default: "wAIC").
+#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).
 #' @param ... Additional arguments passed to the underlying \code{SVEMnet()} and then \code{glmnet()} functions.
 #' @return A list containing the test results.
 #' @details
 #' The `svem_significance_test` function implements a whole-model test designed to gauge the significance of a fitted SVEM model compared to the null hypothesis of a constant response surface. This method helps identify responses that have relatively stronger or weaker relationships with study factors.
 #'
-#' The test constructs standardized predictions by centering the SVEM predictions by the response mean and scaling by the ensemble standard deviation. A reference distribution is created by fitting the SVEM model to multiple randomized permutations of the response vector. The Mahalanobis distances of the original and permuted models are calculated using a reduced-rank singular value decomposition.
+#' The test constructs standardized predictions by centering the SVEM predictions (obtained from \code{SVEMnet()}) by the response mean and scaling by the ensemble standard deviation. A reference distribution is created by fitting the SVEM model to multiple randomized permutations of the response vector. The Mahalanobis distances of the original and permuted models are calculated using a reduced-rank singular value decomposition.
 #'
 #' The R code to perform this test (using matrices of nSVEM and nPerm predictions) is taken from the supplementary material of Karl (2024).
+#'
+#' The \code{SVEMnet} parameter \code{debias} is hard coded to \code{FALSE} for this test. Unpublished simulation work suggests that setting \code{debias=TRUE} reduces the power of the test (without affecting the Type I error rate).
 #' @section Acknowledgments:
 #' Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
 #'
@@ -51,7 +52,7 @@
 #' )
 #'
 #' # View the p-value
-#' test_result$p_value
+#' print(test_result)
 #'
 #' test_result2 <- svem_significance_test(
 #'   y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
@@ -63,7 +64,7 @@
 #' )
 #'
 #' # View the p-value
-#' test_result2$p_value
+#' print(test_result2)
 #'
 #' # Plot the Mahalanobis distances
 #' plot(test_result,test_result2)
@@ -76,9 +77,9 @@
 
 #' @export
 svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPerm = 125,
-                                   percent = 90, nBoot = 200, glmnet_alpha = c(1),
-                                   weight_scheme = c("SVEM", "FWR"), debias = FALSE,
-                                   objective = c("wSSE", "wAIC"),verbose = FALSE,...) {
+                                   percent = 85, nBoot = 200, glmnet_alpha = c(1),
+                                   weight_scheme = c("SVEM"),
+                                   objective = c("wAIC", "wSSE"), verbose = TRUE, ...) {
   # Match the arguments
   objective <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
@@ -148,8 +149,8 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
     stop("No predictors provided.")
   }
 
-  # Create a formula without the response variable
-  terms_obj <- terms(formula)
+  # Create a formula without the response variable, including data argument
+  terms_obj <- terms(formula, data = data)  # Include data argument here
   rhs_formula <- reformulate(attr(terms_obj, "term.labels"))
 
   # Transform T_data into model matrix using the RHS-only formula
@@ -172,7 +173,7 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
   for (i in 1:nSVEM) {
     svem_model <- tryCatch({
       SVEMnet(formula, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
-              weight_scheme = weight_scheme, objective = objective,...)
+              weight_scheme = weight_scheme, objective = objective, ...)
     }, error = function(e) {
       message("Error in SVEMnet during SVEM fitting: ", e$message)
       NULL
@@ -181,7 +182,7 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
     if (is.null(svem_model)) next
 
     # Use predict() function
-    pred_res <- predict(svem_model, newdata = T_data, debias = debias, se.fit = TRUE)
+    pred_res <- predict(svem_model, newdata = T_data, debias = FALSE, se.fit = TRUE)
     f_hat_Y_T <- pred_res$fit
     s_hat_Y_T <- pred_res$se.fit
     # Handle zero standard errors to avoid division by zero
@@ -214,7 +215,7 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
     if (is.null(svem_model_perm)) next
 
     # Use predict() function
-    pred_res <- predict(svem_model_perm, newdata = T_data, debias = debias, se.fit = TRUE)
+    pred_res <- predict(svem_model_perm, newdata = T_data, debias = FALSE, se.fit = TRUE)
     f_hat_piY_T <- pred_res$fit
     s_hat_piY_T <- pred_res$se.fit
     # Handle zero standard errors

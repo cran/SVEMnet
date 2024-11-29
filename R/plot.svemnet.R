@@ -3,7 +3,7 @@
 #' Plots actual versus predicted values for an \code{svem_model} using \code{ggplot2}.
 #'
 #' @param x An object of class \code{svem_model}.
-#' @param plot_debiased Logical; if \code{TRUE}, includes debiased predictions if available (default is \code{TRUE}).
+#' @param plot_debiased Logical; if \code{TRUE}, includes debiased predictions if available (default is \code{FALSE}).
 #' @param ... Additional arguments passed to \code{ggplot2} functions.
 #' @return A \code{ggplot} object showing actual versus predicted values.
 #' @details
@@ -23,7 +23,7 @@
 #' @importFrom stats model.response
 
 #' @export
-plot.svem_model <- function(x, plot_debiased = TRUE, ...) {
+plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
   actual_y <- x$actual_y
   y_pred <- x$y_pred
 

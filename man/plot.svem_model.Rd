@@ -4,12 +4,12 @@
 \alias{plot.svem_model}
 \title{Plot Method for SVEM Models}
 \usage{
-\method{plot}{svem_model}(x, plot_debiased = TRUE, ...)
+\method{plot}{svem_model}(x, plot_debiased = FALSE, ...)
 }
 \arguments{
 \item{x}{An object of class \code{svem_model}.}
 
-\item{plot_debiased}{Logical; if \code{TRUE}, includes debiased predictions if available (default is \code{TRUE}).}
+\item{plot_debiased}{Logical; if \code{TRUE}, includes debiased predictions if available (default is \code{FALSE}).}
 
 \item{...}{Additional arguments passed to \code{ggplot2} functions.}
 }

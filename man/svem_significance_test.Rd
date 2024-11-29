@@ -10,13 +10,12 @@ svem_significance_test(
   nPoint = 2000,
   nSVEM = 5,
   nPerm = 125,
-  percent = 90,
+  percent = 85,
   nBoot = 200,
   glmnet_alpha = c(1),
-  weight_scheme = c("SVEM", "FWR"),
-  debias = FALSE,
-  objective = c("wSSE", "wAIC"),
-  verbose = FALSE,
+  weight_scheme = c("SVEM"),
+  objective = c("wAIC", "wSSE"),
+  verbose = TRUE,
   ...
 )
 }
@@ -31,19 +30,17 @@ svem_significance_test(
 
 \item{nPerm}{The number of SVEM models to fit to permuted data for reference distribution (default: 125).}
 
-\item{percent}{The percentage of variance to capture in the SVD (default: 90).}
+\item{percent}{The percentage of variance to capture in the SVD (default: 85).}
 
 \item{nBoot}{The number of bootstrap iterations within SVEM (default: 200).}
 
 \item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: \code{c(1)}).}
 
-\item{weight_scheme}{The weight scheme to use in SVEM (default: "SVEM"). Valid options are "SVEM" and "FWR".}
+\item{weight_scheme}{The weight scheme to use in SVEM (default: "SVEM").}
 
-\item{debias}{Logical; debiasing option passed to \code{\link{SVEMnet}} (default: \code{FALSE}).}
+\item{objective}{Character; the objective function to use in \code{\link{SVEMnet}}. Options are "wAIC" or "wSSE" (default: "wAIC").}
 
-\item{objective}{Character; the objective function to use in \code{\link{SVEMnet}}. Options are "wAIC" or "wSSE" (default: "wSSE").}
-
-\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{FALSE}).}
+\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
 
 \item{...}{Additional arguments passed to the underlying \code{SVEMnet()} and then \code{glmnet()} functions.}
 }
@@ -56,9 +53,11 @@ Performs a whole-model significance test using the SVEM framework, handling both
 \details{
 The `svem_significance_test` function implements a whole-model test designed to gauge the significance of a fitted SVEM model compared to the null hypothesis of a constant response surface. This method helps identify responses that have relatively stronger or weaker relationships with study factors.
 
-The test constructs standardized predictions by centering the SVEM predictions by the response mean and scaling by the ensemble standard deviation. A reference distribution is created by fitting the SVEM model to multiple randomized permutations of the response vector. The Mahalanobis distances of the original and permuted models are calculated using a reduced-rank singular value decomposition.
+The test constructs standardized predictions by centering the SVEM predictions (obtained from \code{SVEMnet()}) by the response mean and scaling by the ensemble standard deviation. A reference distribution is created by fitting the SVEM model to multiple randomized permutations of the response vector. The Mahalanobis distances of the original and permuted models are calculated using a reduced-rank singular value decomposition.
 
 The R code to perform this test (using matrices of nSVEM and nPerm predictions) is taken from the supplementary material of Karl (2024).
+
+The \code{SVEMnet} parameter \code{debias} is hard coded to \code{FALSE} for this test. Unpublished simulation work suggests that setting \code{debias=TRUE} reduces the power of the test (without affecting the Type I error rate).
 }
 \section{Acknowledgments}{
 
@@ -88,7 +87,7 @@ test_result <- svem_significance_test(
 )
 
 # View the p-value
-test_result$p_value
+print(test_result)
 
 test_result2 <- svem_significance_test(
   y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
@@ -100,7 +99,7 @@ test_result2 <- svem_significance_test(
 )
 
 # View the p-value
-test_result2$p_value
+print(test_result2)
 
 # Plot the Mahalanobis distances
 plot(test_result,test_result2)
