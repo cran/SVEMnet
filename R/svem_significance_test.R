@@ -32,8 +32,8 @@
 #' @examples
 #' \donttest{
 #' # Simulate data
-#' set.seed(0)
-#' n <- 21
+#' set.seed(1)
+#' n <- 30
 #' X1 <- runif(n)
 #' X2 <- runif(n)
 #' X3 <- runif(n)
@@ -45,8 +45,8 @@
 #'   y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2) + I(X3^2),
 #'   data = data,
 #'   nPoint = 2000,
-#'   nSVEM = 5,
-#'   nPerm = 125,
+#'   nSVEM = 7,
+#'   nPerm = 150,
 #'   nBoot = 200
 #'
 #' )
@@ -54,17 +54,19 @@
 #' # View the p-value
 #' print(test_result)
 #'
+#'
 #' test_result2 <- svem_significance_test(
 #'   y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
 #'   data = data,
 #'   nPoint = 2000,
-#'   nSVEM = 5,
-#'   nPerm = 125,
+#'   nSVEM = 7,
+#'   nPerm = 150,
 #'   nBoot = 200
 #' )
 #'
 #' # View the p-value
 #' print(test_result2)
+#'
 #'
 #' # Plot the Mahalanobis distances
 #' plot(test_result,test_result2)
@@ -150,7 +152,10 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
   }
 
   # Create a formula without the response variable, including data argument
-  terms_obj <- terms(formula, data = data)  # Include data argument here
+  terms_obj <- terms(formula, data = data)
+  environment(terms_obj) <- baseenv()  # Set environment to baseenv()
+
+  # Extract the right-hand side (RHS) formula
   rhs_formula <- reformulate(attr(terms_obj, "term.labels"))
 
   # Transform T_data into model matrix using the RHS-only formula
@@ -273,11 +278,11 @@ svem_significance_test <- function(formula, data, nPoint = 2000, nSVEM = 5, nPer
   evectors <- V[, 1:k]
 
   # Step 12: Calculate Mahalanobis distances for permutations
-  T2_perm <- diag(tilde_M_pi_Y %*% evectors %*% diag(evalues^(-1)) %*% t(evectors) %*% t(tilde_M_pi_Y))
+  T2_perm <- rowSums((tilde_M_pi_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_pi_Y %*% evectors))
   d_pi_Y <- sqrt(T2_perm)
 
   # Step 13: Calculate Mahalanobis distances for original data
-  T2_Y <- diag(tilde_M_Y %*% evectors %*% diag(evalues^(-1)) %*% t(evectors) %*% t(tilde_M_Y))
+  T2_Y <- rowSums((tilde_M_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_Y %*% evectors))
   d_Y <- sqrt(T2_Y)
 
   # Step 14: Fit the specified null distribution to d_pi_Y

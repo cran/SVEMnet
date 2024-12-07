@@ -70,7 +70,7 @@ library(SVEMnet)
 
 # Example data
 data <- iris
-svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 100)
+svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 300)
 coef(svem_model)
 ```
 
@@ -92,25 +92,34 @@ print(predictions)
 
 ## Whole Model Significance Testing
 
-
+This is the serial version of the significance test. It is slower but the code is less complicated to read than the faster parallel version.
 
 ```r
 test_result <- svem_significance_test(Sepal.Length ~ ., data = data)
 print(test_result)
 plot(test_result)
 SVEM Significance Test p-value:
-[1] 1.393363e-09
+[1] 0
 ```
 
 ```{r, echo=FALSE, out.width='100%', fig.cap="Whole model test result"}
 knitr::include_graphics("figures/whole_model_test.png")
 ```
+Note that there is a parallelized version that runs much faster
+
+```r
+test_result <- svem_significance_test_parallel(Sepal.Length ~ ., data = data)
+print(test_result)
+plot(test_result)
+SVEM Significance Test p-value:
+[1] 0
+```
 
 # SVEMnet Example 2
 ```r
 # Simulate data
-set.seed(0)
-n <- 21
+set.seed(1)
+n <- 25
 X1 <- runif(n)
 X2 <- runif(n)
 X3 <- runif(n)
@@ -122,49 +131,38 @@ y <- 1 + X1 +  X2 + X1 * X2 + X1^2 + rnorm(n)
 data <- data.frame(y, X1, X2, X3, X4, X5)
 
 # Perform the SVEM significance test
-test_result <- svem_significance_test(
+test_result <- svem_significance_test_parallel(
   y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2) + I(X3^2),
-  data = data,
-  nPoint = 2000,
-  nSVEM = 5,
-  nPerm = 125,
-  nBoot = 200
+  data = data
 
 )
 
 # View the p-value
 print(test_result)
 SVEM Significance Test p-value:
-[1] 5.425884e-05
+[1] 0.009399093
 
-test_result2 <- svem_significance_test(
+
+test_result2 <- svem_significance_test_parallel(
   y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
-  data = data,
-  nPoint = 2000,
-  nSVEM = 5,
-  nPerm = 125,
-  nBoot = 200
+  data = data
 )
 
 # View the p-value
 print(test_result2)
 SVEM Significance Test p-value:
-[1] 0.0009796392
+[1] 0.006475736
 
 #note that the response does not depend on X4 or X5
-test_result3 <- svem_significance_test(
+test_result3 <- svem_significance_test_parallel(
   y ~ (X4 + X5)^2 + I(X4^2) + I(X5^2),
-  data = data,
-  nPoint = 2000,
-  nSVEM = 5,
-  nPerm = 125,
-  nBoot = 200
+  data = data
 )
 
 # View the p-value
 print(test_result3)
 SVEM Significance Test p-value:
-[1] 0.7653206
+[1] 0.8968502
 
 # Plot the Mahalanobis distances
 plot(test_result,test_result2,test_result3)

@@ -1,5 +1,10 @@
 # NEWS for SVEMnet
 
+[1.2.1]
+- Corrected bug in predict() introduced in 1.1.1
+- Added svem_significance_test_parallel
+- Added svem_significance_test_parallel to vignette
+
 [1.1.1]
 - Changed default for `predict()` to `debias=FALSE`.
 - Changed default to `objective="wAIC"` for `weight_scheme="SVEM"`.

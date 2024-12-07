@@ -12,6 +12,7 @@ The \code{SVEMnet} package implements Self-Validated Ensemble Models (SVEM) usin
 \describe{
   \item{\code{\link{SVEMnet}}}{Fit an SVEMnet model using Elastic Net regression.}
   \item{\code{\link{svem_significance_test}}}{Perform a whole-model significance test for SVEM models.}
+  \item{\code{\link{svem_significance_test_parallel}}}{Perform a whole-model significance test for SVEM models. Parallelized version.}
   \item{\code{\link{predict.svem_model}}}{Predict method for SVEM models.}
   \item{\code{\link{plot.svem_model}}}{Plot method for SVEM models.}
   \item{\code{\link{coef.svem_model}}}{Plot method for SVEM models.}

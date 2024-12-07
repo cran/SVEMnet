@@ -25,6 +25,9 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE, 
   # Use the stored terms object but remove the response variable
   terms_obj <- delete.response(object$terms)
 
+  # Set the environment of terms_obj to baseenv() to avoid conflicts
+  environment(terms_obj) <- baseenv()
+
   # Create model frame and model matrix for newdata
   mf <- model.frame(terms_obj, data = newdata, na.action = na.pass)
   X_new <- model.matrix(terms_obj, data = mf)

@@ -3,7 +3,7 @@ library(SVEMnet)
 
 # Example data
 data <- iris
-svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 100)
+svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 300)
 coef(svem_model)
 
 ## ----fig.width=6, fig.height=4------------------------------------------------
