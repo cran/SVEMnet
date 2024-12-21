@@ -9,6 +9,7 @@ vignette: >
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
+
 # Version
 version `r utils::packageVersion("SVEMnet")`
 
@@ -195,7 +196,7 @@ param_grid <- expand.grid(p = p_values, d = d_values, n = n_values, sd = sd_valu
 ## Simulation 1
 First we compare the log root mean squared error (LRMSE) on the holdout set for four different models corresponding to the combinations of `objective={"wAIC","wSSE"}` and `debias={TRUE,FALSE}`. Lemkus (2021) uses `objective={"wSSE"}` and `debias=FALSE`. JMP uses `objective={"wSSE"}` and `debias=TRUE`. Based on the simulations below, `SVEMnet` defaults to `objective={"wAIC"}` and `debias=FALSE`. Note that this is not a commentary on JMP's settings or a statement about globally optimal SVEM settings. These are simply the combinations that `SVEMnet` seems to work best with over the tested scenarios.
 
-The script for this simulation is available [here](../inst/scripts/svemnet_sim.R). Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the four models.
+
 ```{r, echo=FALSE, out.width='100%', fig.cap="LRMSE for {debias}x{objective}"}
 knitr::include_graphics("figures/lrmse.png")
 ```
@@ -204,11 +205,17 @@ The next plot shows the residuals of LRMSE after removing the mean LRMSE of the 
 ```{r, echo=FALSE, out.width='100%', fig.cap="Paired LRMSE for {debias}x{objective}"}
 knitr::include_graphics("figures/paired_lrmse.png")
 ```
+The script for this simulation is available below. Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the four models.
+```{r show-file, echo=FALSE, results='asis'}
+raw_file <- readLines("svemnet_sim.R")
+cat("```r\n")
+cat(raw_file, sep="\n")
+cat("\n```\n")
+```
 
 ## Simulation 2
 The second simulation compares performance across the `weight_scheme` argument of `SVEMnet`. `weight_scheme="Identity"` corresponds to the single-shot (traditional) Lasso (when `glmnet_alpha=1`) fit on the training data. It is fit with `nBoot=1`. `weight_scheme="FWR"` corresponds to fractional weight regression (Xu et al. (2020)) and uses the same exponential weights for the training data as `weight_scheme="SVEM"`, but it uses the exact same weights for validation and does not compute anti-correlated validation weights as SVEM does (Lemkus et al. (2021)). `SVEM` and `Identity` are used with `nBoot=200` and all models are fit with `objective="wAIC"` and `debias=FALSE`.
 
-The script for this simulation is available [here](../inst/scripts/svemnet_sim_identity.R.R). Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the three models.
 
 ```{r, echo=FALSE, out.width='100%', fig.cap="LRMSE for different weight_scheme"}
 knitr::include_graphics("figures/lrmse_identity.png")
@@ -218,6 +225,32 @@ The next plot shows the residuals of LRMSE after removing the mean LRMSE of the 
 knitr::include_graphics("figures/paired_lmrse_identity.png")
 ```
 
+The script for this simulation is available below. Note that this script was generated with `GPT o1-preview`. The first plot shows the test LRMSE for each of the three models.
+```{r show-file2, echo=FALSE, results='asis'}
+raw_file2 <- readLines("svemnet_sim_identity.R")
+cat("```r\n")
+cat(raw_file2, sep="\n")
+cat("\n```\n")
+```
+
+# 21DEC2024: Add glmnet.cv wrapper
+
+This example shows the newly added wrapper for cv.glmnet() to compare performance of SVEM to glmnet's native CV implementation. In this example, the factors are mixture factors (generated with rdirichlet()).
+
+In this simulation, both SVEM (with `objective=wAIC`) and `cv.glmnet` outperform the single-shot elastic net using AIC. The cv.glmnet function is slightly outperforming SVEM. This raises a question of when it is better to use `SVEMnet(...,objective="wAIC")` and when it is better to use `cv.glmnet`. It is again suggested that debiasing harms the predictive performance on holdout data. 
+
+
+The script for this simulation is available below. Note that this script was generated with `GPT o1-preview`. The  plot shows the residual test LRMSE for each of the models (after subtracting the mean teast LRMSE of each of the models).
+```{r, echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different modeling approaches"}
+knitr::include_graphics("figures/mixture_v2.png")
+```
+
+```{r show-file3, echo=FALSE, results='asis'}
+raw_file2 <- readLines("svemnet_sim_mixture_v2.R")
+cat("```r\n")
+cat(raw_file2, sep="\n")
+cat("\n```\n")
+```
 
 
 ## References and Citations

@@ -25,9 +25,30 @@ knitr::include_graphics("figures/lrmse.png")
 ## ----echo=FALSE, out.width='100%', fig.cap="Paired LRMSE for {debias}x{objective}"----
 knitr::include_graphics("figures/paired_lrmse.png")
 
+## ----show-file, echo=FALSE, results='asis'------------------------------------
+raw_file <- readLines("svemnet_sim.R")
+cat("```r\n")
+cat(raw_file, sep="\n")
+cat("\n```\n")
+
 ## ----echo=FALSE, out.width='100%', fig.cap="LRMSE for different weight_scheme"----
 knitr::include_graphics("figures/lrmse_identity.png")
 
 ## ----echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different weight_scheme"----
 knitr::include_graphics("figures/paired_lmrse_identity.png")
+
+## ----show-file2, echo=FALSE, results='asis'-----------------------------------
+raw_file2 <- readLines("svemnet_sim_identity.R")
+cat("```r\n")
+cat(raw_file2, sep="\n")
+cat("\n```\n")
+
+## ----echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different modeling approaches"----
+knitr::include_graphics("figures/mixture_v2.png")
+
+## ----show-file3, echo=FALSE, results='asis'-----------------------------------
+raw_file2 <- readLines("svemnet_sim_mixture_v2.R")
+cat("```r\n")
+cat(raw_file2, sep="\n")
+cat("\n```\n")
 

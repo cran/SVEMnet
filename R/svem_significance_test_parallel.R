@@ -24,9 +24,11 @@
 #'
 #' The R code to perform this test (using matrices of nSVEM and nPerm predictions) is taken from the supplementary material of Karl (2024).
 #'
+#' This function assumes that there are no restrictions among the factors (e.g. mixture factors). The method will work with restrictions, but the code would need to be changed to ensure the \code{nPoint} points respect the factor restriction(s). For example, \code{rdirichlet()} could be used for the mixture factors.
+#'
 #' The \code{SVEMnet} parameter \code{debias} is hard coded to \code{FALSE} for this test. Unpublished simulation work suggests that setting \code{debias=TRUE} reduces the power of the test (without affecting the Type I error rate).
 #' @section Acknowledgments:
-#' Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
+#' Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024).
 #'
 #' @references
 #' Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
@@ -34,7 +36,7 @@
 #' @examples
 #' \donttest{
 #' # Simulate data
-#' set.seed(1)
+#' set.seed(0)
 #' n <- 30
 #' X1 <- runif(n)
 #' X2 <- runif(n)
@@ -53,7 +55,6 @@
 #'   nPerm = 250,
 #'   nBoot = 200,
 #'   nCore = 2
-#'
 #' )
 #'
 #' # View the p-value
@@ -84,8 +85,7 @@
 #' @importFrom stats model.response delete.response terms reformulate median complete.cases
 #' @importFrom foreach foreach %dopar%
 #' @importFrom doParallel registerDoParallel
-#' @importFrom doRNG %dorng%
-#' @importFrom parallel makeCluster stopCluster
+#' @importFrom parallel makeCluster stopCluster clusterSetRNGStream detectCores
 #' @export
 svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM = 7, nPerm = 200,
                                             percent = 85, nBoot = 200, glmnet_alpha = c(1),
@@ -99,8 +99,6 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
   # Set RNGkind
   RNGkind("L'Ecuyer-CMRG")
 
-
-
   # Set seed if provided
   if (!is.null(seed)) {
     set.seed(seed)
@@ -110,6 +108,9 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
   cl <- parallel::makeCluster(nCore)
   doParallel::registerDoParallel(cl)
   on.exit(parallel::stopCluster(cl))  # Ensure cluster is stopped when function exits
+
+  # Distribute RNG streams to each worker
+  parallel::clusterSetRNGStream(cl, iseed = seed)
 
   # Ensure data is a data frame
   data <- as.data.frame(data)
@@ -198,8 +199,8 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
     message("Fitting SVEM models to original data...")
   }
 
-  M_Y <- foreach::foreach(i = 1:nSVEM, .combine = rbind, .options.RNG = seed,
-                          .packages = c("SVEMnet", "stats"), .export = c("SVEMnet")) %dorng% {
+  M_Y <- foreach::foreach(i = 1:nSVEM, .combine = rbind,
+                          .packages = c("SVEMnet", "stats"), .export = c("SVEMnet")) %dopar% {
                             svem_model <- tryCatch({
                               SVEMnet::SVEMnet(formula, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
                                                weight_scheme = weight_scheme, objective = objective, ...)
@@ -213,11 +214,9 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
                               return(rep(NA, nPoint))
                             }
 
-                            # Use predict() function
                             pred_res <- predict(svem_model, newdata = T_data, debias = FALSE, se.fit = TRUE)
                             f_hat_Y_T <- pred_res$fit
                             s_hat_Y_T <- pred_res$se.fit
-                            # Handle zero standard errors to avoid division by zero
                             s_hat_Y_T[s_hat_Y_T == 0] <- 1e-6
                             h_Y <- (f_hat_Y_T - y_mean) / s_hat_Y_T
                             return(h_Y)
@@ -230,8 +229,8 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
   # Record the start time
   start_time_perm <- Sys.time()
 
-  M_pi_Y <- foreach::foreach(jloop = 1:nPerm, .combine = rbind, .options.RNG = seed,
-                             .packages = c("SVEMnet", "stats"), .export = c("SVEMnet")) %dorng% {
+  M_pi_Y <- foreach::foreach(jloop = 1:nPerm, .combine = rbind,
+                             .packages = c("SVEMnet", "stats"), .export = c("SVEMnet")) %dopar% {
                                y_perm <- sample(y, replace = FALSE)
                                data_perm <- data
                                data_perm[[as.character(formula[[2]])]] <- y_perm
@@ -249,11 +248,9 @@ svem_significance_test_parallel <- function(formula, data, nPoint = 2000, nSVEM 
                                  return(rep(NA, nPoint))
                                }
 
-                               # Use predict() function
                                pred_res <- predict(svem_model_perm, newdata = T_data, debias = FALSE, se.fit = TRUE)
                                f_hat_piY_T <- pred_res$fit
                                s_hat_piY_T <- pred_res$se.fit
-                               # Handle zero standard errors
                                s_hat_piY_T[s_hat_piY_T == 0] <- 1e-6
                                h_piY <- (f_hat_piY_T - y_mean) / s_hat_piY_T
 

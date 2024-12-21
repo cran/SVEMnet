@@ -10,6 +10,7 @@
 #'   \item{\code{\link{predict.svem_model}}}{Predict method for SVEM models.}
 #'   \item{\code{\link{plot.svem_model}}}{Plot method for SVEM models.}
 #'   \item{\code{\link{coef.svem_model}}}{Plot method for SVEM models.}
+#'   \item{\code{\link{glmnet_with_cv}}}{Wrapper for cv.glmnet}
 #' }
 #'
 #' @section Acknowledgments:

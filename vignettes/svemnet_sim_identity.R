@@ -46,6 +46,8 @@ cat("Total simulations to run:", total_iterations, "\n")
 
 # Set up parallel backend using 'parallel' package
 num_cores <- 8
+RNGkind("L'Ecuyer-CMRG")
+set.seed(0)
 cl <- makeCluster(num_cores)
 clusterEvalQ(cl, {
   library(SVEMnet)
@@ -57,8 +59,7 @@ clusterEvalQ(cl, {
 clusterExport(cl, varlist = c("n_holdout"))
 
 # Set up RNG for parallel processing
-RNGkind("L'Ecuyer-CMRG")
-set.seed(0)
+
 clusterSetRNGStream(cl, 0)
 
 # Function to perform one simulation for a given setting

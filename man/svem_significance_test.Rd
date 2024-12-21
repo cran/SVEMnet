@@ -57,6 +57,8 @@ The test constructs standardized predictions by centering the SVEM predictions (
 
 The R code to perform this test (using matrices of nSVEM and nPerm predictions) is taken from the supplementary material of Karl (2024).
 
+This function assumes that there are no restrictions among the factors (e.g. mixture factors). The method will work with restrictions, but the code would need to be changed to ensure the \code{nPoint} points respect the factor restriction(s). For example, \code{rdirichlet()} could be used for the mixture factors.
+
 The \code{SVEMnet} parameter \code{debias} is hard coded to \code{FALSE} for this test. Unpublished simulation work suggests that setting \code{debias=TRUE} reduces the power of the test (without affecting the Type I error rate).
 }
 \section{Acknowledgments}{
