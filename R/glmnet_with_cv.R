@@ -54,76 +54,247 @@
 #' model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(0,0.5,1))
 #' predictions <- predict_cv(model_cv, data)
 #'
-#' @importFrom stats model.frame model.response model.matrix lm predict var
-#' @importFrom glmnet cv.glmnet coef.glmnet
+#' @importFrom stats model.frame model.response model.matrix lm predict var coef
+#' @importFrom glmnet cv.glmnet
 #' @export
-glmnet_with_cv <- function(formula, data, glmnet_alpha = c(0, 0.5, 1),
-                           standardize = TRUE, nfolds = 10, ...) {
-  # Create model frame and design matrix
-  mf <- model.frame(formula, data)
-  y <- model.response(mf)
-  X <- model.matrix(formula, data)
+glmnet_with_cv <- function(formula, data,
+                           glmnet_alpha = c(0, 0.5, 1),
+                           standardize = TRUE,
+                           nfolds = 10,
+                           ...){
 
-  # Remove intercept column if present
+  # -----------------------------
+  # Build model frame & matrix
+  # -----------------------------
+  mf <- stats::model.frame(formula, data, na.action = stats::na.omit)
+  if (nrow(mf) < nrow(as.data.frame(data))) {
+    warning("Dropped ", nrow(as.data.frame(data)) - nrow(mf), " row(s) due to missing values.")
+  }
+  y <- stats::model.response(mf)
+  X <- stats::model.matrix(formula, mf)
+
+  # Remove intercept column for glmnet (it will add its own)
   intercept_col <- which(colnames(X) == "(Intercept)")
-  if (length(intercept_col) > 0) {
+  if (length(intercept_col)) {
     X <- X[, -intercept_col, drop = FALSE]
   }
 
-  # Precompute a consistent foldid
-  foldid <- sample(rep(seq_len(nfolds), length.out = nrow(X)))
+  n <- nrow(X)
+  p <- ncol(X)
 
-  # Loop over alphas and perform cv.glmnet
-  best_cvm <- Inf
-  best_alpha <- NA
-  best_model <- NULL
-
-  for (alpha_val in glmnet_alpha) {
-    fit_cv <- tryCatch({
-      cv.glmnet(
-        X, y,
-        alpha = alpha_val,
-        standardize = standardize,
-        foldid = foldid,
-        ...
-      )
-    }, error = function(e) {
-      warning(paste("Error in cv.glmnet for alpha", alpha_val, ":", e$message))
-      return(NULL)
-    })
-
-    if (!is.null(fit_cv)) {
-      # Identify minimal cv error for this alpha
-      min_cvm <- min(fit_cv$cvm)
-      if (min_cvm < best_cvm) {
-        best_cvm <- min_cvm
-        best_alpha <- alpha_val
-        best_model <- fit_cv
-      }
+  # -----------------------------
+  # Near-zero-variance filter
+  # -----------------------------
+  drop_msg <- NULL
+  if (p > 0) {
+    sds <- apply(X, 2, stats::sd)
+    keep <- is.finite(sds) & (sds > 1e-8)
+    if (!all(keep)) {
+      drop_msg <- sprintf("Dropping %d near-zero-variance column(s).", sum(!keep))
+      X <- X[, keep, drop = FALSE]
     }
   }
 
-  if (is.null(best_model)) {
-    stop("All attempts to fit cv.glmnet failed.")
+  # If everything died, fit intercept-only
+  if (ncol(X) == 0) {
+    intercept <- mean(y)
+    parms <- c("(Intercept)" = intercept)
+    y_pred <- rep(intercept, n)
+    debias_fit <- NULL
+    y_pred_debiased <- NULL
+    if (length(y) >= 10 && stats::var(y_pred) > 0) {
+      debias_fit <- stats::lm(y ~ y_pred)
+      y_pred_debiased <- stats::predict(debias_fit)
+    }
+    return(list(
+      parms = parms,
+      debias_fit = debias_fit,
+      glmnet_alpha = glmnet_alpha,
+      best_alpha = NA_real_,
+      best_lambda = NA_real_,
+      actual_y = y,
+      training_X = X,
+      y_pred = y_pred,
+      y_pred_debiased = y_pred_debiased,
+      formula = formula,
+      terms = attr(mf, "terms"),
+      note = c("intercept_only", drop_msg)
+    ))
   }
 
+  # -----------------------------
+  # Safe nfolds (ensure ≥3 obs/fold)
+  # -----------------------------
+  max_folds   <- max(3L, floor(n / 3))
+  nfolds_eff  <- min(max(5L, min(nfolds, n)), max_folds)
+  foldid      <- sample(rep(seq_len(nfolds_eff), length.out = n))
+
+  # Wide lambda path is helpful in narrow regimes
+  cv_args <- list(
+    standardize      = standardize,
+    foldid           = foldid,
+    family           = "gaussian",
+    type.measure     = "mse",
+    lambda.min.ratio = 1e-5
+  )
+  dots <- list(...)
+  if (length(dots)) cv_args[names(dots)] <- dots
+
+  # -----------------------------
+  # Sanitize alpha vector
+  # -----------------------------
+  glmnet_alpha <- unique(as.numeric(glmnet_alpha))
+  glmnet_alpha <- glmnet_alpha[is.finite(glmnet_alpha)]
+  glmnet_alpha <- glmnet_alpha[glmnet_alpha >= 0 & glmnet_alpha <= 1]
+  if (length(glmnet_alpha) == 0L) glmnet_alpha <- 1
+
+  # Helper to try multiple alphas and pick the best cv model
+  .fit_over_alphas <- function(alpha_vec) {
+    best_model <- NULL; best_alpha <- NA_real_; best_cvm <- Inf
+    for (alpha_val in alpha_vec) {
+      fit_cv <- tryCatch({
+        do.call(glmnet::cv.glmnet,
+                c(list(x = X, y = y, alpha = alpha_val), cv_args))
+      }, error = function(e) NULL)
+
+      if (!is.null(fit_cv)) {
+        min_cvm <- suppressWarnings(min(fit_cv$cvm))
+        if (is.finite(min_cvm) && min_cvm < best_cvm) {
+          best_cvm   <- min_cvm
+          best_alpha <- alpha_val
+          best_model <- fit_cv
+        }
+      }
+    }
+    list(model = best_model, alpha = best_alpha)
+  }
+
+  # -----------------------------
+  # Try cv.glmnet over alphas
+  # -----------------------------
+  best <- .fit_over_alphas(glmnet_alpha)
+
+  # If all failed and ridge was requested, retry without alpha=0
+  if (is.null(best$model) && any(glmnet_alpha == 0)) {
+    warning("cv.glmnet failed for all alphas; retrying without alpha=0 (ridge).")
+    best <- .fit_over_alphas(setdiff(glmnet_alpha, 0))
+  }
+
+  # -----------------------------
+  # Ridge fallback (manual CV)
+  # -----------------------------
+  if (is.null(best$model)) {
+    warning("All cv.glmnet attempts failed; switching to ridge fallback with manual CV.")
+    lam_seq <- 10 ^ seq(3, -5, length.out = 120)
+
+    fit_ridge <- tryCatch(
+      glmnet::glmnet(X, y, alpha = 0, lambda = lam_seq,
+                     standardize = standardize, family = "gaussian"),
+      error = function(e) NULL
+    )
+    if (is.null(fit_ridge)) {
+      # last-resort intercept-only
+      intercept <- mean(y)
+      parms <- c("(Intercept)" = intercept)
+      return(list(
+        parms = parms,
+        debias_fit = NULL,
+        glmnet_alpha = glmnet_alpha,
+        best_alpha = 0,
+        best_lambda = NA_real_,
+        actual_y = y,
+        training_X = X,
+        y_pred = rep(intercept, n),
+        y_pred_debiased = NULL,
+        formula = formula,
+        terms = attr(mf, "terms"),
+        note = c("ridge_fallback_failed", drop_msg)
+      ))
+    }
+
+    # manual CV over lam_seq
+    mse_by_lambda <- rep(NA_real_, length(lam_seq))
+    for (j in seq_along(lam_seq)) {
+      lam <- lam_seq[j]
+      preds <- rep(NA_real_, n)
+      for (fold in seq_len(nfolds_eff)) {
+        tr_idx <- which(foldid != fold)
+        te_idx <- which(foldid == fold)
+        fit_j <- tryCatch(
+          glmnet::glmnet(X[tr_idx, , drop = FALSE], y[tr_idx],
+                         alpha = 0, lambda = lam, standardize = standardize,
+                         family = "gaussian"),
+          error = function(e) NULL
+        )
+        if (is.null(fit_j)) next
+        preds[te_idx] <- drop(predict(fit_j, newx = X[te_idx, , drop = FALSE], s = lam))
+      }
+      mse_by_lambda[j] <- mean((preds - y)^2, na.rm = TRUE)
+    }
+    j_best <- which.min(mse_by_lambda)
+    best_lambda <- lam_seq[j_best]
+
+    # final ridge fit on full data
+    final_ridge <- glmnet::glmnet(X, y, alpha = 0, lambda = best_lambda,
+                                  standardize = standardize, family = "gaussian")
+
+    # Robust coef extraction (avoid exact=TRUE path)
+    coef_mat <- as.matrix(stats::coef(final_ridge, s = best_lambda))
+    best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
+
+    y_pred <- drop(predict(final_ridge, newx = X, s = best_lambda))
+
+    debias_fit <- NULL
+    y_pred_debiased <- NULL
+    if (length(y) >= 10 && stats::var(y_pred) > 0) {
+      debias_fit <- stats::lm(y ~ y_pred)
+      y_pred_debiased <- stats::predict(debias_fit)
+    }
+
+    return(list(
+      parms = best_coefs,
+      debias_fit = debias_fit,
+      glmnet_alpha = glmnet_alpha,
+      best_alpha = 0,
+      best_lambda = best_lambda,
+      actual_y = y,
+      training_X = X,
+      y_pred = y_pred,
+      y_pred_debiased = y_pred_debiased,
+      formula = formula,
+      terms = attr(mf, "terms"),
+      note = c("ridge_fallback", drop_msg)
+    ))
+  }
+
+  # -----------------------------
+  # Success path: best cv.glmnet
+  # -----------------------------
+  best_model  <- best$model
+  best_alpha  <- best$alpha
   best_lambda <- best_model$lambda.min
-  best_coefs <- as.vector(coef(best_model, s = best_lambda))
-  names(best_coefs) <- rownames(coef(best_model, s = best_lambda))
 
-  # Predictions on training data
-  y_pred <- drop(predict(best_model, newx = X, s = best_lambda))
+  # Coefficients (robust)
+  coef_mat <- tryCatch(
+    as.matrix(stats::coef(best_model, s = "lambda.min")),
+    error = function(e) {
+      # fallback via underlying fit if needed
+      as.matrix(stats::coef(best_model$glmnet.fit, s = best_lambda))
+    }
+  )
+  best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
 
-  # Debiasing step (if possible)
+  # Training predictions for debias check
+  y_pred <- drop(predict(best_model, newx = X, s = "lambda.min"))
+
   debias_fit <- NULL
   y_pred_debiased <- NULL
-  if (length(y) >= 10 && var(y_pred) > 0) {
-    debias_fit <- lm(y ~ y_pred)
-    y_pred_debiased <- predict(debias_fit)
+  if (length(y) >= 10 && stats::var(y_pred) > 0) {
+    debias_fit <- stats::lm(y ~ y_pred)
+    y_pred_debiased <- stats::predict(debias_fit)
   }
 
-  # Return model object
-  result <- list(
+  list(
     parms = best_coefs,
     debias_fit = debias_fit,
     glmnet_alpha = glmnet_alpha,
@@ -134,91 +305,7 @@ glmnet_with_cv <- function(formula, data, glmnet_alpha = c(0, 0.5, 1),
     y_pred = y_pred,
     y_pred_debiased = y_pred_debiased,
     formula = formula,
-    terms = attr(mf, "terms")
+    terms = attr(mf, "terms"),
+    note = drop_msg
   )
-
-  return(result)
-}
-
-
-
-
-#' Predict Function for glmnet_with_cv Models
-#'
-#' Generate predictions from the model fitted by \code{\link{glmnet_with_cv}}. This function accepts
-#' new data and returns predictions, optionally debiased if a debiasing linear model was fit.
-#'
-#' @param object An object returned by \code{\link{glmnet_with_cv}}.
-#' @param newdata A data frame of new predictor values.
-#' @param debias Logical; if \code{TRUE}, applies the debiasing linear model stored in
-#' \code{object$debias_fit} (if available). Default is \code{FALSE}.
-#' @param ... Additional arguments (not used).
-#'
-#' @details
-#' Predictions are computed by forming the model matrix from \code{newdata} using the stored \code{formula} and \code{terms}
-#' in the fitted model object. The coefficients used are those stored in \code{parms}. If \code{debias=TRUE} and a
-#' \code{debias_fit} linear model is available, predictions are adjusted by that model.
-#'
-#' @return A numeric vector of predictions.
-#'
-#' @seealso \code{\link{glmnet_with_cv}}, \code{\link{SVEMnet}}, \code{\link{predict.svem_model}}
-#'
-#' @examples
-#' set.seed(0)
-#' n <- 50
-#' X1 <- runif(n)
-#' X2 <- runif(n)
-#' y <- 1 + 2*X1 + 3*X2 + rnorm(n)
-#' data <- data.frame(y, X1, X2)
-#' model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(0,0.5,1))
-#' predictions <- predict_cv(model_cv, data)
-#' predictions_debiased <- predict_cv(model_cv, data, debias = TRUE)
-#'
-#' @importFrom stats model.frame model.matrix na.pass coef
-#' @export
-predict_cv <- function(object, newdata, debias = FALSE, ...) {
-  if (!is.data.frame(newdata)) {
-    stop("newdata must be a data frame.")
-  }
-
-  # Use the stored terms object but remove the response variable
-  terms_obj <- delete.response(object$terms)
-  environment(terms_obj) <- baseenv()
-
-  mf <- model.frame(terms_obj, data = newdata, na.action = na.pass)
-  X_new <- model.matrix(terms_obj, data = mf)
-
-  # Remove intercept column if present
-  intercept_col <- which(colnames(X_new) == "(Intercept)")
-  if (length(intercept_col) > 0) {
-    X_new <- X_new[, -intercept_col, drop = FALSE]
-  }
-
-  # Check that newdata has same predictors
-  training_colnames <- colnames(object$training_X)
-  if (!all(training_colnames == colnames(X_new))) {
-    stop("Column names in newdata do not match those in the training data.")
-  }
-
-  # Extract coefficients
-  coefs <- object$parms
-  intercept <- coefs[1]
-  betas <- coefs[-1]
-
-  # Compute predictions
-  predictions <- drop(X_new %*% betas + intercept)
-
-  # Debias if requested and available
-  if (debias && !is.null(object$debias_fit)) {
-    debias_coef <- coef(object$debias_fit)
-    if (length(debias_coef) == 2) {
-      a <- debias_coef[1]
-      b <- debias_coef[2]
-      predictions <- a + b * predictions
-    } else {
-      predictions <- rep(debias_coef[1], length(predictions))
-    }
-  }
-
-  return(predictions)
 }

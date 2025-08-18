@@ -7,7 +7,7 @@
 #' @param debias Logical; default is \code{FALSE}.
 #' @param se.fit Logical; if \code{TRUE}, returns standard errors (default is \code{FALSE}).
 #' @param ... Additional arguments.
-#' @importFrom stats terms reformulate na.pass
+#' @importFrom stats terms reformulate na.pass sd
 #' @return Predictions or a list containing predictions and standard errors.
 #' @details
 #'
@@ -22,13 +22,9 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE, 
     stop("newdata must be a data frame.")
   }
 
-  # Use the stored terms object but remove the response variable
   terms_obj <- delete.response(object$terms)
-
-  # Set the environment of terms_obj to baseenv() to avoid conflicts
   environment(terms_obj) <- baseenv()
 
-  # Create model frame and model matrix for newdata
   mf <- model.frame(terms_obj, data = newdata, na.action = na.pass)
   X_new <- model.matrix(terms_obj, data = mf)
 
@@ -38,39 +34,38 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE, 
     X_new <- X_new[, -intercept_col, drop = FALSE]
   }
 
-  # Check that newdata has the same predictors as the training data
+  # Warn about unseen levels (rows with NAs after model.matrix)
+  bad_rows <- rowSums(is.na(X_new)) > 0
+  if (any(bad_rows)) {
+    warning(sum(bad_rows), " row(s) in newdata contain unseen levels; returning NA predictions for those rows.")
+  }
+
+  # Column set must match training
   training_colnames <- colnames(object$training_X)
   if (!all(training_colnames == colnames(X_new))) {
     stop("Column names in newdata do not match those in the training data.")
   }
 
-  # Extract coefficients
   coef_matrix <- object$coef_matrix  # nBoot x (p + 1)
-  intercepts <- coef_matrix[, 1]     # nBoot intercepts
-  betas <- coef_matrix[, -1, drop = FALSE]  # nBoot x p
+  intercepts <- coef_matrix[, 1]
+  betas <- coef_matrix[, -1, drop = FALSE]
 
   nBoot <- nrow(coef_matrix)
   m <- nrow(X_new)
 
-  # Compute predictions for each bootstrap
   predictions_matrix <- X_new %*% t(betas) + matrix(intercepts, nrow = m, ncol = nBoot, byrow = TRUE)
-
-  # Compute mean predictions
   predictions_mean <- rowMeans(predictions_matrix, na.rm = FALSE)
 
-  # Apply debiasing if requested
   if (debias && !is.null(object$debias_fit)) {
     debias_coef <- coef(object$debias_fit)
     if (length(debias_coef) == 2) {
-      a <- debias_coef[1]
-      b <- debias_coef[2]
+      a <- debias_coef[1]; b <- debias_coef[2]
       predictions_mean <- a + b * predictions_mean
     } else {
       predictions_mean <- rep(debias_coef[1], m)
     }
   }
 
-  # Return predictions with optional standard errors
   if (se.fit) {
     predictions_se <- apply(predictions_matrix, 1, sd, na.rm = TRUE)
     return(list(fit = predictions_mean, se.fit = predictions_se))
@@ -78,3 +73,4 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE, 
     return(predictions_mean)
   }
 }
+

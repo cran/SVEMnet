@@ -27,14 +27,12 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
   actual_y <- x$actual_y
   y_pred <- x$y_pred
 
-  # Create a data frame for plotting
   plot_data <- data.frame(
     Actual = actual_y,
     Predicted = y_pred,
     Type = "Predictions"
   )
 
-  # Add debiased predictions if requested and available
   if (plot_debiased && !is.null(x$y_pred_debiased)) {
     plot_data_debiased <- data.frame(
       Actual = actual_y,
@@ -44,18 +42,17 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
     plot_data <- rbind(plot_data, plot_data_debiased)
   }
 
-  # Create plot
-  p <- ggplot(plot_data, aes(x = .data$Actual, y = .data$Predicted, color = .data$Type, shape = .data$Type)) +
-    geom_point(...) +
-    geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed", size = 1) +
-    labs(title = paste("Actual vs Predicted Values -", class(x)[2]),
-         x = "Actual y",
-         y = "Predicted y") +
-    theme_minimal() +
-    scale_color_manual(values = c("Predictions" = "blue", "Debiased Predictions" = "red")) +
-    scale_shape_manual(values = c("Predictions" = 16, "Debiased Predictions" = 17)) +
-    coord_fixed()
+  p <- ggplot2::ggplot(plot_data, ggplot2::aes(x = Actual, y = Predicted,
+                                               color = Type, shape = Type)) +
+    ggplot2::geom_point(...) +
+    ggplot2::geom_abline(slope = 1, intercept = 0, color = "black", linetype = "dashed", size = 1) +
+    ggplot2::labs(title = paste("Actual vs Predicted Values -", utils::tail(class(x), 1)),
+                  x = "Actual y",
+                  y = "Predicted y") +
+    ggplot2::theme_minimal() +
+    ggplot2::scale_color_manual(values = c("Predictions" = "blue", "Debiased Predictions" = "red")) +
+    ggplot2::scale_shape_manual(values = c("Predictions" = 16, "Debiased Predictions" = 17)) +
+    ggplot2::coord_fixed()
 
   print(p)
 }
-

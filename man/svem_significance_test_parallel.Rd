@@ -2,14 +2,15 @@
 % Please edit documentation in R/svem_significance_test_parallel.R
 \name{svem_significance_test_parallel}
 \alias{svem_significance_test_parallel}
-\title{SVEM Significance Test (Parallel Version)}
+\title{SVEM Significance Test with Mixture Support (Parallel Version)}
 \usage{
 svem_significance_test_parallel(
   formula,
   data,
+  mixture_groups = NULL,
   nPoint = 2000,
-  nSVEM = 7,
-  nPerm = 200,
+  nSVEM = 5,
+  nPerm = 125,
   percent = 85,
   nBoot = 200,
   glmnet_alpha = c(1),
@@ -26,99 +27,52 @@ svem_significance_test_parallel(
 
 \item{data}{A data frame containing the variables in the model.}
 
-\item{nPoint}{The number of random points to generate in the factor space (default: 2000).}
+\item{mixture_groups}{Optional list describing one or more mixture factor
+groups.  Each element of the list should be a list with components
+`vars` (character vector of column names), `lower` (numeric vector of
+lower bounds of the same length as `vars`), `upper` (numeric vector
+of upper bounds of the same length), and `total` (scalar specifying the
+sum of the mixture variables).  All mixture variables must be
+included in `vars`, and no variable can appear in more than one
+mixture group.  Defaults to `NULL` (no mixtures).}
 
-\item{nSVEM}{The number of SVEM models to fit to the original data (default: 7).}
+\item{nPoint}{Number of random points in the factor space (default: 2000).}
 
-\item{nPerm}{The number of SVEM models to fit to permuted data for reference distribution (default: 200).}
+\item{nSVEM}{Number of SVEM fits on the original data (default: 5).}
 
-\item{percent}{The percentage of variance to capture in the SVD (default: 85).}
+\item{nPerm}{Number of SVEM fits on permuted responses for the reference
+distribution (default: 125).}
 
-\item{nBoot}{The number of bootstrap iterations within SVEM (default: 200).}
+\item{percent}{Percentage of variance to capture in the SVD (default: 85).}
 
-\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: \code{c(1)}).}
+\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 200).}
 
-\item{weight_scheme}{The weight scheme to use in SVEM (default: "SVEM").}
+\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: `c(1)`).}
 
-\item{objective}{Character; the objective function to use in \code{\link{SVEMnet}}. Options are "wAIC" or "wSSE" (default: "wAIC").}
+\item{weight_scheme}{Weighting scheme for SVEM (default: "SVEM").}
 
-\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
+\item{objective}{Objective function for SVEM ("wAIC" or "wSSE", default: "wAIC").}
 
-\item{nCore}{The number of CPU cores to use for parallel processing (default: all available cores).}
+\item{verbose}{Logical; if `TRUE`, displays progress messages (default: `TRUE`).}
 
-\item{seed}{An integer seed for random number generation (default: NULL).}
+\item{nCore}{Number of CPU cores for parallel processing (default: all available cores).}
 
-\item{...}{Additional arguments passed to the underlying \code{SVEMnet()} and then \code{glmnet()} functions.}
+\item{seed}{Optional integer seed for reproducible parallel RNG (default: NULL).}
+
+\item{...}{Additional arguments passed to `SVEMnet()` and then to `glmnet()`.}
 }
 \value{
-A list containing the test results.
+A list of class `svem_significance_test` containing the test results.
 }
 \description{
-Performs a whole-model significance test using the SVEM framework, handling both continuous and categorical predictors, with parallel computation.
+Whole-model significance test using SVEM with support for mixture factor groups,
+parallelizing the SVEM fits for originals and permutations.
 }
 \details{
-The `svem_significance_test_parallel` function implements a whole-model test designed to gauge the significance of a fitted SVEM model compared to the null hypothesis of a constant response surface, with parallel computation. This method helps identify responses that have relatively stronger or weaker relationships with study factors.
-
-The test constructs standardized predictions by centering the SVEM predictions (obtained from \code{SVEMnet()}) by the response mean and scaling by the ensemble standard deviation. A reference distribution is created by fitting the SVEM model to multiple randomized permutations of the response vector. The Mahalanobis distances of the original and permuted models are calculated using a reduced-rank singular value decomposition.
-
-The R code to perform this test (using matrices of nSVEM and nPerm predictions) is taken from the supplementary material of Karl (2024).
-
-This function assumes that there are no restrictions among the factors (e.g. mixture factors). The method will work with restrictions, but the code would need to be changed to ensure the \code{nPoint} points respect the factor restriction(s). For example, \code{rdirichlet()} could be used for the mixture factors.
-
-The \code{SVEMnet} parameter \code{debias} is hard coded to \code{FALSE} for this test. Unpublished simulation work suggests that setting \code{debias=TRUE} reduces the power of the test (without affecting the Type I error rate).
+Identical to \code{svem_significance_test()} but runs the expensive
+SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
+(including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
 }
-\section{Acknowledgments}{
-
-Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024).
-}
-
-\examples{
-\donttest{
-# Simulate data
-set.seed(0)
-n <- 30
-X1 <- runif(n)
-X2 <- runif(n)
-X3 <- runif(n)
-y <- 1 + X1 +  X2 + X1 * X2 + X1^2 + rnorm(n)
-data <- data.frame(y, X1, X2, X3)
-
-#CRAN requires a max of nCore=2 for example. Recommend using default nCore to use entire CPU.
-
-# Perform the SVEM significance test
-test_result <- svem_significance_test_parallel(
-  y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2) + I(X3^2),
-  data = data,
-  nPoint = 2000,
-  nSVEM = 9,
-  nPerm = 250,
-  nBoot = 200,
-  nCore = 2
-)
-
-# View the p-value
-print(test_result)
-
-
-test_result2 <- svem_significance_test_parallel(
-  y ~ (X1 + X2 )^2 + I(X1^2) + I(X2^2),
-  data = data,
-  nPoint = 2000,
-  nSVEM = 9,
-  nPerm = 250,
-  nBoot = 200,
-  nCore = 2
-)
-
-# View the p-value
-print(test_result2)
-
-
-# Plot the Mahalanobis distances
-plot(test_result,test_result2)
-}
-
-}
-\references{
-Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+\seealso{
+svem_significance_test svem_significance_test_parallel
 }

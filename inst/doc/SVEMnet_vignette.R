@@ -19,36 +19,24 @@ knitr::include_graphics("figures/whole_model_test.png")
 ## ----echo=FALSE, out.width='100%', fig.cap="Whole Model Test Results for Example 2"----
 knitr::include_graphics("figures/whole_model_2.png")
 
-## ----echo=FALSE, out.width='100%', fig.cap="LRMSE for {debias}x{objective}"----
-knitr::include_graphics("figures/lrmse.png")
-
-## ----echo=FALSE, out.width='100%', fig.cap="Paired LRMSE for {debias}x{objective}"----
-knitr::include_graphics("figures/paired_lrmse.png")
-
-## ----show-file, echo=FALSE, results='asis'------------------------------------
-raw_file <- readLines("svemnet_sim.R")
+## ----show-file4, echo=FALSE, results='asis'-----------------------------------
+raw_file3 <- readLines("debias_and_objective.R")
 cat("```r\n")
-cat(raw_file, sep="\n")
+cat(raw_file3, sep="\n")
 cat("\n```\n")
 
-## ----echo=FALSE, out.width='100%', fig.cap="LRMSE for different weight_scheme"----
-knitr::include_graphics("figures/lrmse_identity.png")
+## ----echo=FALSE, out.width='100%', fig.cap="Simulation-blocked Residual LRMSE for different objective functions and debiasing"----
+knitr::include_graphics("figures/14AUG25.png")
 
-## ----echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different weight_scheme"----
-knitr::include_graphics("figures/paired_lmrse_identity.png")
-
-## ----show-file2, echo=FALSE, results='asis'-----------------------------------
-raw_file2 <- readLines("svemnet_sim_identity.R")
+## ----show-file5, echo=FALSE, results='asis'-----------------------------------
+raw_file4 <- readLines("svem_vs_lassoCV_par_v2.R")
 cat("```r\n")
-cat(raw_file2, sep="\n")
+cat(raw_file4, sep="\n")
 cat("\n```\n")
 
-## ----echo=FALSE, out.width='100%', fig.cap="Residual LRMSE for different modeling approaches"----
-knitr::include_graphics("figures/mixture_v2.png")
-
-## ----show-file3, echo=FALSE, results='asis'-----------------------------------
-raw_file2 <- readLines("svemnet_sim_mixture_v2.R")
+## ----show-file6, echo=FALSE, results='asis'-----------------------------------
+raw_file6 <- readLines("debias_aicc_cvglm.R")
 cat("```r\n")
-cat(raw_file2, sep="\n")
+cat(raw_file6, sep="\n")
 cat("\n```\n")
 

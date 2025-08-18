@@ -1,8 +1,8 @@
 Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Elastic Net Regression
-Version: 1.3.0
-Date: 2024-12-21
+Version: 1.4.0
+Date: 2025-08-16
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
@@ -20,7 +20,8 @@ License: GPL-2 | GPL-3
 Encoding: UTF-8
 RoxygenNote: 7.3.2
 NeedsCompilation: no
-Packaged: 2024-12-21 18:57:39 UTC; andre
-Author: Andrew T. Karl [cre, aut] (<https://orcid.org/0000-0002-5933-8706>)
+Packaged: 2025-08-18 17:53:56 UTC; andre
+Author: Andrew T. Karl [cre, aut] (ORCID:
+    <https://orcid.org/0000-0002-5933-8706>)
 Repository: CRAN
-Date/Publication: 2024-12-21 19:10:02 UTC
+Date/Publication: 2025-08-18 18:10:20 UTC

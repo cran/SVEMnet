@@ -1,20 +1,59 @@
 #' Fit an SVEMnet Model
 #'
-#' Wrapper for 'glmnet' (Friedman et al. 2010) to fit an ensemble of Elastic Net models using the Self-Validated Ensemble Model method (SVEM, Lemkus et al. 2021).
+#' Wrapper for 'glmnet' (Friedman et al. 2010) to fit an ensemble of Elastic Net
+#' models using the Self-Validated Ensemble Model method (SVEM, Lemkus et al. 2021).
 #' Allows searching over multiple alpha values in the Elastic Net penalty.
 #'
 #' @param formula A formula specifying the model to be fitted.
 #' @param data A data frame containing the variables in the model.
 #' @param nBoot Number of bootstrap iterations (default is 200).
 #' @param glmnet_alpha Elastic Net mixing parameter(s) (default is \code{c(0, 0.5, 1)}).
-#' Can be a vector of alpha values, where \code{alpha = 1} corresponds to Lasso and \code{alpha = 0} corresponds to Ridge regression.
-#' @param weight_scheme Weighting scheme for SVEM (default is "SVEM"). Valid options are "SVEM", "FWR", and "Identity".
-#' "FWR" calculates the Fractional Weight Regression (Xu et al., 2020) and is included for demonstration;
-#' "SVEM" generally provides better performance."Identity" simply sets the training and validation weights to 1. Use with \code{nBoot = 1} and \code{objective = "wAIC"} to get an elastic net fit on the training data using AIC.
-#' @param objective Objective function for selecting lambda (default is "wAIC"). Valid options are "wAIC" and "wSSE".
-#' The "w" refers to "weighted" validation.
-#' @param standardize logical. Passed to \code{glmnet} to control standardization (default is \code{TRUE}).
-#' @param ... Additional arguments passed to the underlying \code{glmnet()} function.
+#'   Can be a vector of alpha values, where \code{alpha = 1} is Lasso and \code{alpha = 0} is Ridge.
+#' @param weight_scheme Weighting scheme for SVEM (default "SVEM").
+#'   One of \code{"SVEM"}, \code{"FWR"}, or \code{"Identity"}.
+#' @param objective Objective used to pick \code{lambda} on each bootstrap path (default "wAIC").
+#'   One of \code{"wSSE"}, \code{"wAIC"}, or \code{"wAICc"}.
+#'
+#'   Internally, SVEM creates complementary fractional weights for the same rows
+#'   (training vs. validation) and normalizes the validation weights so that
+#'   \code{sum(w_valid) = n}. Let \code{SSE_w = sum(w_valid * resid^2)} and
+#'   \code{k} be the number of estimated parameters including the intercept
+#'   (i.e., \code{glmnet} \code{df} + 1). The objectives are:
+#'
+#'   \itemize{
+#'     \item \code{"wSSE"}: \emph{Weighted sum of squared errors}. Uses \code{SSE_w}
+#'       directly. This matches the original SVEM paper's selection rule. It tends
+#'       to favor more complex fits near the \code{n ~ p} boundary because it has
+#'       no complexity penalty; use mainly as a baseline.
+#'
+#'     \item \code{"wAIC"}: \emph{Weighted AIC for Gaussian errors}. Uses
+#'       \code{AIC = n * log(SSE_w / n) + 2 * k}. Here \code{n = sum(w_valid)} (after
+#'       normalization it equals the training sample size). Candidates with
+#'       \code{k >= n} are excluded to avoid undefined likelihood / zero residual df.
+#'
+#'     \item \code{"wAICc"}: \emph{Small-sample corrected weighted AIC}. First compute
+#'       \code{AIC} as above, then add the correction
+#'       \code{2 * k * (k + 1) / (n_eff - k - 1)} using the
+#'       effective validation size \code{n_eff = (sum(w_valid)^2) / sum(w_valid^2)}.
+#'       We clip \code{n_eff} to \code{[5, n]} for stability. Candidates with
+#'       \code{k >= n} or \code{k >= n_eff - 1} are excluded. In practice this
+#'       strongly discourages over-parameterized models when \code{n} is close to \code{k}
+#'       and removes the familiar "spike" in selection around \code{n - p approx 0}.
+#'   }
+#'
+#'   \strong{Notes on \code{k}}: We use \code{k = df + 1} where \code{df} is
+#'   \code{glmnet}'s (non-intercept) degrees of freedom at each \code{lambda}.
+#'   For numerical robustness near the boundary, penalties are evaluated with a
+#'   conservative \code{k_eff = pmin(pmax(1, k), n - 2)}, but admissibility
+#'   still requires \code{k < n} (and \code{k < n_eff - 1} for AICc).
+#'
+#'   \strong{When to use which?} \code{"wAICc"} is generally safer for small or
+#'   borderline designs (\code{n} not much larger than the model size).
+#'   \code{"wAIC"} can be slightly better when \code{n >> k} and signal is strong.
+#'   \code{"wSSE"} is provided for completeness and comparison with the original SVEM.
+#'
+#' @param standardize Logical; passed to \code{glmnet} (default \code{TRUE}).
+#' @param ... Additional args to \code{glmnet()}.
 #' @return An object of class \code{svem_model}.
 #' @details
 #' The Self-Validated Ensemble Model (SVEM, Lemkus et al., 2021) framework provides a bootstrap approach to improve predictions from various base learning models, including Elastic Net regression as implemented in `glmnet`. SVEM is particularly suited for situations where a complex response surface is modeled with relatively few experimental runs.
@@ -26,7 +65,10 @@
 #'objective options:
 #' \describe{
 #'   \item{\code{"wSSE"}}{Weighted Sum of Squared Errors. Selects the lambda that minimizes the weighted validation error without penalizing model complexity. While this may lead to models that overfit when the number of parameters is large relative to the number of observations, SVEM mitigates overfitting (high prediction variance) by averaging over multiple bootstrap models. This is the objective function used by Lemkus et al. (2021) with \code{weight_scheme="SVEM"}}
-#'   \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n \* log(wSSE / n) + 2 \* k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters with nonzero coefficients. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
+#'
+#'   \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n * log(wSSE / n) + 2 * k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters with nonzero coefficients. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
+#'
+#'   \item{\code{"wAICc"}}{Small-sample corrected weighted AIC. First compute \code{AIC} as above, then add the correction \code{2 * k * (k + 1) / (n_eff - k - 1)}, where \code{n_eff = (sum(w_valid)^2) / sum(w_valid^2)} is the effective validation size. For stability, \code{n_eff} is clipped to \code{[5, n]}. Candidates with \code{k >= n} or \code{k >= n_eff - 1} are excluded. In practice this strongly discourages over-parameterized models when \code{n} is close to \code{k} and removes the familiar spike in selection around \code{n - p = 0}.}
 #' }
 #'
 #'weight_scheme options:
@@ -63,7 +105,7 @@
 #' Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
 #'
 #' @references
-#' Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Discovery-Summit-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/73730}
+#' Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 #'
 #' Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
 #'
@@ -75,7 +117,7 @@
 #'
 #' Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{ https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
 #'
-#' Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Discovery-Summit-Europe-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/51286}
+#' Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
 #'
 #' Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
 #'
@@ -103,185 +145,215 @@
 #' plot(model)
 #' predict(model,data)
 #'
-#' @importFrom stats runif rbinom rbeta lm predict coef sd var model.frame model.matrix
+#' @importFrom stats runif lm predict coef var model.frame model.matrix model.response
 #' @importFrom glmnet glmnet
 #' @export
+
 SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0, 0.5, 1),
-                    weight_scheme = c("SVEM", "FWR","Identity"),
-                    objective = c("wAIC","wSSE"),standardize=TRUE,...) {
-  objective <- match.arg(objective)
+                    weight_scheme = c("SVEM", "FWR", "Identity"),
+                    objective = c("wAICc", "wAIC", "wSSE"),
+                    standardize = TRUE, ...) {
+  ## ---- arg checks ----
+  objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
 
-  # Create model frame and design matrix
-  mf <- model.frame(formula, data)
+  if (!is.numeric(nBoot) || length(nBoot) != 1L || nBoot < 1 || !is.finite(nBoot)) {
+    stop("nBoot must be a single finite number >= 1.")
+  }
+  nBoot <- as.integer(nBoot)
+
+  if (length(glmnet_alpha) < 1L) stop("'glmnet_alpha' must contain at least one value.")
+  if (!is.numeric(glmnet_alpha) || any(!is.finite(glmnet_alpha))) {
+    stop("'glmnet_alpha' must be numeric and finite.")
+  }
+
+  ## ---- model frame / matrix (single NA policy) ----
+  data <- as.data.frame(data)
+  mf   <- model.frame(formula, data, na.action = stats::na.omit)
+  if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+
   y <- model.response(mf)
-  X <- model.matrix(formula, data)
+  X <- model.matrix(formula, mf)
 
-  # Remove intercept column if present
-  intercept_col <- which(colnames(X) == "(Intercept)")
-  if (length(intercept_col) > 0) {
-    X <- X[, -intercept_col, drop = FALSE]
+  ## Remove intercept column (glmnet adds its own)
+  int_idx <- which(colnames(X) %in% c("(Intercept)", "Intercept"))
+  if (length(int_idx)) X <- X[, -int_idx, drop = FALSE]
+  if (ncol(X) == 0L) stop("SVEMnet requires at least one predictor.")
+
+  y_numeric <- as.numeric(y)
+  if (any(!is.finite(y_numeric)) || any(!is.finite(X))) {
+    stop("Non-finite values in response/predictors after NA handling.")
   }
-  intercept_col <- which(colnames(X) == "Intercept")
-  if (length(intercept_col) > 0) {
-    X <- X[, -intercept_col, drop = FALSE]
-  }
+  storage.mode(X) <- "double"
 
-  n <- nrow(X)
-  p <- ncol(X)
-  nobs <- n
-  nparm <- p + 1  # Including intercept
+  n <- nrow(X); p <- ncol(X)
+  nobs  <- n
+  nparm <- p + 1L
 
-  # Initialize matrices and vectors
-  coef_matrix <- matrix(NA, nrow = nBoot, ncol = p + 1)
-  colnames(coef_matrix) <- c("Intercept", colnames(X))
-  best_alphas <- numeric(nBoot)
-  best_lambdas <- numeric(nBoot)
+  ## ---- containers ----
+  coef_matrix  <- matrix(NA_real_, nrow = nBoot, ncol = p + 1L)
+  colnames(coef_matrix) <- c("(Intercept)", colnames(X))
+  best_alphas  <- rep(NA_real_, nBoot)
+  best_lambdas <- rep(NA_real_, nBoot)
 
-  # Bootstrap iterations
-  for (i in 1:nBoot) {
-    # Generate weights
+  ## ---- bootstrap loop ----
+  for (i in seq_len(nBoot)) {
+    ## fractional weights
+    eps <- .Machine$double.eps
     if (weight_scheme == "SVEM") {
-      U <- runif(n)
+      U <- pmin(pmax(runif(n), eps), 1 - eps)
       w_train <- -log(U)
-      w_valid <- -log(1 - U)
+      w_valid <- -log1p(-U)
     } else if (weight_scheme == "FWR") {
-      w_train <- -log(runif(n))
+      U <- pmin(pmax(runif(n), eps), 1 - eps)
+      w_train <- -log(U)
       w_valid <- w_train
-    } else if (weight_scheme == "Identity") {
-      w_train <- rep(1,n)
-      w_valid <- rep(1,n)
+    } else { # "Identity"
+      w_train <- rep(1, n)
+      w_valid <- rep(1, n)
     }
-    else {
-      stop("Invalid weight_scheme specified.")
-    }
-
-    # Normalize weights
+    ## normalize to sum to n
     w_train <- w_train * (n / sum(w_train))
     w_valid <- w_valid * (n / sum(w_valid))
-    y_numeric <- as.numeric(y)
 
-    # Variables to store the best model
-    best_val_error <- Inf
-    best_alpha <- NA
-    best_lambda <- NA
-    best_beta_hat <- rep(NA, p + 1)
+    ## trackers per bootstrap
+    best_val_score <- Inf
+    best_alpha     <- NA_real_
+    best_lambda    <- NA_real_
+    best_beta_hat  <- rep(NA_real_, p + 1L)
 
-    # Loop over alphas
+    ## ---- search over alpha ----
     for (alpha in glmnet_alpha) {
-      # Fit Elastic Net model
       fit <- tryCatch({
-        glmnet(
-          X, y_numeric,
-          alpha = alpha,
-          weights = w_train,
-          intercept = TRUE,
-          standardize = standardize,
-          maxit = 1e6,
-          nlambda = 500
-        )
-      }, warning = function(w) {
-        warning(paste("Warning in glmnet for alpha", alpha, ":", w$message))
-        return(NULL)
-      }, error = function(e) {
-        warning(paste("Error in glmnet for alpha", alpha, ":", e$message))
-        return(NULL)
-      })
+        withCallingHandlers({
+          glmnet::glmnet(
+            x = X, y = y_numeric,
+            alpha = alpha,
+            weights = w_train,
+            intercept = TRUE,
+            standardize = standardize,
+            nlambda = 500,
+            maxit = 1e6,
+            ...
+          )
+        }, warning = function(w) invokeRestart("muffleWarning"))
+      }, error = function(e) NULL)
+      if (is.null(fit) || !length(fit$lambda) || !length(fit$df)) next
 
-      if (is.null(fit)) next
-
-      # Predict on validation set
+      ## predictions across the path
       pred_valid <- tryCatch({
-        predict(fit, newx = X)
-      }, warning = function(w) {
-        warning(paste("Warning in prediction for alpha", alpha, ":", w$message))
-        return(NULL)
-      }, error = function(e) {
-        warning(paste("Error in prediction for alpha", alpha, ":", e$message))
-        return(NULL)
-      })
+        as.matrix(withCallingHandlers(predict(fit, newx = X),
+                                      warning = function(w) invokeRestart("muffleWarning")))
+      }, error = function(e) NULL)
+      if (is.null(pred_valid) || nrow(pred_valid) != n) next
 
-      if (is.null(pred_valid)) next
+      ## weighted SSE along the path
+      res <- pred_valid - y_numeric
+      val_errors <- as.vector(crossprod(w_valid, res^2))   # length = n_lambda
+      val_errors[!is.finite(val_errors)] <- Inf
+      adj_val_errors <- pmax(val_errors, .Machine$double.eps)
 
-      # Compute validation error
-      val_errors <- colSums(w_valid * (y_numeric - pred_valid)^2)
-      k_values <- fit$df
-      n_obs <- length(y_numeric)
-      aic_values <- n_obs * log(val_errors / n_obs) + 2 * k_values
+      ## degrees of freedom: df from glmnet excludes intercept -> add 1
+      k_raw <- fit$df + 1L
+      if (length(k_raw) != length(adj_val_errors)) next
 
-      # Choose lambda
+      ## effective validation n (for AICc); weights were normalized, so sumw approx n
+      sumw  <- sum(w_valid)
+      sumw2 <- sum(w_valid^2)
+      n_eff <- (sumw^2) / (sumw2 + .Machine$double.eps)
+      n_eff <- max(5, min(n, n_eff))  # soft clip to [5, n]
+
+      ## weighted MSE (SSE_w / sum of weights)
+      mse_w <- adj_val_errors / sumw
+
+      ## conservative k to avoid near-boundary pathologies; keep ≥1
+      k_eff <- pmax(1L, pmin(k_raw, n - 2L))
+
       if (objective == "wSSE") {
-        idx_min <- which.min(val_errors)
-        lambda_opt <- fit$lambda[idx_min]
-        val_error <- val_errors[idx_min]
+        ## EXACTLY the classic SVEM objective (leave as raw weighted SSE)
+        metric <- val_errors
       } else if (objective == "wAIC") {
-        idx_min <- which.min(aic_values)
-        lambda_opt <- fit$lambda[idx_min]
-        val_error <- aic_values[idx_min]
+        ## AIC only defined for k < n; penalize using k_eff
+        metric <- rep(Inf, length(k_raw))
+        mask_aic <- (k_raw < n)
+        metric[mask_aic] <- sumw * log(mse_w[mask_aic]) + 2 * k_eff[mask_aic]
+      } else {  ## "wAICc"
+        ## AICc only defined for k < n and k < n_eff - 1
+        metric <- rep(Inf, length(k_raw))
+        mask_aicc <- (k_raw < n) & (k_eff < (n_eff - 1))
+        aic_base  <- sumw * log(mse_w) + 2 * k_eff        # same scale as wAIC
+        corr      <- (2 * k_eff * (k_eff + 1)) / (n_eff - k_eff - 1)
+        metric[mask_aicc] <- aic_base[mask_aicc] + corr[mask_aicc]
       }
 
-      # Update best model
-      if (val_error < best_val_error) {
-        best_val_error <- val_error
-        best_alpha <- alpha
-        best_lambda <- lambda_opt
-        best_beta_hat <- as.vector(coef(fit, s = lambda_opt))
+      metric[!is.finite(metric)] <- Inf
+      if (all(!is.finite(metric))) next   # nothing admissible for this alpha
+
+      idx_min <- which.min(metric)
+      if (!length(idx_min) || is.na(idx_min)) next
+      lambda_opt <- fit$lambda[idx_min]
+      val_score  <- metric[idx_min]
+
+
+
+      if (is.finite(val_score) && val_score < best_val_score) {
+        beta <- tryCatch({ as.matrix(stats::coef(fit, s = lambda_opt)) }, error = function(e) NULL)
+        if (!is.null(beta)) {
+          best_val_score <- val_score
+          best_alpha     <- alpha
+          best_lambda    <- lambda_opt
+          best_beta_hat  <- drop(beta)  # (p+1), includes intercept
+        }
       }
+    } # alpha loop
+
+    ## fallback this bootstrap
+    if (anyNA(best_beta_hat) || !all(is.finite(best_beta_hat))) {
+      best_beta_hat <- c(mean(y_numeric), rep(0, p))
+      best_alpha    <- NA_real_
+      best_lambda   <- NA_real_
     }
 
-    # Store best coefficients
-    if (any(is.na(best_beta_hat))) {
-      message(paste("Error in SVEMnet: Iteration", i, "produced NA coefficients."))
-      next
-    } else {
-      coef_matrix[i, ] <- best_beta_hat
-      best_alphas[i] <- best_alpha
-      best_lambdas[i] <- best_lambda
-    }
-  }
+    coef_matrix[i, ] <- best_beta_hat
+    best_alphas[i]   <- best_alpha
+    best_lambdas[i]  <- best_lambda
+  } # bootstrap loop
 
-  # Remove invalid iterations
-  valid_rows <- rowSums(is.na(coef_matrix)) == 0
-  if (sum(valid_rows) == 0) {
-    stop("All bootstrap iterations failed to produce valid coefficients.")
-  }
-  coef_matrix <- coef_matrix[valid_rows, , drop = FALSE]
-  best_alphas <- best_alphas[valid_rows]
+  ## ---- finalize ----
+  valid_rows <- rowSums(!is.finite(coef_matrix)) == 0
+  if (!any(valid_rows)) stop("All bootstrap iterations failed to produce valid coefficients.")
+  coef_matrix  <- coef_matrix[valid_rows, , drop = FALSE]
+  best_alphas  <- best_alphas[valid_rows]
   best_lambdas <- best_lambdas[valid_rows]
 
-  # Compute average coefficients
-  avg_coefficients <- colMeans(coef_matrix, na.rm = TRUE)
+  avg_coefficients <- colMeans(coef_matrix)
+  y_pred <- as.vector(X %*% avg_coefficients[-1L] + avg_coefficients[1L])
 
-  # Debiasing step
   debias_fit <- NULL
   y_pred_debiased <- NULL
-  y_pred <- X %*% avg_coefficients[-1] + avg_coefficients[1]
-  if (nBoot >= 10 && var(y_pred) > 0) {
-    debias_fit <- lm(y_numeric ~ y_pred)
-    y_pred_debiased <- predict(debias_fit)
+  if (nBoot >= 10 && stats::var(y_pred) > 0) {
+    debias_fit <- stats::lm(y_numeric ~ y_pred)
+    y_pred_debiased <- stats::predict(debias_fit)
   }
 
-
-
-  # Return model object
   result <- list(
-    parms = avg_coefficients,
-    debias_fit = debias_fit,
-    coef_matrix = coef_matrix,
-    nBoot = nBoot,
-    glmnet_alpha = glmnet_alpha,
-    best_alphas = best_alphas,
-    best_lambdas = best_lambdas,
-    weight_scheme = weight_scheme,
-    actual_y = y_numeric,
-    training_X = X,
-    y_pred = y_pred,
-    y_pred_debiased = y_pred_debiased,
-    nobs = nobs,
-    nparm = nparm,
-    formula = formula,
-    terms = attr(mf, "terms")
+    parms            = avg_coefficients,
+    debias_fit       = debias_fit,
+    coef_matrix      = coef_matrix,
+    nBoot            = nBoot,
+    glmnet_alpha     = glmnet_alpha,
+    best_alphas      = best_alphas,
+    best_lambdas     = best_lambdas,
+    weight_scheme    = weight_scheme,
+    actual_y         = y_numeric,
+    training_X       = X,
+    y_pred           = y_pred,
+    y_pred_debiased  = y_pred_debiased,
+    nobs             = nobs,
+    nparm            = nparm,
+    formula          = formula,
+    terms            = attr(mf, "terms")
   )
   class(result) <- c("svem_model", "SVEMnet")
-  return(result)
+  result
 }

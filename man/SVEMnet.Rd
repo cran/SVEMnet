@@ -10,7 +10,7 @@ SVEMnet(
   nBoot = 200,
   glmnet_alpha = c(0, 0.5, 1),
   weight_scheme = c("SVEM", "FWR", "Identity"),
-  objective = c("wAIC", "wSSE"),
+  objective = c("wAICc", "wAIC", "wSSE"),
   standardize = TRUE,
   ...
 )
@@ -23,24 +23,62 @@ SVEMnet(
 \item{nBoot}{Number of bootstrap iterations (default is 200).}
 
 \item{glmnet_alpha}{Elastic Net mixing parameter(s) (default is \code{c(0, 0.5, 1)}).
-Can be a vector of alpha values, where \code{alpha = 1} corresponds to Lasso and \code{alpha = 0} corresponds to Ridge regression.}
+Can be a vector of alpha values, where \code{alpha = 1} is Lasso and \code{alpha = 0} is Ridge.}
 
-\item{weight_scheme}{Weighting scheme for SVEM (default is "SVEM"). Valid options are "SVEM", "FWR", and "Identity".
-"FWR" calculates the Fractional Weight Regression (Xu et al., 2020) and is included for demonstration;
-"SVEM" generally provides better performance."Identity" simply sets the training and validation weights to 1. Use with \code{nBoot = 1} and \code{objective = "wAIC"} to get an elastic net fit on the training data using AIC.}
+\item{weight_scheme}{Weighting scheme for SVEM (default "SVEM").
+One of \code{"SVEM"}, \code{"FWR"}, or \code{"Identity"}.}
 
-\item{objective}{Objective function for selecting lambda (default is "wAIC"). Valid options are "wAIC" and "wSSE".
-The "w" refers to "weighted" validation.}
+\item{objective}{Objective used to pick \code{lambda} on each bootstrap path (default "wAIC").
+  One of \code{"wSSE"}, \code{"wAIC"}, or \code{"wAICc"}.
 
-\item{standardize}{logical. Passed to \code{glmnet} to control standardization (default is \code{TRUE}).}
+  Internally, SVEM creates complementary fractional weights for the same rows
+  (training vs. validation) and normalizes the validation weights so that
+  \code{sum(w_valid) = n}. Let \code{SSE_w = sum(w_valid * resid^2)} and
+  \code{k} be the number of estimated parameters including the intercept
+  (i.e., \code{glmnet} \code{df} + 1). The objectives are:
 
-\item{...}{Additional arguments passed to the underlying \code{glmnet()} function.}
+  \itemize{
+    \item \code{"wSSE"}: \emph{Weighted sum of squared errors}. Uses \code{SSE_w}
+      directly. This matches the original SVEM paper's selection rule. It tends
+      to favor more complex fits near the \code{n ~ p} boundary because it has
+      no complexity penalty; use mainly as a baseline.
+
+    \item \code{"wAIC"}: \emph{Weighted AIC for Gaussian errors}. Uses
+      \code{AIC = n * log(SSE_w / n) + 2 * k}. Here \code{n = sum(w_valid)} (after
+      normalization it equals the training sample size). Candidates with
+      \code{k >= n} are excluded to avoid undefined likelihood / zero residual df.
+
+    \item \code{"wAICc"}: \emph{Small-sample corrected weighted AIC}. First compute
+      \code{AIC} as above, then add the correction
+      \code{2 * k * (k + 1) / (n_eff - k - 1)} using the
+      effective validation size \code{n_eff = (sum(w_valid)^2) / sum(w_valid^2)}.
+      We clip \code{n_eff} to \code{[5, n]} for stability. Candidates with
+      \code{k >= n} or \code{k >= n_eff - 1} are excluded. In practice this
+      strongly discourages over-parameterized models when \code{n} is close to \code{k}
+      and removes the familiar "spike" in selection around \code{n - p approx 0}.
+  }
+
+  \strong{Notes on \code{k}}: We use \code{k = df + 1} where \code{df} is
+  \code{glmnet}'s (non-intercept) degrees of freedom at each \code{lambda}.
+  For numerical robustness near the boundary, penalties are evaluated with a
+  conservative \code{k_eff = pmin(pmax(1, k), n - 2)}, but admissibility
+  still requires \code{k < n} (and \code{k < n_eff - 1} for AICc).
+
+  \strong{When to use which?} \code{"wAICc"} is generally safer for small or
+  borderline designs (\code{n} not much larger than the model size).
+  \code{"wAIC"} can be slightly better when \code{n >> k} and signal is strong.
+  \code{"wSSE"} is provided for completeness and comparison with the original SVEM.}
+
+\item{standardize}{Logical; passed to \code{glmnet} (default \code{TRUE}).}
+
+\item{...}{Additional args to \code{glmnet()}.}
 }
 \value{
 An object of class \code{svem_model}.
 }
 \description{
-Wrapper for 'glmnet' (Friedman et al. 2010) to fit an ensemble of Elastic Net models using the Self-Validated Ensemble Model method (SVEM, Lemkus et al. 2021).
+Wrapper for 'glmnet' (Friedman et al. 2010) to fit an ensemble of Elastic Net
+models using the Self-Validated Ensemble Model method (SVEM, Lemkus et al. 2021).
 Allows searching over multiple alpha values in the Elastic Net penalty.
 }
 \details{
@@ -53,7 +91,10 @@ SVEMnet allows for the Elastic Net mixing parameter (`glmnet_alpha`) to be a vec
 objective options:
 \describe{
   \item{\code{"wSSE"}}{Weighted Sum of Squared Errors. Selects the lambda that minimizes the weighted validation error without penalizing model complexity. While this may lead to models that overfit when the number of parameters is large relative to the number of observations, SVEM mitigates overfitting (high prediction variance) by averaging over multiple bootstrap models. This is the objective function used by Lemkus et al. (2021) with \code{weight_scheme="SVEM"}}
-  \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n \* log(wSSE / n) + 2 \* k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters with nonzero coefficients. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
+
+  \item{\code{"wAIC"}}{Weighted Akaike Information Criterion. Balances model fit with complexity by penalizing the number of parameters. It is calculated as \code{AIC = n * log(wSSE / n) + 2 * k}, where \code{wSSE} is the weighted sum of squared errors, \code{n} is the number of observations, and \code{k} is the number of parameters with nonzero coefficients. Typically used with \code{weight_scheme="FWR"} or \code{weight_scheme="Identity"}}
+
+  \item{\code{"wAICc"}}{Small-sample corrected weighted AIC. First compute \code{AIC} as above, then add the correction \code{2 * k * (k + 1) / (n_eff - k - 1)}, where \code{n_eff = (sum(w_valid)^2) / sum(w_valid^2)} is the effective validation size. For stability, \code{n_eff} is clipped to \code{[5, n]}. Candidates with \code{k >= n} or \code{k >= n_eff - 1} are excluded. In practice this strongly discourages over-parameterized models when \code{n} is close to \code{k} and removes the familiar spike in selection around \code{n - p = 0}.}
 }
 
 weight_scheme options:
@@ -114,7 +155,7 @@ predict(model,data)
 
 }
 \references{
-Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Discovery-Summit-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/73730}
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
 
@@ -126,7 +167,7 @@ Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications
 
 Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{ https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
 
-Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Discovery-Summit-Europe-2018/Model-Validation-Strategies-for-Designed-Experiments-Using/ta-p/51286}
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
 
 Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
 
