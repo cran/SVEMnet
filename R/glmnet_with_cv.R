@@ -6,7 +6,7 @@
 #'
 #' @param formula A formula specifying the model to be fitted.
 #' @param data A data frame containing the variables in the model.
-#' @param glmnet_alpha Elastic Net mixing parameter(s) (default is \code{c(0, 0.5, 1)}).
+#' @param glmnet_alpha Elastic Net mixing parameter(s) (default is \code{c(1)}).
 #' If multiple values are provided, \code{cv.glmnet} is run for each \code{alpha}, and the model with the lowest cross-validation
 #' error is selected.
 #' @param standardize Logical flag passed to \code{\link[glmnet]{glmnet}}. If \code{TRUE} (default), each variable is standardized
@@ -51,7 +51,7 @@
 #' y <- 1 + 2*X1 + 3*X2 + rnorm(n)
 #' data <- data.frame(y, X1, X2)
 #'
-#' model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(0,0.5,1))
+#' model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(1))
 #' predictions <- predict_cv(model_cv, data)
 #'
 #' @importFrom stats model.frame model.response model.matrix lm predict var coef
@@ -86,14 +86,14 @@ glmnet_with_cv <- function(formula, data,
   # Near-zero-variance filter
   # -----------------------------
   drop_msg <- NULL
-  if (p > 0) {
-    sds <- apply(X, 2, stats::sd)
-    keep <- is.finite(sds) & (sds > 1e-8)
-    if (!all(keep)) {
-      drop_msg <- sprintf("Dropping %d near-zero-variance column(s).", sum(!keep))
-      X <- X[, keep, drop = FALSE]
-    }
-  }
+  # if (p > 0) {
+  #   sds <- apply(X, 2, stats::sd)
+  #   keep <- is.finite(sds) & (sds > 1e-8)
+  #   if (!all(keep)) {
+  #     drop_msg <- sprintf("Dropping %d near-zero-variance column(s).", sum(!keep))
+  #     X <- X[, keep, drop = FALSE]
+  #   }
+  # }
 
   # If everything died, fit intercept-only
   if (ncol(X) == 0) {

@@ -18,7 +18,7 @@ glmnet_with_cv(
 
 \item{data}{A data frame containing the variables in the model.}
 
-\item{glmnet_alpha}{Elastic Net mixing parameter(s) (default is \code{c(0, 0.5, 1)}).
+\item{glmnet_alpha}{Elastic Net mixing parameter(s) (default is \code{c(1)}).
 If multiple values are provided, \code{cv.glmnet} is run for each \code{alpha}, and the model with the lowest cross-validation
 error is selected.}
 
@@ -66,7 +66,7 @@ X2 <- runif(n)
 y <- 1 + 2*X1 + 3*X2 + rnorm(n)
 data <- data.frame(y, X1, X2)
 
-model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(0,0.5,1))
+model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(1))
 predictions <- predict_cv(model_cv, data)
 
 }

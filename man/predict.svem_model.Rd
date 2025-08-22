@@ -4,7 +4,14 @@
 \alias{predict.svem_model}
 \title{Predict Method for SVEM Models}
 \usage{
-\method{predict}{svem_model}(object, newdata, debias = FALSE, se.fit = FALSE, ...)
+\method{predict}{svem_model}(
+  object,
+  newdata,
+  debias = FALSE,
+  se.fit = FALSE,
+  agg = c("parms", "mean"),
+  ...
+)
 }
 \arguments{
 \item{object}{An object of class \code{svem_model}.}
@@ -15,7 +22,12 @@
 
 \item{se.fit}{Logical; if \code{TRUE}, returns standard errors (default is \code{FALSE}).}
 
-\item{...}{Additional arguments.}
+\item{agg}{Aggregation method for ensemble predictions. One of \code{"parms"} (default)
+or \code{"mean"}. \code{"parms"} uses the aggregated coefficients stored in
+\code{object$parms} (or \code{parms_debiased} if \code{debias=TRUE}). \code{"mean"}
+averages predictions from individual bootstrap members equally.}
+
+\item{...}{Additional arguments (currently unused).}
 }
 \value{
 Predictions or a list containing predictions and standard errors.
@@ -24,10 +36,17 @@ Predictions or a list containing predictions and standard errors.
 Generates predictions from a fitted \code{svem_model}.
 }
 \details{
-A debiased fit is available (along with the standard fit). This is provided to allow the user to match the output of JMP.\\ https://www.jmp.com/support/help/en/18.1/?utm_source=help&utm_medium=redirect#page/jmp/overview-of-selfvalidated-ensemble-models.shtml. The debiasing coefficients are always calculated by SVEMnet(), and the predict() function determines whether the raw or debiased predictions are returned via the \code{debias} argument. Default is \code{FALSE} based on performance on unpublished simulation studies.
+A debiased fit is available (along with the standard fit). This is provided to
+allow the user to match the output of JMP. The debiasing coefficients are always
+calculated by \code{SVEMnet()}, and the predict() function determines whether the
+raw or debiased predictions are returned via the \code{debias} argument (default
+\code{FALSE}). When \code{se.fit=TRUE} and \code{debias=TRUE}, the reported SE is
+the bootstrap spread scaled by \eqn{|b|} from the calibration \eqn{y \sim y_{pred}}.
 }
 \section{Acknowledgments}{
 
-Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
+Development of this package was assisted by GPT o1-preview, which helped in constructing
+the structure of some of the code and the roxygen documentation. The code for the
+significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
 }
 
