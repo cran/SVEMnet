@@ -1,64 +1,125 @@
-#' Predict Method for glmnet_with_cv Objects
+#' Predict for svem_cv objects (and convenience wrapper)
 #'
 #' Generates predictions from a fitted object returned by \code{glmnet_with_cv()}.
 #'
-#' @param object A list returned by \code{glmnet_with_cv()}.
+#' The design matrix for \code{newdata} is rebuilt using the training \code{terms}
+#' (with environment set to \code{baseenv()}), along with the saved factor
+#' \code{xlevels} and \code{contrasts} (stored in \code{object$schema}). Columns are
+#' aligned robustly to the training order:
+#' \itemize{
+#'   \item Any training columns that \code{model.matrix()} drops for \code{newdata}
+#'         (e.g., a factor collapses to a single level) are added back as zero columns.
+#'   \item Columns are reordered to exactly match the training order.
+#'   \item Rows with unseen factor levels are warned about and return \code{NA}.
+#' }
+#'
+#' If \code{debias = TRUE} and a calibration fit \code{lm(y ~ y_pred)} exists with a
+#' finite slope, predictions are transformed by \code{a + b * pred}.
+#'
+#' @name predict_cv
+#' @aliases predict_cv predict.svem_cv
+#'
+#' @param object A list returned by \code{glmnet_with_cv()} (class \code{svem_cv}).
 #' @param newdata A data frame of new predictor values.
-#' @param debias Logical; if \code{TRUE} and a debiasing fit is available, apply it (default \code{FALSE}).
-#' @param strict Logical; if \code{TRUE}, require exact column-name match with training design (default \code{FALSE}).
+#' @param debias Logical; if TRUE and a debiasing fit is available, apply it.
+#' @param strict Logical; if TRUE, require exact column-name match with training design
+#'   (including intercept position) after alignment. Default \code{FALSE}.
 #' @param ... Additional arguments (currently unused).
 #'
 #' @return A numeric vector of predictions.
 #'
-#' @details Columns are aligned by name. With \code{strict=TRUE}, a mismatch errors.
+#' @examples
+#' set.seed(1)
+#' n <- 50; p <- 5
+#' X <- matrix(rnorm(n * p), n, p)
+#' y <- X[,1] - 0.5 * X[,2] + rnorm(n)
+#' df_ex <- data.frame(y = as.numeric(y), X)
+#' colnames(df_ex) <- c("y", paste0("x", 1:p))
+#' fit <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1, nfolds = 5, repeats = 2, seed = 9)
+#' preds_raw <- predict_cv(fit, df_ex)
+#' preds_db  <- predict_cv(fit, df_ex, debias = TRUE)
+#' cor(preds_raw, df_ex$y)
 #'
-#' @importFrom stats delete.response model.frame model.matrix na.pass predict setNames
+#' @importFrom stats delete.response model.frame model.matrix na.pass predict setNames coef
 #' @export
-
-# Robust prediction for glmnet_with_cv() objects
 predict_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
-  stopifnot(is.list(object), is.data.frame(newdata), !is.null(object$terms), !is.null(object$parms))
+  # Delegate to the S3 method to keep a single code path.
+  predict(object, newdata = newdata, debias = debias, strict = strict, ...)
+}
 
-  # Build test model matrix using the training terms (no response)
-  terms_obj <- delete.response(object$terms)
-  # don't nuke its environment; it contains contrasts info
-
-  mf_new <- model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
-  mm_new <- model.matrix(terms_obj, data = mf_new)
-
-  # Mark rows with unseen levels / NA columns produced by model.matrix
-  bad_rows <- rowSums(is.na(mm_new)) > 0L
-  if (any(bad_rows)) {
-    warning(sum(bad_rows), " row(s) in newdata contain unseen levels; returning NA for those rows.")
-    # replace NAs with 0 so matrix multiply works; we'll drop them after
-    mm_new[is.na(mm_new)] <- 0
+#' @rdname predict_cv
+#' @export
+#' @method predict svem_cv
+predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
+  stopifnot(is.list(object), is.data.frame(newdata))
+  if (is.null(object$terms) || is.null(object$parms) || is.null(object$training_X)) {
+    stop("The object is missing required components (terms/parms/training_X).")
   }
 
-  # Coefficients (should include "(Intercept)")
-  coefs <- object$parms
+  # Training terms (environment nuked for safety)
+  terms_obj <- stats::delete.response(object$terms)
+  environment(terms_obj) <- baseenv()
 
-  # Optional strict check (train/test columns must match)
-  if (isTRUE(strict)) {
-    tr_cols <- colnames(object$training_X)
-    # training_X was built without the intercept; add it for a fair check
-    tr_cols <- c("(Intercept)", tr_cols)
-    if (!identical(tr_cols, colnames(mm_new))) {
-      stop("Column names in newdata do not match those used in training (strict=TRUE).")
+  # Harmonize factor/character levels to training xlevels
+  xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else NULL
+  if (!is.null(xlev) && length(xlev)) {
+    for (v in names(xlev)) {
+      if (v %in% names(newdata)) {
+        if (is.factor(newdata[[v]])) {
+          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
+        } else if (is.character(newdata[[v]])) {
+          newdata[[v]] <- factor(newdata[[v]], levels = xlev[[v]])
+        } else {
+          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
+        }
+      }
     }
   }
 
-  # Align by names (robust): build a full beta vector over test columns
-  beta <- setNames(numeric(ncol(mm_new)), colnames(mm_new))
+  # Build model frame/matrix with saved contrasts; allow NAs (unseen levels become NA)
+  ctr <- if (!is.null(object$contrasts)) object$contrasts else NULL
+  mf_new <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
+  mm_new <- stats::model.matrix(terms_obj, data = mf_new, contrasts.arg = ctr)
+
+  # Drop intercept (training_X is stored without intercept)
+  int_col <- which(colnames(mm_new) == "(Intercept)")
+  if (length(int_col)) mm_new <- mm_new[, -int_col, drop = FALSE]
+
+  # Identify rows with any NA columns (typically from unseen levels)
+  bad_rows <- rowSums(is.na(mm_new)) > 0L
+  if (any(bad_rows)) {
+    warning(sum(bad_rows),
+            " row(s) in newdata contain unseen or missing levels; returning NA for those rows.")
+    mm_new[is.na(mm_new)] <- 0
+  }
+
+  # Strict check if requested
+  if (isTRUE(strict)) {
+    tr <- c("(Intercept)", colnames(object$training_X))
+    te <- c("(Intercept)", colnames(mm_new))
+    if (!identical(tr, te)) {
+      stop("Column names in newdata do not match training design (strict=TRUE).")
+    }
+  }
+
+  # Align coefficients to test design by name
+  coefs <- object$parms                       # includes "(Intercept)"
+  beta  <- stats::setNames(numeric(ncol(mm_new) + 1L),
+                           c("(Intercept)", colnames(mm_new)))
   common <- intersect(names(coefs), names(beta))
   beta[common] <- coefs[common]
 
-  preds <- as.numeric(mm_new %*% beta)
+  # Predict
+  preds <- as.numeric(beta[1L] + mm_new %*% beta[-1L])
   if (any(bad_rows)) preds[bad_rows] <- NA_real_
 
+  # Optional debias calibration
   if (debias && !is.null(object$debias_fit)) {
-    # Keep NA rows as NA through debiasing
     ok <- !is.na(preds)
-    preds[ok] <- as.numeric(predict(object$debias_fit, newdata = data.frame(y_pred = preds[ok])))
+    if (any(ok)) {
+      preds[ok] <- as.numeric(stats::predict(object$debias_fit,
+                                             newdata = data.frame(y_pred = preds[ok])))
+    }
   }
 
   preds

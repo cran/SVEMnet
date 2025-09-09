@@ -2,25 +2,21 @@
 % Please edit documentation in R/coef.R
 \name{coef.svem_model}
 \alias{coef.svem_model}
-\title{Plot Coefficient Nonzero Percentages from a SVEMnet Model}
+\title{Coefficient Nonzero Percentages from an SVEM Model}
 \usage{
-\method{coef}{svem_model}(object, ...)
+\method{coef}{svem_model}(object, tol = 1e-07, ...)
 }
 \arguments{
-\item{object}{An object of class \code{svem_model} returned by the \code{SVEMnet} function.}
+\item{object}{An object of class \code{svem_model}.}
 
-\item{...}{other arguments to pass.}
+\item{tol}{Numeric tolerance for "nonzero" (default \code{1e-7}).}
+
+\item{...}{Unused.}
 }
 \value{
-Invisibly returns a data frame containing the percentage of bootstraps
-        where each coefficient is nonzero.
+Invisibly returns a data frame with variables and percentages.
 }
 \description{
-This function calculates the percentage of bootstrap iterations in which each coefficient
-is nonzero.
+Calculates the percentage of bootstrap iterations in which each coefficient
+(excluding the intercept) is nonzero, using a small tolerance.
 }
-\section{Acknowledgments}{
-
-Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
-}
-

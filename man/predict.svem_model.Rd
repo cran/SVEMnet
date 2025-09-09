@@ -14,39 +14,64 @@
 )
 }
 \arguments{
-\item{object}{An object of class \code{svem_model}.}
+\item{object}{An object of class svem_model (created by SVEMnet()).}
 
 \item{newdata}{A data frame of new predictor values.}
 
-\item{debias}{Logical; default is \code{FALSE}.}
+\item{debias}{Logical; default is FALSE. If TRUE, apply the linear calibration
+fit (y ~ y_pred) learned during training when available.}
 
-\item{se.fit}{Logical; if \code{TRUE}, returns standard errors (default is \code{FALSE}).}
+\item{se.fit}{Logical; if TRUE, returns standard errors (default FALSE).}
 
-\item{agg}{Aggregation method for ensemble predictions. One of \code{"parms"} (default)
-or \code{"mean"}. \code{"parms"} uses the aggregated coefficients stored in
-\code{object$parms} (or \code{parms_debiased} if \code{debias=TRUE}). \code{"mean"}
-averages predictions from individual bootstrap members equally.}
+\item{agg}{Aggregation method for ensemble predictions. One of "parms" (default)
+or "mean". "parms" uses the aggregated coefficients stored in object$parms
+(or parms_debiased if debias=TRUE). "mean" averages predictions from individual
+bootstrap members equally and optionally applies the debias calibration.}
 
 \item{...}{Additional arguments (currently unused).}
 }
 \value{
-Predictions or a list containing predictions and standard errors.
+A numeric vector of predictions, or a list with components \code{fit} and
+\code{se.fit} when \code{se.fit = TRUE}.
 }
 \description{
-Generates predictions from a fitted \code{svem_model}.
+Generates predictions from a fitted svem_model.
 }
 \details{
-A debiased fit is available (along with the standard fit). This is provided to
-allow the user to match the output of JMP. The debiasing coefficients are always
-calculated by \code{SVEMnet()}, and the predict() function determines whether the
-raw or debiased predictions are returned via the \code{debias} argument (default
-\code{FALSE}). When \code{se.fit=TRUE} and \code{debias=TRUE}, the reported SE is
-the bootstrap spread scaled by \eqn{|b|} from the calibration \eqn{y \sim y_{pred}}.
-}
-\section{Acknowledgments}{
+The function uses the training terms, factor levels (xlevels), and contrasts
+saved by SVEMnet(). The terms object environment is set to baseenv() to avoid
+unexpected lookup of objects in the original environment.
 
-Development of this package was assisted by GPT o1-preview, which helped in constructing
-the structure of some of the code and the roxygen documentation. The code for the
-significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
+Column handling is strict but robust:
+\itemize{
+\item We require that the set of columns produced by \code{model.matrix} on
+\code{newdata} matches the set used in training.
+\item If \code{model.matrix} drops some training columns (e.g., a factor
+collapses to a single level in \code{newdata}), we add those missing columns
+as zeros so coefficients align.
+\item We then reorder columns to the exact training order before multiplying.
 }
 
+Rows in \code{newdata} that contain unseen factor levels will yield NA predictions
+(and NA standard errors if \code{se.fit=TRUE}); a warning is issued indicating how
+many rows were affected.
+
+When \code{agg="mean"}, the predictive SE is the bootstrap spread (row-wise sd of
+member predictions). If \code{debias=TRUE} and the calibration slope is available and
+finite, SEs are scaled by abs(slope).
+}
+\examples{
+set.seed(1)
+n  <- 40
+X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
+y  <- 1 + 0.8*X1 - 0.5*X2 + 0.2*X3 + rnorm(n, 0, 0.3)
+dat <- data.frame(y, X1, X2, X3)
+fit <- SVEMnet(y ~ (X1 + X2 + X3)^2, dat, nBoot = 30, relaxed = TRUE)
+pred <- predict(fit, dat)
+head(pred)
+
+# With SEs and debias
+out <- predict(fit, dat, debias = TRUE, se.fit = TRUE, agg = "mean")
+str(out)
+
+}

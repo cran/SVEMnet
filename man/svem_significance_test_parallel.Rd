@@ -9,13 +9,16 @@ svem_significance_test_parallel(
   data,
   mixture_groups = NULL,
   nPoint = 2000,
-  nSVEM = 5,
-  nPerm = 125,
-  percent = 85,
-  nBoot = 200,
+  nSVEM = 10,
+  nPerm = 150,
+  percent = 90,
+  nBoot = 100,
   glmnet_alpha = c(1),
   weight_scheme = c("SVEM"),
-  objective = c("wAIC", "wSSE"),
+  objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+  auto_ratio_cutoff = 1.3,
+  gamma = 2,
+  relaxed = FALSE,
   verbose = TRUE,
   nCore = parallel::detectCores(),
   seed = NULL,
@@ -28,51 +31,127 @@ svem_significance_test_parallel(
 \item{data}{A data frame containing the variables in the model.}
 
 \item{mixture_groups}{Optional list describing one or more mixture factor
-groups.  Each element of the list should be a list with components
-`vars` (character vector of column names), `lower` (numeric vector of
-lower bounds of the same length as `vars`), `upper` (numeric vector
-of upper bounds of the same length), and `total` (scalar specifying the
-sum of the mixture variables).  All mixture variables must be
-included in `vars`, and no variable can appear in more than one
-mixture group.  Defaults to `NULL` (no mixtures).}
+groups. Each element of the list should be a list with components
+\code{vars} (character vector of column names), \code{lower} (numeric vector of
+lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
+of upper bounds of the same length), and \code{total} (scalar specifying the
+sum of the mixture variables). All mixture variables must be
+included in \code{vars}, and no variable can appear in more than one
+mixture group. Defaults to \code{NULL} (no mixtures).}
 
 \item{nPoint}{Number of random points in the factor space (default: 2000).}
 
-\item{nSVEM}{Number of SVEM fits on the original data (default: 5).}
+\item{nSVEM}{Number of SVEM fits on the original data (default: 10).}
 
 \item{nPerm}{Number of SVEM fits on permuted responses for the reference
-distribution (default: 125).}
+distribution (default: 150).}
 
-\item{percent}{Percentage of variance to capture in the SVD (default: 85).}
+\item{percent}{Percentage of variance to capture in the SVD (default: 90).}
 
-\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 200).}
+\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 100).}
 
-\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: `c(1)`).}
+\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: \code{c(1)}).}
 
 \item{weight_scheme}{Weighting scheme for SVEM (default: "SVEM").}
 
-\item{objective}{Objective function for SVEM ("wAIC" or "wSSE", default: "wAIC").}
+\item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
+path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"},
+\code{"wGIC"}, \code{"wSSE"} (default: \code{"auto"}).}
 
-\item{verbose}{Logical; if `TRUE`, displays progress messages (default: `TRUE`).}
+\item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
+\code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
+\code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.}
+
+\item{gamma}{Penalty weight used only when \code{objective = "wGIC"} (default 2).
+Passed to \code{SVEMnet()}.}
+
+\item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner \code{SVEMnet()}
+fits use glmnet's relaxed elastic net path and select both lambda and relaxed gamma
+on each bootstrap. When \code{FALSE}, the standard glmnet path is used. This value
+is passed through to \code{SVEMnet()}. Any \code{relaxed} provided via \code{...}
+is ignored with a warning.}
+
+\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
 
 \item{nCore}{Number of CPU cores for parallel processing (default: all available cores).}
 
 \item{seed}{Optional integer seed for reproducible parallel RNG (default: NULL).}
 
-\item{...}{Additional arguments passed to `SVEMnet()` and then to `glmnet()`.}
+\item{...}{Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
+(for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
+\code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
+setting is controlled by the \code{relaxed} argument of this function and
+any \code{relaxed} value passed via \code{...} is ignored with a warning.}
 }
 \value{
-A list of class `svem_significance_test` containing the test results.
+A list of class \code{svem_significance_test} containing the test results.
 }
 \description{
 Whole-model significance test using SVEM with support for mixture factor groups,
 parallelizing the SVEM fits for originals and permutations.
 }
 \details{
-Identical to \code{svem_significance_test()} but runs the expensive
+Identical in logic to \code{svem_significance_test()} but runs the expensive
 SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
 (including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
 }
+\examples{
+\donttest{
+  set.seed(1)
+
+  # Small toy data with a 3-component mixture A, B, C
+  n <- 40
+  sample_trunc_dirichlet <- function(n, lower, upper, total) {
+    k <- length(lower)
+    stopifnot(length(upper) == k, total >= sum(lower), total <= sum(upper))
+    avail <- total - sum(lower)
+    if (avail <= 0) return(matrix(rep(lower, each = n), nrow = n))
+    out <- matrix(NA_real_, n, k)
+    i <- 1L
+    while (i <= n) {
+      g <- rgamma(k, 1, 1)
+      w <- g / sum(g)
+      x <- lower + avail * w
+      if (all(x <= upper + 1e-12)) { out[i, ] <- x; i <- i + 1L }
+    }
+    out
+  }
+
+  lower <- c(0.10, 0.20, 0.05)
+  upper <- c(0.60, 0.70, 0.50)
+  total <- 1.0
+  ABC   <- sample_trunc_dirichlet(n, lower, upper, total)
+  A <- ABC[, 1]; B <- ABC[, 2]; C <- ABC[, 3]
+  X <- runif(n)
+  F <- factor(sample(c("red", "blue"), n, replace = TRUE))
+  y <- 2 + 3*A + 1.5*B + 1.2*C + 0.5*X + 1*(F == "red") + rnorm(n, sd = 0.3)
+  dat <- data.frame(y = y, A = A, B = B, C = C, X = X, F = F)
+
+  mix_spec <- list(list(
+    vars  = c("A", "B", "C"),
+    lower = lower,
+    upper = upper,
+    total = total
+  ))
+
+  # Parallel significance test (default relaxed = FALSE)
+  res <- svem_significance_test_parallel(
+    y ~ A + B + C + X + F,
+    data           = dat,
+    mixture_groups = mix_spec,
+    glmnet_alpha   = c(1),
+    weight_scheme  = "SVEM",
+    objective      = "auto",
+    auto_ratio_cutoff = 1.3,
+    relaxed        = FALSE,   # default, shown for clarity
+    nCore          = 2,
+    seed           = 123,
+    verbose        = FALSE
+  )
+  print(res$p_value)
+}
+
+}
 \seealso{
-svem_significance_test svem_significance_test_parallel
+\code{svem_significance_test}
 }

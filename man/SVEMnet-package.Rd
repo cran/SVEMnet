@@ -3,20 +3,21 @@
 \docType{package}
 \name{SVEMnet-package}
 \alias{SVEMnet-package}
-\title{SVEMnet: Self-Validated Ensemble Models with Elastic Net Regression}
+\title{SVEMnet: Self-Validated Ensemble Models with Relaxed Lasso and Elastic-Net Regression}
 \description{
 The \code{SVEMnet} package implements Self-Validated Ensemble Models (SVEM) using Elastic Net (including lasso and ridge) regression via \code{glmnet}. SVEM averages predictions from multiple models fitted to fractionally weighted bootstraps of the data, tuned with anti-correlated validation weights.
 }
 \section{Functions}{
 
 \describe{
-  \item{\code{\link{SVEMnet}}}{Fit an SVEMnet model using Elastic Net regression.}
-  \item{\code{\link{svem_significance_test}}}{Perform a whole-model significance test for SVEM models.}
-  \item{\code{\link{svem_significance_test_parallel}}}{Perform a whole-model significance test for SVEM models. Parallelized version.}
-  \item{\code{\link{predict.svem_model}}}{Predict method for SVEM models.}
-  \item{\code{\link{plot.svem_model}}}{Plot method for SVEM models.}
-  \item{\code{\link{coef.svem_model}}}{Plot method for SVEM models.}
-  \item{\code{\link{glmnet_with_cv}}}{Wrapper for cv.glmnet}
+\item{\code{\link{SVEMnet}}}{Fit an SVEMnet model using Elastic Net regression.}
+\item{\code{\link{predict.svem_model}}}{Predict method for SVEM models.}
+\item{\code{\link{svem_significance_test}}}{Whole-model significance test.}
+\item{\code{\link{svem_significance_test_parallel}}}{Parallel whole-model test.}
+\item{\code{\link{plot.svem_model}}}{Plot actual vs predicted for a model.}
+\item{\code{\link{coef.svem_model}}}{Coefficient nonzero percentages (bootstrap).}
+\item{\code{\link{plot_svem_significance_tests}}}{Plotting helper for multiple tests.}
+\item{\code{\link{glmnet_with_cv}}}{Wrapper around \code{cv.glmnet()} with repeats.}
 }
 }
 
@@ -42,7 +43,7 @@ Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Exper
 
 Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
 
-Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It’s All About Prediction. \emph{JMP Discovery Conference}.
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
 }
 \author{
 \strong{Maintainer}: Andrew T. Karl \email{akarl@asu.edu} (\href{https://orcid.org/0000-0002-5933-8706}{ORCID})

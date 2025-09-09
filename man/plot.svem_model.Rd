@@ -9,28 +9,13 @@
 \arguments{
 \item{x}{An object of class \code{svem_model}.}
 
-\item{plot_debiased}{Logical; if \code{TRUE}, includes debiased predictions if available (default is \code{FALSE}).}
+\item{plot_debiased}{Logical; if \code{TRUE}, includes debiased predictions if available.}
 
-\item{...}{Additional arguments passed to \code{ggplot2} functions.}
+\item{...}{Additional aesthetics passed to \code{geom_point()}.}
 }
 \value{
-A \code{ggplot} object showing actual versus predicted values.
+A \code{ggplot} object.
 }
 \description{
-Plots actual versus predicted values for an \code{svem_model} using \code{ggplot2}.
+Plots actual versus predicted values for an \code{svem_model}.
 }
-\details{
-This function creates an actual vs. predicted plot for the SVEM model. If \code{plot_debiased} is \code{TRUE} and debiased predictions are available, it includes them in the plot.
-
-**Plot Features:**
-\itemize{
-  \item **Actual vs. Predicted Points:** Plots the actual response values against the predicted values from the SVEM model.
-  \item **Debiased Predictions:** If available and \code{plot_debiased} is \code{TRUE}, debiased predictions are included.
-  \item **Ideal Fit Line:** A dashed line representing perfect prediction (slope = 1, intercept = 0) is included for reference.
-}
-}
-\section{Acknowledgments}{
-
-Development of this package was assisted by GPT o1-preview, which helped in constructing the structure of some of the code and the roxygen documentation. The code for the significance test is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
-}
-

@@ -2,18 +2,22 @@
 % Please edit documentation in R/predict.cv.R
 \name{predict_cv}
 \alias{predict_cv}
-\title{Predict Method for glmnet_with_cv Objects}
+\alias{predict.svem_cv}
+\title{Predict for svem_cv objects (and convenience wrapper)}
 \usage{
 predict_cv(object, newdata, debias = FALSE, strict = FALSE, ...)
+
+\method{predict}{svem_cv}(object, newdata, debias = FALSE, strict = FALSE, ...)
 }
 \arguments{
-\item{object}{A list returned by \code{glmnet_with_cv()}.}
+\item{object}{A list returned by \code{glmnet_with_cv()} (class \code{svem_cv}).}
 
 \item{newdata}{A data frame of new predictor values.}
 
-\item{debias}{Logical; if \code{TRUE} and a debiasing fit is available, apply it (default \code{FALSE}).}
+\item{debias}{Logical; if TRUE and a debiasing fit is available, apply it.}
 
-\item{strict}{Logical; if \code{TRUE}, require exact column-name match with training design (default \code{FALSE}).}
+\item{strict}{Logical; if TRUE, require exact column-name match with training design
+(including intercept position) after alignment. Default \code{FALSE}.}
 
 \item{...}{Additional arguments (currently unused).}
 }
@@ -24,5 +28,30 @@ A numeric vector of predictions.
 Generates predictions from a fitted object returned by \code{glmnet_with_cv()}.
 }
 \details{
-Columns are aligned by name. With \code{strict=TRUE}, a mismatch errors.
+The design matrix for \code{newdata} is rebuilt using the training \code{terms}
+(with environment set to \code{baseenv()}), along with the saved factor
+\code{xlevels} and \code{contrasts} (stored in \code{object$schema}). Columns are
+aligned robustly to the training order:
+\itemize{
+\item Any training columns that \code{model.matrix()} drops for \code{newdata}
+(e.g., a factor collapses to a single level) are added back as zero columns.
+\item Columns are reordered to exactly match the training order.
+\item Rows with unseen factor levels are warned about and return \code{NA}.
+}
+
+If \code{debias = TRUE} and a calibration fit \code{lm(y ~ y_pred)} exists with a
+finite slope, predictions are transformed by \code{a + b * pred}.
+}
+\examples{
+set.seed(1)
+n <- 50; p <- 5
+X <- matrix(rnorm(n * p), n, p)
+y <- X[,1] - 0.5 * X[,2] + rnorm(n)
+df_ex <- data.frame(y = as.numeric(y), X)
+colnames(df_ex) <- c("y", paste0("x", 1:p))
+fit <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1, nfolds = 5, repeats = 2, seed = 9)
+preds_raw <- predict_cv(fit, df_ex)
+preds_db  <- predict_cv(fit, df_ex, debias = TRUE)
+cor(preds_raw, df_ex$y)
+
 }

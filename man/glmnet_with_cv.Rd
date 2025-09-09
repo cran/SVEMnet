@@ -7,73 +7,102 @@
 glmnet_with_cv(
   formula,
   data,
-  glmnet_alpha = c(0, 0.5, 1),
+  glmnet_alpha = c(0, 0.25, 0.5, 0.75, 1),
   standardize = TRUE,
   nfolds = 10,
+  repeats = 5,
+  choose_rule = c("min", "1se"),
+  seed = NULL,
+  exclude = NULL,
+  relaxed = FALSE,
+  relax_gamma = NULL,
   ...
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be fitted.}
+\item{formula}{Model formula.}
 
-\item{data}{A data frame containing the variables in the model.}
+\item{data}{Data frame.}
 
-\item{glmnet_alpha}{Elastic Net mixing parameter(s) (default is \code{c(1)}).
-If multiple values are provided, \code{cv.glmnet} is run for each \code{alpha}, and the model with the lowest cross-validation
-error is selected.}
+\item{glmnet_alpha}{Numeric vector of alphas, default c(0,0.25,0.5,0.75, 1).}
 
-\item{standardize}{Logical flag passed to \code{\link[glmnet]{glmnet}}. If \code{TRUE} (default), each variable is standardized
-before model fitting.}
+\item{standardize}{Logical passed to glmnet (default TRUE).}
 
-\item{nfolds}{Number of cross-validation folds (default is \code{10}).}
+\item{nfolds}{CV folds (default 10), internally constrained so >= ~3 obs/fold.}
 
-\item{...}{Additional arguments passed to \code{\link[glmnet]{cv.glmnet}}.}
+\item{repeats}{Number of independent CV repeats (default 5).}
+
+\item{choose_rule}{"1se" or "min" (default). In simulations "1se" lead to increased RMSE on holdout data when simulating small mixture designs.}
+
+\item{seed}{Optional integer seed for reproducible fold IDs.}
+
+\item{exclude}{Optional vector OR function for glmnet's exclude=.
+If a function, cv.glmnet applies it inside each training fold (glmnet >= 4.1-2).}
+
+\item{relaxed}{Logical; if TRUE, call glmnet/cv.glmnet with relax=TRUE (default FALSE).}
+
+\item{relax_gamma}{Optional numeric vector passed as gamma= to glmnet/cv.glmnet
+when relaxed=TRUE. If NULL, glmnet uses its internal default gamma path.}
+
+\item{...}{Args forwarded to both cv.glmnet() and glmnet(), e.g.
+family, weights, parallel, type.measure, intercept, maxit, lower.limits,
+upper.limits, penalty.factor, offset, standardize.response, keep, etc.}
 }
 \value{
-A list containing:
+A list with elements:
 \itemize{
-  \item \code{parms}: Coefficients from the selected \code{cv.glmnet} model at \code{lambda.min}.
-  \item \code{debias_fit}: A linear model of the form \code{y ~ y_pred} used for debiasing (if applicable).
-  \item \code{glmnet_alpha}: The vector of \code{alpha} values considered.
-  \item \code{best_alpha}: The selected \code{alpha} value that gave the best cross-validation result.
-  \item \code{best_lambda}: The \code{lambda} value chosen by cross-validation at the selected \code{alpha}.
-  \item \code{actual_y}: The response vector used in the model.
-  \item \code{training_X}: The predictor matrix used in the model.
-  \item \code{y_pred}: The fitted values from the final model (no debiasing).
-  \item \code{y_pred_debiased}: Debiased fitted values if \code{debias_fit} is available.
-  \item \code{formula}: The formula used for model fitting.
-  \item \code{terms}: The terms object extracted from the model frame.
+\item parms Named numeric vector of coefficients (including "(Intercept)").
+\item glmnet_alpha Numeric vector of alphas searched.
+\item best_alpha Numeric; winning alpha.
+\item best_lambda Numeric; winning lambda.
+\item y_pred In-sample predictions from the returned coefficients.
+\item debias_fit Optional lm(y ~ y_pred) for Gaussian family.
+\item y_pred_debiased If debias_fit exists, its fitted values.
+\item cv_summary Per-alpha data frames with lambda, mean_cvm, sd_cvm, se_combined, n_repeats, idx_min, idx_1se.
+\item formula Original formula.
+\item terms Cleaned training terms (environment set to baseenv()).
+\item training_X Training design matrix without intercept.
+\item actual_y Training response vector.
+\item xlevels Factor levels seen during training (for safe predict).
+\item contrasts Contrasts used during training (for safe predict).
+\item schema list(feature_names, terms_str, xlevels, contrasts, terms_hash) for deterministic predict.
+\item note Character vector of notes (e.g., dropped rows, relaxed-coef source).
+\item meta List: nfolds, repeats, rule, family, relaxed, relax_cv_fallbacks, cv_object (if keep=TRUE for the final fit).
 }
 }
 \description{
-A wrapper function for \code{\link[glmnet]{cv.glmnet}} that takes input arguments in a manner similar to \code{\link{SVEMnet}}.
-This function searches over multiple \code{alpha} values by running \code{cv.glmnet()} for each provided \code{alpha}, and then
-selects the combination of \code{alpha} and \code{lambda} with the best cross-validation performance.
+Repeated K-fold CV over a per-alpha lambda path, with a proper
+1-SE rule across repeats. Preserves fields expected by predict_cv().
+Optionally uses glmnet's built-in relaxed elastic net for both the warm-start
+path and each CV fit. When relaxed=TRUE, the final coefficients are taken
+from a cv.glmnet() object at the chosen lambda so that the returned model
+reflects the relaxed solution (including its gamma).
 }
 \details{
-This function uses \code{\link[glmnet]{cv.glmnet}} to fit a generalized linear model with elastic net regularization,
-performing k-fold cross-validation to select the regularization parameter \code{lambda}. If multiple \code{alpha} values are
-provided, it selects the best-performing \code{alpha}-\code{lambda} pair based on the minimal cross-validation error.
-
-After fitting, the function calculates a debiasing linear model (if possible). This is done by regressing the actual responses
-on the fitted values obtained from the selected model. The resulting linear model is stored in \code{debias_fit}.
+To avoid duplicate-argument errors, arguments like x, y, alpha, lambda,
+foldid, and exclude are passed explicitly and removed from the dots
+before calling glmnet::cv.glmnet().
 }
 \examples{
-set.seed(0)
-n <- 50
-X1 <- runif(n)
-X2 <- runif(n)
-y <- 1 + 2*X1 + 3*X2 + rnorm(n)
-data <- data.frame(y, X1, X2)
+set.seed(123)
+n <- 100; p <- 10
+X <- matrix(rnorm(n * p), n, p)
+beta <- c(1, -1, rep(0, p - 2))
+y <- as.numeric(X \%*\% beta + rnorm(n))
+df_ex <- data.frame(y = y, X)
+colnames(df_ex) <- c("y", paste0("x", 1:p))
 
-model_cv <- glmnet_with_cv(y ~ X1 + X2, data = data, glmnet_alpha = c(1))
-predictions <- predict_cv(model_cv, data)
+# Default: 1SE rule, repeats=1, non-relaxed
+fit_1se <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = c(0.5, 1),
+                          nfolds = 5, repeats = 1, seed = 42)
+str(fit_1se$parms)
 
-}
-\references{
-Friedman, J., Hastie, T., & Tibshirani, R. (2010). Regularization Paths for Generalized Linear Models via Coordinate Descent.
-\emph{Journal of Statistical Software}, 33(1), 1-22. \doi{10.18637/jss.v033.i01}
-}
-\seealso{
-\code{\link[glmnet]{glmnet}}, \code{\link[glmnet]{cv.glmnet}}, \code{\link{SVEMnet}}
+# v1-like behavior: choose_rule="min"
+fit_min <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1,
+                          nfolds = 5, repeats = 1, choose_rule = "min", seed = 42)
+
+# Relaxed path with gamma search
+fit_relax <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1,
+                            nfolds = 5, repeats = 1, relaxed = TRUE, seed = 42)
+
 }

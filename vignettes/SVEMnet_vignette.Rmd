@@ -71,7 +71,7 @@ library(SVEMnet)
 
 # Example data
 data <- iris
-svem_model <- SVEMnet(Sepal.Length ~ ., data = data, nBoot = 300)
+svem_model <- SVEMnet(Sepal.Length ~ ., data = data, relaxed=FALSE,glmnet_alpha=c(1),nBoot = 50)
 coef(svem_model)
 ```
 
@@ -178,32 +178,9 @@ knitr::include_graphics("figures/whole_model_2.png")
 
 Newly added wrapper for cv.glmnet() to compare performance of SVEM to glmnet's native CV implementation.
 
-# 22AUG2025: Simulation — choosing the default SVEMnet objective (lasso)
+# 08SEP2025: Added relaxed option
 
-Including 0 in glmnet_alpha (ridge) seems to make the fits less stable. Changing default to lasso (alpha=1). It might be reasonable to use c(0.5, 1).
-
-**What we tested.** We compared SVEMnet objectives with **lasso** (α = 1) — `wAIC`, `wBIC`, and `wSSE` — against a benchmark `glmnet_cv_lasso`.  
-**Design range.** Simulated mixture surface with random coefficients; Theoretical R² ∈ {0.3, 0.5, 0.7, 0.9}; sample sizes **n_total ∈ {15, 25, 35, …, 95}**.  
-**Metrics.** Holdout **NRASE** and **NAAE**, both **normalized per run** by the holdout SD of the true response; tie-aware **win rate**; **average rank** (lower = better); and **paired, per-run** differences between AIC and BIC. Analyses are **stratified** at **n_total ≤ 40** vs **n_total > 40**.
-
-**Key findings from this run (values will vary with a new seed):**
-- **Overall:** glmnet_cv_lasso and SVEM_wAIC_lasso were close (mean NRASE ≈ **0.526** vs **0.532**), BIC higher (**0.543**), and wSSE highest (**0.646**).
-- **Small n (n_total ≤ 40):** **BIC** had the best mean NRASE (≈ **0.683**), then glmnet (≈ **0.717**), then **AIC** (≈ **0.747**); wSSE lagged (≈ **1.01**). AIC–BIC paired mean Δ ≈ **+0.063** (AIC worse; p ≈ 0.016).  
-  → **BIC is safer/better at very small n.**
-- **Larger n (n_total > 40):** **AIC** dominated (**≈ 0.425**) vs glmnet (**≈ 0.430**) and BIC (**≈ 0.473**); wSSE in between (**≈ 0.462**). AIC–BIC paired mean Δ ≈ **−0.048** (AIC better; p ≪ 1e−30).  
-  → **AIC is superior once n grows.**
-- **wSSE (lasso)** under-performed both AIC and BIC in this setup and can be excluded from default consideration.
-
-
-
-```
-```{r show-file6, echo=FALSE, results='asis'}
-raw_file6 <- readLines("bic_sim.R")
-cat("```r\n")
-cat(raw_file6, sep="\n")
-cat("\n```\n")
-```
-
+Simulations show improved behavior from a relaxed grid search that allows the model to apply a lighter penalty to parameteres retained from the initial elastic net fit. This option tends to hurt RMSE on holdout data for cross validated glmnet, but the SVEM bootstraps average over the addtional variability introduced by this option and produce smaller RMSE on holdout data.
 
 ## References and Citations
 

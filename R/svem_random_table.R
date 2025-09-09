@@ -1,207 +1,107 @@
-#
-# NOTE: This utility function
-# allows users to explore the fitted SVEMnet model by generating a
-# random grid of predictor values and computing the corresponding model
-# predictions.  Mixture factor groups can be specified so that
-# composition variables are sampled from a Dirichlet distribution.
-#' Generate a Random Prediction Table for a Fitted SVEMnet Model
+#' Generate a Random Prediction Table from a Fitted SVEMnet Model (no refit)
 #'
-#' This utility function generates a random sample of points from the
-#' predictor space and computes the corresponding predicted responses from
-#' a fitted SVEMnet model.  It can be used to explore the fitted
-#' response surface in a way analogous to JMP's "Output Random Table"
-#' feature.  The function recognizes mixture factor groups and draws
-#' Dirichlet-distributed compositions within the specified bounds so
-#' that mixture variables sum to a user-supplied total.  Continuous
-#' non-mixture variables are sampled uniformly across their observed
-#' ranges using a maximin Latin hypercube design, and categorical
-#' variables are sampled from their observed levels.  No random noise is
-#' added to the predicted responses.
+#' Samples the original predictor factor space using ranges and levels cached
+#' inside a fitted \code{svem_model} (from \code{SVEMnet()}) and computes
+#' predictions at those points. Optional mixture groups let you sample
+#' composition variables on a (possibly truncated) simplex via a Dirichlet draw.
+#' No refitting is performed.
 #'
-#' @param formula A formula specifying the fitted model.  This should be the
-#'   same formula used when fitting the SVEMnet model.
-#' @param data A data frame containing the variables in the model.
-#' @param n Number of random points to generate (default: 1000).
-#' @param mixture_groups Optional list describing mixture factor groups.  Each
-#'   element should be a list with components `vars` (character vector of
-#'   mixture variable names), `lower` (numeric vector of lower bounds),
-#'   `upper` (numeric vector of upper bounds) and `total` (scalar sum).
-#'   See `svem_significance_test_with_mixture()` for details.  Defaults
-#'   to `NULL` (no mixtures).
-#' @param nBoot Number of bootstrap iterations to use when fitting the
-#'   SVEMnet model (default: 200).
-#' @param glmnet_alpha Elastic net mixing parameter(s) passed to `SVEMnet`
-#'   (default: `c(1)`).
-#' @param weight_scheme Weighting scheme for SVEM (default: "SVEM").
-#' @param objective Objective function for SVEM ("wAIC" or "wSSE";
-#'   default: "wAIC").
-#' @param debias Logical; if `TRUE`, the debiasing coefficients of the
-#'   fitted model are applied when predicting (default: `FALSE`).
-#' @param ... Additional arguments passed to `SVEMnet()` and then to
-#'   `glmnet()`.
-#' @return A data frame containing the sampled predictor values and the
-#'   corresponding predicted responses.  The response column is named
-#'   according to the left-hand side of `formula`.
+#' @param object A fitted \code{svem_model} returned by \code{SVEMnet()}.
+#'               The object must contain \code{$sampling_schema}, which is
+#'               created by the updated \code{SVEMnet()}.
+#' @param n Number of random points to generate (default \code{1000}).
+#' @param mixture_groups Optional list of mixture factor groups. Each element is
+#'   a list with components:
+#'   \itemize{
+#'     \item \code{vars}: character vector of mixture variable names (must be in the model).
+#'     \item \code{lower}: numeric vector of lower bounds (same length as \code{vars}).
+#'     \item \code{upper}: numeric vector of upper bounds (same length as \code{vars}).
+#'     \item \code{total}: scalar specifying the group total (e.g., 1.0).
+#'   }
+#'   If omitted, all variables are sampled independently using the cached schema.
+#' @param debias Logical; if \code{TRUE}, applies the calibration from
+#'   \code{object$debias_fit} (if available) to the mean prediction (default \code{FALSE}).
+#'
+#' @return A data frame with sampled predictors and a predicted response column.
+#'   The response column name matches the left-hand side of \code{object$formula}.
+#'
 #' @details
-#' This function first fits an SVEMnet model using the supplied
-#' parameters.  It then generates a random grid of points in the
-#' predictor space, honouring mixture constraints if `mixture_groups`
-#' is provided.  Predictions are computed from the fitted model on these
-#' points.  No random noise is added; the predictions come directly from
-#' the model.  If you wish to explore the uncertainty of predictions,
-#' consider adding noise separately or using the standard error output
-#' from `predict.svem_model()`.
+#' This function uses:
+#' \itemize{
+#'   \item \code{object$sampling_schema$num_ranges} for uniform sampling of numeric variables.
+#'   \item \code{object$sampling_schema$factor_levels} for categorical sampling.
+#'   \item \code{object$terms}, \code{object$xlevels}, and \code{object$contrasts}
+#'         (via \code{predict.svem_model}) to encode the model matrix consistently.
+#' }
+#' Mixture groups are handled by drawing Dirichlet weights and mapping them to the
+#' truncated simplex defined by \code{lower}, \code{upper}, and \code{total}; proposals
+#' violating upper bounds are rejected (with oversampling to keep it efficient).
 #'
-#' @seealso `SVEMnet`, `predict.svem_model`, `svem_significance_test_with_mixture`.
+#' @seealso \code{\link{SVEMnet}}, \code{\link{predict.svem_model}},
+#'   \code{\link{svem_significance_test}}, \code{\link{svem_significance_test_parallel}}
+#'
 #' @examples
 #' \donttest{
-#' set.seed(42)
+#' set.seed(1)
 #' n <- 40
+#' X1 <- runif(n); X2 <- runif(n)
+#' A <- runif(n); B <- runif(n); C <- pmax(0, 1 - A - B)  # simple mixture-ish
+#' F <- factor(sample(c("lo","hi"), n, TRUE))
+#' y <- 1 + 2*X1 - X2 + 3*A + 1.5*B + 0.5*C + (F=="hi") + rnorm(n, 0, 0.3)
+#' d <- data.frame(y, X1, X2, A, B, C, F)
 #'
-#' # Helper to generate training data mixtures with bounds
-#' sample_trunc_dirichlet <- function(n, lower, upper, total) {
-#'   k <- length(lower)
-#'   min_sum <- sum(lower); max_sum <- sum(upper)
-#'   stopifnot(total >= min_sum, total <= max_sum)
-#'   avail <- total - min_sum
-#'   out <- matrix(NA_real_, n, k)
-#'   i <- 1
-#'   while (i <= n) {
-#'     g <- rgamma(k, 1, 1)
-#'     w <- g / sum(g)
-#'     x <- lower + avail * w
-#'     if (all(x <= upper + 1e-12)) {
-#'       out[i, ] <- x; i <- i + 1
-#'     }
-#'   }
-#'   out
+#' fit <- SVEMnet(y ~ X1 + X2 + A + B + C + F, d, nBoot = 50, glmnet_alpha = 1)
+#'
+#' # No mixture constraints (independent sampling using cached ranges/levels)
+#' tbl1 <- svem_random_table_from_model(fit, n = 50)
+#' head(tbl1)
+#'
+#' # With mixture constraints for A,B,C that sum to 1 and have bounds
+#' mix <- list(list(vars = c("A","B","C"),
+#'                  lower = c(0.1, 0.1, 0.1),
+#'                  upper = c(0.7, 0.7, 0.7),
+#'                  total = 1.0))
+#' tbl2 <- svem_random_table_from_model(fit, n = 50, mixture_groups = mix)
+#' head(tbl2)
 #' }
 #'
-#' # Three mixture factors (A, B, C) with distinct bounds; sum to total = 1
-#' lower <- c(0.10, 0.20, 0.05)
-#' upper <- c(0.60, 0.70, 0.50)
-#' total <- 1.0
-#' ABC   <- sample_trunc_dirichlet(n, lower, upper, total)
-#' A <- ABC[, 1]; B <- ABC[, 2]; C <- ABC[, 3]
-#'
-#' # Additional predictors
-#' X <- runif(n)
-#' F <- factor(sample(letters[1:3], n, replace = TRUE))
-#'
-#' # Response
-#' y <- 1 + 2*A + 3*B + 1.5*C + 0.5*X +
-#'      ifelse(F == "a", 0, ifelse(F == "b", 1, -1)) +
-#'      rnorm(n, sd = 0.3)
-#'
-#' dat <- data.frame(y = y, A = A, B = B, C = C, X = X, F = F)
-#'
-#' # Mixture specification for the random table generator
-#' mix_spec <- list(
-#'   list(
-#'     vars  = c("A", "B", "C"),
-#'     lower = c(0.10, 0.20, 0.05),
-#'     upper = c(0.60, 0.70, 0.50),
-#'     total = 1.0
-#'   )
-#' )
-#'
-#' # Fit SVEMnet and generate 50 random points
-#' rand_tab <- svem_random_table(
-#'   y ~ A + B + C + X + F,
-#'   data           = dat,
-#'   n              = 50,
-#'   mixture_groups = mix_spec,
-#'   nBoot          = 50,
-#'   glmnet_alpha   = c(1),
-#'   weight_scheme  = "SVEM",
-#'   objective      = "wAIC",
-#'   debias         = FALSE
-#' )
-#'
-#' # Check mixture validity in the generated table
-#' stopifnot(all(abs((rand_tab$A + rand_tab$B + rand_tab$C) - 1) < 1e-8))
-#' summary(rand_tab[c("A","B","C")])
-#' head(rand_tab)
-#' }
+#' @importFrom lhs maximinLHS
+#' @importFrom stats rgamma
 #' @export
-svem_random_table <- function(formula, data, n = 1000, mixture_groups = NULL,
-                              nBoot = 200, glmnet_alpha = c(1),
-                              weight_scheme = c("SVEM"),
-                              objective = c("wAIC", "wSSE"),
-                              debias = FALSE, ...) {
-  objective <- match.arg(objective)
-  weight_scheme <- match.arg(weight_scheme)
-  data <- as.data.frame(data)
-
-  # Fit the model
-  svem_model <- SVEMnet(formula, data = data, nBoot = nBoot,
-                        glmnet_alpha = glmnet_alpha,
-                        weight_scheme = weight_scheme,
-                        objective = objective, ...)
-
-  # Parse model terms
-  mf <- model.frame(formula, data)
-  y_var <- as.character(formula[[2]])
-  predictor_vars <- all.vars(delete.response(terms(formula, data = data)))
-
-  # Identify types
-  is_cat <- vapply(data[predictor_vars], function(x) is.factor(x) || is.character(x), logical(1))
-  is_num <- vapply(data[predictor_vars], is.numeric, logical(1))
-  categorical_vars <- predictor_vars[is_cat]
-  continuous_vars  <- predictor_vars[is_num]
-
-  # Collect mixture vars (and guard against overlaps)
-  mixture_vars <- character(0)
-  if (!is.null(mixture_groups)) {
-    for (grp in mixture_groups) mixture_vars <- c(mixture_vars, grp$vars)
-    if (any(duplicated(mixture_vars))) {
-      dups <- unique(mixture_vars[duplicated(mixture_vars)])
-      stop("Mixture variables appear in multiple groups: ", paste(dups, collapse = ", "))
-    }
+svem_random_table_from_model <- function(object, n = 1000, mixture_groups = NULL, debias = FALSE) {
+  if (!inherits(object, "svem_model")) stop("object must be a 'svem_model' from SVEMnet().")
+  if (is.null(object$sampling_schema) || !is.list(object$sampling_schema)) {
+    stop("object$sampling_schema is missing. Refit with the updated SVEMnet() that records sampling_schema.")
   }
-  nonmix_continuous <- setdiff(continuous_vars, mixture_vars)
+  ss <- object$sampling_schema
+  predictor_vars <- ss$predictor_vars
+  var_classes    <- ss$var_classes
+  num_ranges     <- ss$num_ranges           # 2 x K matrix, rownames c('min','max')
+  factor_levels  <- ss$factor_levels        # named list
 
-  # Non-mixture continuous via maximin LHS
-  if (length(nonmix_continuous) > 0) {
-    ranges <- vapply(data[nonmix_continuous],
-                     function(col) {
-                       r <- range(col, na.rm = TRUE)
-                       if (!is.finite(r[1]) || !is.finite(r[2])) r <- c(0, 1)
-                       r
-                     },
-                     numeric(2))
-    T_continuous_raw <- as.matrix(lhs::maximinLHS(n, length(nonmix_continuous)))
-    T_continuous <- matrix(NA_real_, nrow = n, ncol = length(nonmix_continuous))
-    colnames(T_continuous) <- nonmix_continuous
-    for (i in seq_along(nonmix_continuous)) {
-      T_continuous[, i] <- T_continuous_raw[, i] * (ranges[2, i] - ranges[1, i]) + ranges[1, i]
-    }
-    T_continuous <- as.data.frame(T_continuous)
-  } else {
-    T_continuous <- NULL
-  }
+  if (!length(predictor_vars)) stop("No predictor variables found in sampling_schema.")
 
-  # Mixture groups: truncated-simplex Dirichlet with rejection on upper
+  # Partition variables
+  is_num <- names(var_classes)[var_classes %in% c("numeric","integer")]
+  is_cat <- setdiff(predictor_vars, is_num)
+
+  # Helper: truncated-simplex Dirichlet sampler (with upper-bound rejection)
   .sample_trunc_dirichlet <- function(n, lower, upper, total,
-                                      alpha = NULL, oversample = 4, max_tries = 10000L) {
+                                      alpha = NULL, oversample = 4L, max_tries = 10000L) {
     k <- length(lower)
-    if (length(upper) != k) stop("upper must have length equal to lower.")
+    if (length(upper) != k) stop("upper must have same length as lower.")
     if (is.null(alpha)) alpha <- rep(1, k)
 
-    min_sum <- sum(lower)
-    max_sum <- sum(upper)
+    min_sum <- sum(lower); max_sum <- sum(upper)
     if (total < min_sum - 1e-12 || total > max_sum + 1e-12) {
       stop("Infeasible mixture constraints: need sum(lower) <= total <= sum(upper).")
     }
 
     avail <- total - min_sum
-    if (avail <= 1e-12) {
-      return(matrix(rep(lower, each = n), nrow = n))
-    }
+    if (avail <= 1e-12) return(matrix(rep(lower, each = n), nrow = n))
 
     res <- matrix(NA_real_, nrow = n, ncol = k)
     filled <- 0L; tries <- 0L
-
     while (filled < n && tries < max_tries) {
       m <- max(oversample * (n - filled), 1L)
       g <- matrix(stats::rgamma(m * k, shape = alpha, rate = 1), ncol = k, byrow = TRUE)
@@ -210,26 +110,69 @@ svem_random_table <- function(formula, data, n = 1000, mixture_groups = NULL,
       ok <- cand <= matrix(upper, nrow = m, ncol = k, byrow = TRUE)
       ok <- rowSums(ok) == k
       if (any(ok)) {
-        keep_idx <- which(ok)
-        take <- min(length(keep_idx), n - filled)
-        res[(filled + 1):(filled + take), ] <- cand[keep_idx[seq_len(take)], , drop = FALSE]
+        keep <- which(ok)
+        take <- min(length(keep), n - filled)
+        res[(filled + 1):(filled + take), ] <- cand[keep[seq_len(take)], , drop = FALSE]
         filled <- filled + take
       }
       tries <- tries + 1L
     }
-
     if (filled < n) {
       stop("Could not sample enough feasible mixture points within max_tries. ",
-           "Try relaxing upper bounds or increasing 'oversample'/'max_tries'.")
+           "Relax bounds or increase oversample/max_tries.")
     }
     res
   }
 
-  T_mixture <- NULL
+  # Track any mixture variables (to avoid double-sampling them as 'numeric')
+  mixture_vars <- character(0)
   if (!is.null(mixture_groups)) {
+    # Validate groups and collect names
+    for (grp in mixture_groups) {
+      if (is.null(grp$vars)) stop("Each mixture group must contain a 'vars' character vector.")
+      if (!all(grp$vars %in% predictor_vars)) {
+        missing <- setdiff(grp$vars, predictor_vars)
+        stop("Mixture variables not in model predictors: ", paste(missing, collapse = ", "))
+      }
+      mixture_vars <- c(mixture_vars, grp$vars)
+    }
+    # No variable may appear in more than one group
+    if (any(duplicated(mixture_vars))) {
+      dups <- unique(mixture_vars[duplicated(mixture_vars)])
+      stop("Mixture variables appear in multiple groups: ", paste(dups, collapse = ", "))
+    }
+  }
+
+  # ----- Sample non-mixture numeric variables (uniform over cached ranges) -----
+  nonmix_num <- setdiff(is_num, mixture_vars)
+  T_num <- NULL
+  if (length(nonmix_num)) {
+    # If any numeric var has a degenerate or missing range, fall back to [0,1]
+    rng <- vapply(nonmix_num, function(v) {
+      if (!is.null(num_ranges) && ncol(num_ranges) && v %in% colnames(num_ranges)) {
+        r <- num_ranges[, v]
+        if (!all(is.finite(r)) || r[1] >= r[2]) c(0, 1) else r
+      } else {
+        c(0, 1)
+      }
+    }, numeric(2))
+    # Latin hypercube in [0,1] then map to ranges
+    U <- as.matrix(lhs::maximinLHS(n, length(nonmix_num)))
+    T_num <- matrix(NA_real_, nrow = n, ncol = length(nonmix_num))
+    colnames(T_num) <- nonmix_num
+    for (j in seq_along(nonmix_num)) {
+      lo <- rng[1, j]; hi <- rng[2, j]
+      T_num[, j] <- lo + (hi - lo) * U[, j]
+    }
+    T_num <- as.data.frame(T_num)
+  }
+
+  # ----- Sample mixture groups (Dirichlet on truncated simplex) -----
+  T_mix <- NULL
+  if (!is.null(mixture_groups) && length(mixture_groups)) {
     all_mix_vars <- unlist(lapply(mixture_groups, `[[`, "vars"))
-    T_mixture <- matrix(NA_real_, nrow = n, ncol = length(all_mix_vars))
-    colnames(T_mixture) <- all_mix_vars
+    T_mix <- matrix(NA_real_, nrow = n, ncol = length(all_mix_vars))
+    colnames(T_mix) <- all_mix_vars
 
     for (grp in mixture_groups) {
       vars  <- grp$vars
@@ -240,49 +183,60 @@ svem_random_table <- function(formula, data, n = 1000, mixture_groups = NULL,
 
       if (length(lower) != k || length(upper) != k) {
         stop("lower and upper must each have length equal to the number of mixture variables (",
-             paste(vars, collapse = ","), ").")
+             paste(vars, collapse = ", "), ").")
       }
       vals <- .sample_trunc_dirichlet(n, lower, upper, total)
       colnames(vals) <- vars
-      T_mixture[, vars] <- vals
+      T_mix[, vars] <- vals
     }
-    T_mixture <- as.data.frame(T_mixture)
+    T_mix <- as.data.frame(T_mix)
   }
 
-  # Categorical sampling (force factors even if source was character)
-  T_categorical <- NULL
-  if (length(categorical_vars) > 0) {
-    T_categorical <- vector("list", length(categorical_vars))
-    names(T_categorical) <- categorical_vars
-    for (v in categorical_vars) {
-      x <- data[[v]]
-      if (is.factor(x)) {
-        lev <- levels(x)
-        T_categorical[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
-      } else {
-        lev <- sort(unique(as.character(x)))
-        T_categorical[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
-      }
+  # ----- Sample categorical variables (use cached level sets) -----
+  T_cat <- NULL
+  if (length(is_cat)) {
+    T_cat <- vector("list", length(is_cat))
+    names(T_cat) <- is_cat
+    for (v in is_cat) {
+      lev <- factor_levels[[v]]
+      # If no cached levels (shouldn't happen with updated SVEMnet), fallback to two dummy levels
+      if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
+      T_cat[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
     }
-    T_categorical <- as.data.frame(T_categorical, stringsAsFactors = FALSE)
+    T_cat <- as.data.frame(T_cat, stringsAsFactors = FALSE)
   }
 
-  # Combine
-  parts <- list(T_continuous, T_mixture, T_categorical)
+  # ----- Combine into a single raw data frame aligned to predictor names -----
+  parts <- list(T_num, T_mix, T_cat)
   parts <- parts[!vapply(parts, is.null, logical(1))]
-  if (length(parts) == 0) stop("No predictors provided.")
+  if (!length(parts)) stop("No predictors could be sampled from the schema.")
   T_data <- do.call(cbind, parts)
 
-  # Align column order to model predictors if possible
-  common <- intersect(predictor_vars, colnames(T_data))
-  T_data <- T_data[, common, drop = FALSE]
+  # Ensure all predictors present (fill missing with sensible defaults)
+  missing_pred <- setdiff(predictor_vars, colnames(T_data))
+  if (length(missing_pred)) {
+    for (v in missing_pred) {
+      if (v %in% names(var_classes) && var_classes[[v]] %in% c("numeric","integer")) {
+        # fallback numeric in [0,1]
+        T_data[[v]] <- runif(n)
+      } else {
+        # fallback factor with a single dummy level
+        T_data[[v]] <- factor(rep("L1", n))
+      }
+    }
+  }
 
-  # Predict
-  preds <- predict(svem_model, newdata = T_data, debias = debias)
+  # Order columns like predictor_vars (not strictly necessary, but tidy)
+  T_data <- T_data[, predictor_vars, drop = FALSE]
+
+  # ----- Predict using the fitted model -----
+  preds <- predict(object, newdata = T_data, debias = debias)
   if (is.list(preds) && !is.null(preds$fit)) preds <- preds$fit
 
+  # Name response from stored formula
+  resp_name <- tryCatch(as.character(object$formula[[2]]), error = function(e) "yhat")
   out <- T_data
-  out[[y_var]] <- as.numeric(preds)
+  out[[resp_name]] <- as.numeric(preds)
   rownames(out) <- NULL
   out
 }

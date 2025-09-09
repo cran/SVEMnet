@@ -9,8 +9,8 @@
 \arguments{
 \item{x}{An object of class \code{svem_significance_test}.}
 
-\item{...}{Additional arguments (not used).}
+\item{...}{Additional arguments (unused).}
 }
 \description{
-Prints the p-value from an object of class \code{svem_significance_test}.
+Prints the median p-value from an object of class \code{svem_significance_test}.
 }

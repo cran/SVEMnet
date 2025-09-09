@@ -2,17 +2,18 @@
 % Please edit documentation in R/SVEMnet.R
 \name{SVEMnet}
 \alias{SVEMnet}
-\title{Fit an SVEMnet Model}
+\title{Fit an SVEMnet Model (with optional relaxed elastic net)}
 \usage{
 SVEMnet(
   formula,
   data,
-  nBoot = 300,
-  glmnet_alpha = c(1),
+  nBoot = 200,
+  glmnet_alpha = c(0.25, 0.5, 0.75, 1),
   weight_scheme = c("SVEM", "FWR", "Identity"),
-  objective = c("wAIC", "wBIC", "wGIC", "wSSE"),
+  objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+  auto_ratio_cutoff = 1.3,
   gamma = 2,
-  standardize = TRUE,
+  relaxed = TRUE,
   ...
 )
 }
@@ -21,139 +22,163 @@ SVEMnet(
 
 \item{data}{A data frame containing the variables in the model.}
 
-\item{nBoot}{Number of bootstrap iterations (default is 300).}
+\item{nBoot}{Number of bootstrap iterations (default 200).}
 
-\item{glmnet_alpha}{Elastic Net mixing parameter(s) (default is \code{c(1)}).
-Can be a vector of alpha values, where \code{alpha = 1} is Lasso and \code{alpha = 0} is Ridge.}
+\item{glmnet_alpha}{Elastic Net mixing parameter(s). May be a vector with entries in the range between 0 and 1, inclusive,
+where alpha = 1 is Lasso and alpha = 0 is Ridge. Defaults to c(0.25, 0.5, 0.75, 1).}
 
 \item{weight_scheme}{Weighting scheme for SVEM (default "SVEM").
-One of \code{"SVEM"}, \code{"FWR"}, or \code{"Identity"}.}
+One of "SVEM", "FWR", or "Identity".}
 
-\item{objective}{Objective used to pick \code{lambda} on each bootstrap path (default "wAIC").
-One of \code{"wAIC"}, \code{"wBIC"}, \code{"wGIC"}, or \code{"wSSE"}.}
+\item{objective}{Objective used to pick lambda on each bootstrap path
+(default "auto"). One of "auto", "wAIC", "wBIC", "wGIC", or "wSSE".}
 
-\item{gamma}{Penalty weight used only when \code{objective="wGIC"} (numeric, default \code{2}).
-Setting \code{gamma = 2} reproduces wAIC.}
+\item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
+objective = "auto" (default 1.3). Let r = n_X / p_X, where n_X is the
+number of training rows and p_X is the number of predictors in the model
+matrix after dropping the intercept column. If r >= auto_ratio_cutoff,
+SVEMnet uses wAIC; otherwise it uses wBIC.}
 
-\item{standardize}{Logical; passed to \code{glmnet} (default \code{TRUE}).}
+\item{gamma}{Penalty weight used only when objective = "wGIC" (numeric, default 2).
+Setting gamma = 2 reproduces wAIC. Larger values approach a BIC-like penalty.}
 
-\item{...}{Additional args to \code{glmnet()}.}
+\item{relaxed}{Logical, TRUE or FALSE (default TRUE). When TRUE, use glmnet's
+relaxed elastic net path and select both lambda and relaxed gamma on each bootstrap.
+When FALSE, fit the standard glmnet path (equivalent to gamma = 1).
+Note: if relaxed = TRUE and glmnet_alpha includes 0 (ridge), alpha = 0 is dropped.}
+
+\item{...}{Additional args passed to glmnet() (e.g., penalty.factor,
+lower.limits, upper.limits, offset, standardize.response, etc.).
+Any user-supplied weights are ignored so SVEM can supply its own bootstrap weights.
+Any user-supplied standardize is ignored; SVEMnet always uses standardize = TRUE.}
 }
 \value{
-An object of class \code{svem_model}.
+An object of class svem_model with elements:
+\itemize{
+\item parms: averaged coefficients (including intercept).
+\item parms_debiased: averaged coefficients adjusted by the calibration fit.
+\item debias_fit: lm(y ~ y_pred) calibration model used for debiasing (or NULL).
+\item coef_matrix: per-bootstrap coefficient matrix.
+\item nBoot, glmnet_alpha, best_alphas, best_lambdas, weight_scheme, relaxed.
+\item best_relax_gammas: per-bootstrap relaxed gamma chosen (NA if relaxed = FALSE).
+\item objective_input, objective_used, objective (same as objective_used),
+auto_used, auto_decision, auto_rule, gamma (when wGIC).
+\item dropped_alpha0_for_relaxed: whether alpha = 0 was removed because relaxed = TRUE.
+\item schema: list(feature_names, terms_str, xlevels, contrasts, terms_hash) for safe predict.
+\item sampling_schema: list(
+predictor_vars, var_classes,
+num_ranges = rbind(min=..., max=...) for numeric raw predictors,
+factor_levels = list(...) for factor/character raw predictors).
+\item diagnostics: list with k_summary (median and IQR of selected size),
+fallback_rate, n_eff_summary, alpha_freq, relax_gamma_freq.
+\item actual_y, training_X, y_pred, y_pred_debiased, nobs, nparm, formula, terms,
+xlevels, contrasts.
+}
 }
 \description{
-Wrapper for 'glmnet' (Friedman et al. 2010) to fit an ensemble of Elastic Net
-models using the Self-Validated Ensemble Model method (SVEM, Lemkus et al. 2021).
-Allows searching over multiple alpha values in the Elastic Net penalty.
+Wrapper for glmnet (Friedman et al. 2010) to fit an ensemble of Elastic Net
+models using the Self-Validated Ensemble Model method (SVEM; Lemkus et al. 2021),
+with an option to use glmnet's built-in relaxed elastic net (Meinshausen 2007).
+Supports searching over multiple alpha values in the Elastic Net penalty.
 }
 \details{
-The Self-Validated Ensemble Model (SVEM, Lemkus et al., 2021) framework provides a bootstrap
-approach to improve predictions from base learners, including Elastic Net regression
-as implemented in \code{glmnet}. In each of the \code{nBoot} iterations, SVEMnet applies
-random exponentially distributed weights to the observations; anti-correlated weights are
-used for validation when \code{weight_scheme="SVEM"}.
+SVEM applies fractional bootstrap weights to training data and anti-correlated
+weights for validation when weight_scheme = "SVEM". For each bootstrap, glmnet
+paths are fit for each alpha in glmnet_alpha, and the lambda (and, if relaxed = TRUE,
+relaxed gamma) minimizing a weighted validation criterion is selected.
 
-SVEMnet allows \code{glmnet_alpha} to be a vector, enabling a search over multiple Elastic Net
-mixing parameters within each bootstrap. The \code{objective} controls how the validation
-criterion balances fit and complexity:
+Predictors are always standardized internally via glmnet::glmnet(..., standardize = TRUE).
 
-\describe{
-  \item{\code{"wSSE"}}{Weighted Sum of Squared Errors: uses the weighted validation SSE directly.}
-  \item{\code{"wAIC"}}{Weighted AIC (Gaussian): \code{AIC = n * log(SSE_w / n) + 2 * k},
-        where \code{n = sum(w_valid)} (after normalization) and \code{k} counts parameters
-        including the intercept. Candidates require \code{k < n}.}
-  \item{\code{"wBIC"}}{Weighted BIC-like criterion: \code{n * log(SSE_w / n) + log(n_eff) * k},
-        with \code{n_eff = (sum(w_valid)^2) / sum(w_valid^2)} (Kish). For stability, \code{n_eff}
-        is clipped to \code{[5, n]}. Candidates require \code{k < n} and \code{k < n_eff - 1}.}
-  \item{\code{"wGIC"}}{Weighted Generalized Information Criterion:
-        \code{n * log(SSE_w / n) + gamma * k}. Here \code{gamma} is a fixed nonnegative number.
-        For robustness near the boundary, candidates require \code{k < n} and \code{k < n_eff - 1}.}
+When relaxed = TRUE, coef(fit, s = lambda, gamma = g) is used to obtain the
+coefficient path at each relaxed gamma in the internal grid. Metrics are computed
+from validation-weighted errors and model size is taken as the number of nonzero
+coefficients including the intercept (support size), keeping selection consistent
+between standard and relaxed paths. When relaxed = FALSE, gamma is fixed at 1.
+
+Automatic objective rule ("auto"): This function uses a single ratio cutoff,
+auto_ratio_cutoff, applied to r = n_X / p_X, where p_X is computed from
+the model matrix with the intercept column removed. If r >= auto_ratio_cutoff
+the selection criterion is wAIC; otherwise it is wBIC.
+
+Implementation notes for safety:
+\itemize{
+\item The training terms object is stored with environment set to baseenv() to avoid
+accidental lookups in the calling environment.
+\item A compact schema (feature names, xlevels, contrasts) is stored to let predict()
+reconstruct the design matrix deterministically.
+\item A lightweight sampling schema (numeric ranges and factor levels for raw predictors)
+is cached to enable random-table generation without needing the original data.
 }
-
-\strong{Note on BIC:} In reweighted validation, information content varies with weight
-heterogeneity; using \code{log(n_eff)} adapts the penalty to that effective size. With uniform
-weights (Identity), \code{n_eff = n} and you recover standard BIC.
-
-A debiased fit is output (along with the standard fit). This is provided to allow the user to
-match the output of JMP, which returns a debiased fit whenever \code{nBoot >= 10}.
-The debiasing coefficients are always calculated by \code{SVEMnet()}, and the
-\code{predict()} method determines whether the raw or debiased predictions are returned via its
-\code{debias} argument. The default is \code{debias = FALSE}, based on performance on unpublished simulations.
-
-The returned object includes averaged coefficients (\code{parms}), debiased coefficients
-(\code{parms_debiased}), the calibration fit (\code{debias_fit}), per-bootstrap coefficients,
-chosen alphas and lambdas, the chosen \code{objective} (and \code{gamma} if applicable), and a
-compact \code{diagnostics} list (median/IQR of selected model size and alpha frequencies).
 }
 \section{Acknowledgments}{
 
-Development of this package was assisted by GPT o1-preview, which helped in constructing the
-structure of some of the code and the roxygen documentation. The code for the significance test
-is taken from the supplementary material of Karl (2024) (it was handwritten by that author).
+Development of this package was assisted by GPT o1-preview for structuring parts of the code
+and documentation.
 }
 
 \examples{
-# Simulate data
-set.seed(0)
-n <- 21
-X1 <- runif(n)
-X2 <- runif(n)
-X3 <- runif(n)
-y <- 1 + 2*X1 + 3*X2 + X1*X2 + X1^2  + rnorm(n)
-data <- data.frame(y, X1, X2, X3)
+set.seed(42)
 
-# Fit the SVEMnet model with a formula
-model <- SVEMnet(
-  y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2) + I(X3^2),
-  glmnet_alpha = c(1),
-  data = data
+n  <- 30
+X1 <- rnorm(n)
+X2 <- rnorm(n)
+X3 <- rnorm(n)
+eps <- rnorm(n, sd = 0.5)
+y <- 1 + 2*X1 - 1.5*X2 + 0.5*X3 + 1.2*(X1*X2) + 0.8*(X1^2) + eps
+dat <- data.frame(y, X1, X2, X3)
+
+mod_relax <- SVEMnet(
+  y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
+  data          = dat,
+  glmnet_alpha  = c(1, 0.5),
+  nBoot         = 75,
+  objective     = "auto",
+  weight_scheme = "SVEM",
+  relaxed       = FALSE #to run faster to pass CRAN checks
 )
-coef(model)
-plot(model)
-predict(model, data)
 
-# Example: BIC-like penalty
-# model_bic <- SVEMnet(y ~ X1 + X2 + X3, data = data, objective = "wBIC")
-# Example: GIC with custom gamma
-# model_gic <- SVEMnet(y ~ X1 + X2 + X3, data = data, objective = "wGIC", gamma = 4)
+pred_in_raw <- predict(mod_relax, dat, debias = FALSE)
+pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 
 }
 \references{
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using
-Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}.
-\url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+Bootstrapping Techniques With Applications to Biopharmaceuticals. JMP Discovery Conference.
+https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated
-Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122.
-\doi{10.1016/j.chemolab.2024.105122}
+Ensemble Models (SVEM). Chemometrics and Intelligent Laboratory Systems, 249, 105122.
+doi:10.1016/j.chemolab.2024.105122
 
 Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with
-Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+Mixture Experiments. JMP Discovery Conference. doi:10.13140/RG.2.2.34598.40003/1
 
 Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for
-Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439.
-\doi{10.1016/j.chemolab.2021.104439}
+Design of Experiments. Chemometrics and Intelligent Laboratory Systems, 219, 104439.
+doi:10.1016/j.chemolab.2021.104439
 
 Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the
-Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358.
-\doi{10.1080/00031305.2020.1731599}
+Fractional-Random-Weight Bootstrap. The American Statistician, 74(4), 345-358.
+doi:10.1080/00031305.2020.1731599
 
 Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture
-Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}.
-\url{ https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+Designs, Neural Networks and SVEM. JMP Discovery Conference.
+https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841
 
 Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using
-Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}.
-\url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+Bootstrapping Techniques With Applications to Biopharmaceuticals. JMP Discovery Conference - Europe.
+https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true
 
 Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and
-Analysis of Experiments. \emph{JMP Discovery Conference - Europe}.
-\url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+Analysis of Experiments. JMP Discovery Conference - Europe.
+https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634
 
 Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity:
-It’s All About Prediction. \emph{JMP Discovery Conference}.
+It's All About Prediction. JMP Discovery Conference.
 
 Friedman, J. H., Hastie, T., & Tibshirani, R. (2010). Regularization Paths for Generalized
-Linear Models via Coordinate Descent. \emph{Journal of Statistical Software}, 33(1), 1–22.
+Linear Models via Coordinate Descent. Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
 }

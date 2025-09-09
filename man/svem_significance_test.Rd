@@ -9,13 +9,16 @@ svem_significance_test(
   data,
   mixture_groups = NULL,
   nPoint = 2000,
-  nSVEM = 5,
-  nPerm = 125,
-  percent = 85,
-  nBoot = 200,
+  nSVEM = 10,
+  nPerm = 150,
+  percent = 90,
+  nBoot = 100,
   glmnet_alpha = c(1),
   weight_scheme = c("SVEM"),
-  objective = c("wAIC", "wSSE"),
+  objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+  auto_ratio_cutoff = 1.3,
+  gamma = 2,
+  relaxed = FALSE,
   verbose = TRUE,
   ...
 )
@@ -26,138 +29,88 @@ svem_significance_test(
 \item{data}{A data frame containing the variables in the model.}
 
 \item{mixture_groups}{Optional list describing one or more mixture factor
-groups.  Each element of the list should be a list with components
-`vars` (character vector of column names), `lower` (numeric vector of
-lower bounds of the same length as `vars`), `upper` (numeric vector
-of upper bounds of the same length), and `total` (scalar specifying the
-sum of the mixture variables).  All mixture variables must be
-included in `vars`, and no variable can appear in more than one
-mixture group.  Defaults to `NULL` (no mixtures).}
+groups. Each element of the list should be a list with components
+\code{vars} (character vector of column names), \code{lower} (numeric vector of
+lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
+of upper bounds of the same length), and \code{total} (scalar specifying the
+sum of the mixture variables). All mixture variables must be
+included in \code{vars}, and no variable can appear in more than one
+mixture group. Defaults to \code{NULL} (no mixtures).}
 
 \item{nPoint}{Number of random points in the factor space (default: 2000).}
 
-\item{nSVEM}{Number of SVEM fits on the original data (default: 5).}
+\item{nSVEM}{Number of SVEM fits on the original data (default: 10).}
 
 \item{nPerm}{Number of SVEM fits on permuted responses for the reference
-distribution (default: 125).}
+distribution (default: 150).}
 
-\item{percent}{Percentage of variance to capture in the SVD (default: 85).}
+\item{percent}{Percentage of variance to capture in the SVD (default: 90).}
 
-\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 200).}
+\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 100).}
 
-\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: `c(1)`).}
+\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: \code{c(1)}).}
 
 \item{weight_scheme}{Weighting scheme for SVEM (default: "SVEM").}
 
-\item{objective}{Objective function for SVEM ("wAIC" or "wSSE", default: "wAIC").}
+\item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
+path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"},
+\code{"wGIC"}, \code{"wSSE"} (default: \code{"auto"}).}
 
-\item{verbose}{Logical; if `TRUE`, displays progress messages (default: `TRUE`).}
+\item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
+\code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
+\code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.}
 
-\item{...}{Additional arguments passed to `SVEMnet()` and then to `glmnet()`.}
+\item{gamma}{Penalty weight used only when \code{objective = "wGIC"} (default 2).
+Passed to \code{SVEMnet()}.}
+
+\item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner
+\code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
+lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
+glmnet path is used. This value is passed through to \code{SVEMnet()}.
+Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
+(\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.}
+
+\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
+
+\item{...}{Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
+(for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
+\code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
+setting is controlled by the \code{relaxed} argument of this function and
+any \code{relaxed} value passed via \code{...} is ignored with a warning.}
 }
 \value{
-A list of class `svem_significance_test` containing the test results.
+A list of class \code{svem_significance_test} containing:
+\itemize{
+\item \code{p_value}: median p-value across evaluation points.
+\item \code{p_values}: vector of per-point p-values.
+\item \code{d_Y}: distances for original fits.
+\item \code{d_pi_Y}: distances for permutation fits.
+\item \code{distribution_fit}: fitted SHASHo distribution object.
+\item \code{data_d}: data frame combining distances and labels.
+}
 }
 \description{
 Performs a whole-model significance test using the SVEM framework and allows
-the user to specify mixture factor groups.  Mixture factors are sets of
+the user to specify mixture factor groups. Mixture factors are sets of
 continuous variables that are constrained to sum to a constant (the
-mixture total) and have optional lower and upper bounds.  When mixture
+mixture total) and have optional lower and upper bounds. When mixture
 groups are supplied, the grid of evaluation points is generated by
 sampling Dirichlet variates over the mixture simplex rather than by
-independently sampling each continuous predictor.  Non-mixture
+independently sampling each continuous predictor. Non-mixture
 continuous predictors are sampled via a maximin Latin hypercube over
 their observed ranges, and categorical predictors are sampled from
-their observed levels.  The remainder of the algorithm follows
-`svem_significance_test()`, computing standardized predictions on the grid,
-refitting SVEM on permutations of the response, and calculating a
-Mahalanobis distance for the original and permutation fits.
+their observed levels.
 }
 \details{
-This function extends `svem_significance_test()` by allowing the user to
-specify mixture factor groups.  In a mixture group, the specified
-variables are jointly sampled from a Dirichlet distribution so that
-their values sum to the specified `total`.  Lower and upper bounds can
-be supplied to shift and scale the mixture simplex.  Feasibility is
-checked (`sum(lower) <= total <= sum(upper)`), and samples are generated
-as `lower + (total - sum(lower)) * w` for Dirichlet weights `w`, with
-rejection of any draws violating the upper bounds.  This guarantees the
-correct total while respecting all bounds.
-
 If no mixture groups are supplied, this function behaves identically
-to `svem_significance_test()`.
-}
-\examples{
-\donttest{
-  # Construct a small data set with a three-component mixture (A, B, C)
-  # Each has distinct lower/upper bounds and they sum to 1
-  set.seed(123)
-  n <- 30
+to a standard SVEM-based whole-model test, sampling non-mixture continuous
+variables via a maximin Latin hypercube within their observed ranges,
+and categorical variables from their observed levels.
 
-  # Helper used only for generating training data in this example
-  sample_trunc_dirichlet <- function(n, lower, upper, total) {
-    k <- length(lower)
-    min_sum <- sum(lower); max_sum <- sum(upper)
-    stopifnot(total >= min_sum, total <= max_sum)
-    avail <- total - min_sum
-    out <- matrix(NA_real_, n, k)
-    i <- 1L
-    while (i <= n) {
-      g <- rgamma(k, 1, 1)
-      w <- g / sum(g)
-      x <- lower + avail * w
-      if (all(x <= upper + 1e-12)) {
-        out[i, ] <- x
-        i <- i + 1L
-      }
-    }
-    out
-  }
-
-  # Three mixture components with distinct bounds; sum to 1
-  lower <- c(0.10, 0.20, 0.05)  # for A, B, C
-  upper <- c(0.60, 0.70, 0.50)
-  total <- 1.0
-  ABC   <- sample_trunc_dirichlet(n, lower, upper, total)
-  A <- ABC[, 1]; B <- ABC[, 2]; C <- ABC[, 3]
-
-  # Additional predictors
-  X <- runif(n)
-  F <- factor(sample(c("red", "blue"), n, replace = TRUE))
-
-  # Response
-  y <- 2 + 3*A + 1.5*B + 1.2*C + 0.5*X + 1*(F == "red") + rnorm(n, sd = 0.3)
-  dat <- data.frame(y = y, A = A, B = B, C = C, X = X, F = F)
-
-  # Specify the mixture group for A, B, C
-  mix_spec <- list(
-    list(
-      vars  = c("A", "B", "C"),
-      lower = c(0.10, 0.20, 0.05),
-      upper = c(0.60, 0.70, 0.50),
-      total = 1.0
-    )
-  )
-
-  # Run the whole-model significance test on this mixture model
-  test_res <- svem_significance_test(
-    y ~ A + B + C + X + F,
-    data           = dat,
-    mixture_groups = mix_spec,
-    nPoint         = 200,
-    nSVEM          = 3,
-    nPerm          = 50,
-    nBoot          = 100,
-    glmnet_alpha   = c(1),
-    weight_scheme  = "SVEM",
-    objective      = "wAIC",
-    verbose        = FALSE
-  )
-
-  print(test_res)
-  plot(test_res)
-}
+Internally, predictions at evaluation points use \code{predict.svem_model()}
+with \code{se.fit = TRUE}. Rows with unseen categorical levels are returned
+as \code{NA} and are excluded from distance summaries via \code{complete.cases()}.
 }
 \seealso{
-`svem_significance_test()`
+\code{SVEMnet()}, \code{predict.svem_model()}
 }
