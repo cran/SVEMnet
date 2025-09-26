@@ -11,7 +11,13 @@
 #' their observed ranges, and categorical predictors are sampled from
 #' their observed levels.
 #'
-#' @param formula A formula specifying the model to be tested.
+#' This function can optionally reuse a deterministic, locked expansion built
+#' with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
+#' ensure that categorical levels, contrasts, and the polynomial/interaction structure are
+#' identical across repeated calls and across multiple responses of the same factor space.
+#'
+#' @param formula A formula specifying the model to be tested. If \code{spec} is provided,
+#'   the right-hand side is ignored and replaced by the locked expansion in \code{spec}.
 #' @param data A data frame containing the variables in the model.
 #' @param mixture_groups Optional list describing one or more mixture factor
 #'   groups. Each element of the list should be a list with components
@@ -31,19 +37,28 @@
 #' @param weight_scheme Weighting scheme for SVEM (default: "SVEM").
 #' @param objective Objective used inside \code{SVEMnet()} to pick the bootstrap
 #'   path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"},
-#'   \code{"wGIC"}, \code{"wSSE"} (default: \code{"auto"}).
+#'   \code{"wSSE"} (default: \code{"auto"}).
 #' @param auto_ratio_cutoff Single cutoff for the automatic rule when
 #'   \code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
 #'   \code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.
-#' @param gamma Penalty weight used only when \code{objective = "wGIC"} (default 2).
-#'   Passed to \code{SVEMnet()}.
 #' @param relaxed Logical; default \code{FALSE}. When \code{TRUE}, inner
 #'   \code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
 #'   lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
 #'   glmnet path is used. This value is passed through to \code{SVEMnet()}.
 #'   Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
 #'   (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.
-#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).
+#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{FALSE}).
+#' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
+#'   the test reuses its locked expansion. The working formula becomes
+#'   \code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
+#'   \code{response} if supplied, otherwise from the left-hand side of \code{formula}.
+#'   Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
+#'   when available.
+#' @param response Optional character name for the response variable to use when \code{spec}
+#'   is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.
+#' @param use_spec_contrasts Logical; default \code{TRUE}. When \code{spec} is supplied and
+#'   \code{use_spec_contrasts=TRUE}, the function temporarily replays \code{spec$settings$contrasts_options}
+#'   for deterministic coding, then restores the caller's options on exit.
 #' @param ... Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
 #'   (for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
 #'   \code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
@@ -70,20 +85,28 @@
 #' with \code{se.fit = TRUE}. Rows with unseen categorical levels are returned
 #' as \code{NA} and are excluded from distance summaries via \code{complete.cases()}.
 #'
-#' @seealso \code{SVEMnet()}, \code{predict.svem_model()}
+#' When reusing a \code{spec}, you can fit many responses independently over the
+#' same encoded factor space by calling this function repeatedly with different
+#' \code{response} values.
+#'
+#' @seealso \code{SVEMnet()}, \code{predict.svem_model()}, \code{bigexp_terms()}, \code{bigexp_formula()}
+#' @template ref-svem
 #' @importFrom stats model.frame model.response model.matrix terms delete.response
-#' @importFrom stats rgamma sd coef predict
+#' @importFrom stats rgamma sd coef predict complete.cases median
 #' @export
 svem_significance_test <- function(formula, data, mixture_groups = NULL,
                                    nPoint = 2000, nSVEM = 10, nPerm = 150,
                                    percent = 90, nBoot = 100,
                                    glmnet_alpha = c(1),
                                    weight_scheme = c("SVEM"),
-                                   objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+                                   objective = c("auto", "wAIC", "wBIC", "wSSE"),
                                    auto_ratio_cutoff = 1.3,
-                                   gamma = 2,
                                    relaxed = FALSE,
-                                   verbose = TRUE, ...) {
+                                   verbose = FALSE,
+                                   spec = NULL,
+                                   response = NULL,
+                                   use_spec_contrasts = TRUE,
+                                   ...) {
   # Dependencies used via :: must be available
   if (!requireNamespace("lhs", quietly = TRUE)) {
     stop("Package 'lhs' not found. Please install it to use svem_significance_test().")
@@ -97,7 +120,32 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
   weight_scheme <- match.arg(weight_scheme)
   data <- as.data.frame(data)
 
-  # Sanitize ... so our explicit 'relaxed' cannot be double-specified
+  # Build working formula, optionally from spec (locks expansion)
+  if (!is.null(spec)) {
+    resp_name <- if (!is.null(response)) {
+      if (!is.character(response) || length(response) != 1L || !nzchar(response))
+        stop("response must be a non-empty character scalar when provided.")
+      response
+    } else {
+      as.character(formula[[2]])
+    }
+    if (!resp_name %in% names(data)) stop("Response '", resp_name, "' not found in 'data'.")
+    f_use <- bigexp_formula(spec, resp_name)
+  } else {
+    f_use <- formula
+    resp_name <- as.character(formula[[2]])
+  }
+
+  # Temporarily pin contrasts (spec's options when requested, else caller's current)
+  contrasts_opts <- if (!is.null(spec) && isTRUE(use_spec_contrasts)) {
+    spec$settings$contrasts_options %||% getOption("contrasts")
+  } else {
+    getOption("contrasts")
+  }
+  old_opts <- options(contrasts = contrasts_opts)
+  on.exit(options(old_opts), add = TRUE)
+
+  # Sanitize ... so explicit 'relaxed' cannot be double-specified
   dots <- list(...)
   if ("relaxed" %in% names(dots)) {
     warning("Ignoring 'relaxed' in '...'; use the 'relaxed' argument of svem_significance_test().")
@@ -105,16 +153,21 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
   }
 
   # Training design summary (ranges/levels)
-  mf <- stats::model.frame(formula, data)
+  mf <- stats::model.frame(f_use, data)
   y  <- stats::model.response(mf)
-  X  <- stats::model.matrix(formula, mf)
-  intercept_col <- which(colnames(X) == "(Intercept)")
-  if (length(intercept_col) > 0) X <- X[, -intercept_col, drop = FALSE]
 
-  predictor_vars  <- base::all.vars(stats::delete.response(stats::terms(formula, data = data)))
-  predictor_types <- sapply(data[predictor_vars], class)
-  continuous_vars  <- predictor_vars[!predictor_types %in% c("factor", "character")]
-  categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character")]
+  # Determine raw predictors and their types for sampling
+  if (!is.null(spec)) {
+    predictor_vars   <- spec$vars
+    is_cat           <- spec$is_cat
+    categorical_vars <- names(is_cat)[is_cat]
+    continuous_vars  <- names(is_cat)[!is_cat]
+  } else {
+    predictor_vars  <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data)))
+    predictor_types <- vapply(data[predictor_vars], function(z) class(z)[1L], character(1))
+    categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character", "logical")]
+    continuous_vars  <- setdiff(predictor_vars, categorical_vars)
+  }
 
   # Identify mixture vars
   mixture_vars <- character(0)
@@ -127,21 +180,35 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
   }
   nonmix_continuous_vars <- setdiff(continuous_vars, mixture_vars)
 
-  # Non-mixture continuous via maximin LHS over observed ranges
+  # Non-mixture continuous via maximin LHS over ranges (prefer spec$num_range)
   if (length(nonmix_continuous_vars) > 0) {
-    ranges <- sapply(data[nonmix_continuous_vars], function(col) range(col, na.rm = TRUE))
+    if (!is.null(spec) && ncol(spec$num_range) > 0) {
+      rng_mat <- spec$num_range[, colnames(spec$num_range) %in% nonmix_continuous_vars, drop = FALSE]
+      missing <- setdiff(nonmix_continuous_vars, colnames(rng_mat))
+      if (length(missing)) {
+        add <- sapply(data[missing], function(col) range(col, na.rm = TRUE))
+        rownames(add) <- c("min","max")
+        rng_mat <- cbind(rng_mat, add)
+      }
+      rng_mat <- rng_mat[, nonmix_continuous_vars, drop = FALSE]
+    } else {
+      rng_mat <- sapply(data[nonmix_continuous_vars], function(col) range(col, na.rm = TRUE))
+      rownames(rng_mat) <- c("min","max")
+    }
+
     T_continuous_raw <- as.matrix(lhs::maximinLHS(nPoint, length(nonmix_continuous_vars)))
     T_continuous <- matrix(NA_real_, nrow = nPoint, ncol = length(nonmix_continuous_vars))
     colnames(T_continuous) <- nonmix_continuous_vars
     for (i in seq_along(nonmix_continuous_vars)) {
-      T_continuous[, i] <- T_continuous_raw[, i] * (ranges[2, i] - ranges[1, i]) + ranges[1, i]
+      lo <- rng_mat["min", i]; hi <- rng_mat["max", i]
+      T_continuous[, i] <- T_continuous_raw[, i] * (hi - lo) + lo
     }
     T_continuous <- as.data.frame(T_continuous)
   } else {
     T_continuous <- NULL
   }
 
-  # Mixture sampling with truncation
+  # Truncated Dirichlet sampler for mixture groups
   .sample_trunc_dirichlet <- function(n, lower, upper, total,
                                       alpha = NULL, oversample = 4L, max_tries = 10000L) {
     k <- length(lower)
@@ -184,6 +251,7 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
     res
   }
 
+  # Mixture evaluation points
   T_mixture <- NULL
   if (!is.null(mixture_groups)) {
     mix_all_vars <- unlist(lapply(mixture_groups, `[[`, "vars"))
@@ -209,44 +277,52 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
     T_mixture <- as.data.frame(T_mixture)
   }
 
-  # Categorical sampling (use observed levels; keep training levels attribute for factors)
+  # Categorical sampling (prefer spec$levels when available)
   T_categorical <- NULL
   if (length(categorical_vars) > 0) {
     T_categorical <- vector("list", length(categorical_vars))
     names(T_categorical) <- categorical_vars
     for (v in categorical_vars) {
-      x <- data[[v]]
-      if (is.factor(x)) {
-        obs_lev <- levels(base::droplevels(x))
-        T_categorical[[v]] <- factor(
-          sample(obs_lev, nPoint, replace = TRUE),
-          levels = levels(x)
-        )
+      if (!is.null(spec)) {
+        lv <- spec$levels[[v]]
+        if (is.null(lv)) lv <- sort(unique(as.character(data[[v]])))
+        T_categorical[[v]] <- factor(sample(lv, nPoint, replace = TRUE), levels = lv)
       } else {
-        obs_lev <- sort(unique(as.character(x)))
-        T_categorical[[v]] <- factor(
-          sample(obs_lev, nPoint, replace = TRUE),
-          levels = obs_lev
-        )
+        x <- data[[v]]
+        if (is.factor(x)) {
+          obs_lev <- levels(base::droplevels(x))
+          T_categorical[[v]] <- factor(
+            sample(obs_lev, nPoint, replace = TRUE),
+            levels = levels(x)
+          )
+        } else {
+          obs_lev <- sort(unique(as.character(x)))
+          T_categorical[[v]] <- factor(
+            sample(obs_lev, nPoint, replace = TRUE),
+            levels = obs_lev
+          )
+        }
       }
     }
     T_categorical <- as.data.frame(T_categorical, stringsAsFactors = FALSE)
   }
 
+  # Assemble evaluation grid
   parts <- list(T_continuous, T_mixture, T_categorical)
   parts <- parts[!vapply(parts, is.null, logical(1))]
   if (length(parts) == 0) stop("No predictors provided.")
   T_data <- do.call(cbind, parts)
 
+  # Originals
   y_mean <- mean(y)
   M_Y <- matrix(NA_real_, nrow = nSVEM, ncol = nPoint)
   if (isTRUE(verbose)) message("Fitting SVEM models to original data with mixture handling...")
   for (i in seq_len(nSVEM)) {
     svem_model <- tryCatch({
       do.call(SVEMnet, c(list(
-        formula = formula, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
+        formula = f_use, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
         weight_scheme = weight_scheme, objective = objective,
-        auto_ratio_cutoff = auto_ratio_cutoff, gamma = gamma,
+        auto_ratio_cutoff = auto_ratio_cutoff,
         relaxed = relaxed
       ), dots))
     }, error = function(e) {
@@ -262,18 +338,19 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
     M_Y[i, ] <- h_Y
   }
 
+  # Permutations
   M_pi_Y <- matrix(NA_real_, nrow = nPerm, ncol = nPoint)
   if (isTRUE(verbose)) message("Starting permutation testing...")
   start_time_perm <- Sys.time()
   for (j in seq_len(nPerm)) {
     y_perm <- sample(y, replace = FALSE)
     data_perm <- data
-    data_perm[[as.character(formula[[2]])]] <- y_perm
+    data_perm[[resp_name]] <- y_perm
     svem_model_perm <- tryCatch({
       do.call(SVEMnet, c(list(
-        formula = formula, data = data_perm, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
+        formula = f_use, data = data_perm, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
         weight_scheme = weight_scheme, objective = objective,
-        auto_ratio_cutoff = auto_ratio_cutoff, gamma = gamma,
+        auto_ratio_cutoff = auto_ratio_cutoff,
         relaxed = relaxed
       ), dots))
     }, error = function(e) {
@@ -302,37 +379,62 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
     }
   }
 
+  # Clean and check
   M_Y    <- M_Y[stats::complete.cases(M_Y), , drop = FALSE]
   M_pi_Y <- M_pi_Y[stats::complete.cases(M_pi_Y), , drop = FALSE]
   if (nrow(M_Y) == 0) stop("All SVEM fits on the original data failed.")
   if (nrow(M_pi_Y) == 0) stop("All SVEM fits on permuted data failed.")
 
-  col_means_M_pi_Y <- colMeans(M_pi_Y)
-  col_sds_M_pi_Y   <- apply(M_pi_Y, 2, sd)
+  # Normalize by permutation mean/sd
+  col_means_M_pi_Y <- colMeans(M_pi_Y, na.rm = TRUE)
+  col_sds_M_pi_Y   <- apply(M_pi_Y, 2, sd, na.rm = TRUE)
   col_sds_M_pi_Y[col_sds_M_pi_Y == 0] <- 1e-6
+  tilde_M_pi_Y <- scale(M_pi_Y, center = col_means_M_pi_Y, scale = col_sds_M_pi_Y)
 
-  tilde_M_pi_Y  <- scale(M_pi_Y, center = col_means_M_pi_Y, scale = col_sds_M_pi_Y)
-  M_Y_centered  <- sweep(M_Y,  2, col_means_M_pi_Y, "-")
-  tilde_M_Y     <- sweep(M_Y_centered, 2, col_sds_M_pi_Y, "/")
+  M_Y_centered <- sweep(M_Y, 2, col_means_M_pi_Y, "-")
+  tilde_M_Y    <- sweep(M_Y_centered, 2, col_sds_M_pi_Y, "/")
 
+  # SVD and distances (robust against rank deficiency / zero eigenvalues)
   svd_res <- svd(tilde_M_pi_Y)
-  V <- svd_res$v; s <- svd_res$d
-  evalues_temp <- s^2
-  evalues_temp <- evalues_temp / sum(evalues_temp) * ncol(tilde_M_pi_Y)
-  cumsum_evalues <- cumsum(evalues_temp) / sum(evalues_temp) * 100
-  k_idx <- which(cumsum_evalues >= percent)[1]
-  if (is.na(k_idx)) k_idx <- length(evalues_temp)
-  evalues <- evalues_temp[1:k_idx]
-  evectors <- V[, 1:k_idx, drop = FALSE]
+  s <- svd_res$d
+  V <- svd_res$v
 
-  T2_perm <- rowSums((tilde_M_pi_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_pi_Y %*% evectors))
-  d_pi_Y  <- sqrt(T2_perm)
+  s2 <- s^2
+  if (length(s2) == 0L || sum(s2) <= .Machine$double.eps) {
+    # Degenerate case: all singular values ~ 0
+    d_pi_Y <- rep(0, nrow(tilde_M_pi_Y))
+    d_Y    <- rep(0, nrow(tilde_M_Y))
+  } else {
+    # Choose number of components by cumulative variance threshold
+    cum <- cumsum(s2) / sum(s2) * 100
+    k_idx <- which(cum >= percent)[1]
+    if (is.na(k_idx)) k_idx <- length(s2)
 
-  T2_Y <- rowSums((tilde_M_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_Y %*% evectors))
-  d_Y  <- sqrt(T2_Y)
+    # Use only positive-variance components and never exceed available columns
+    pos <- which(s2 > .Machine$double.eps)
+    if (length(pos) == 0L) {
+      d_pi_Y <- rep(0, nrow(tilde_M_pi_Y))
+      d_Y    <- rep(0, nrow(tilde_M_Y))
+    } else {
+      k_idx <- min(k_idx, length(pos), ncol(V))
+      evectors <- V[, seq_len(k_idx), drop = FALSE]
+      evalues  <- s2[seq_len(k_idx)]
+
+      Z_perm <- as.matrix(tilde_M_pi_Y) %*% evectors
+      Z_Y    <- as.matrix(tilde_M_Y)    %*% evectors
+
+      T2_perm <- rowSums((Z_perm^2) / rep(evalues, each = nrow(Z_perm)))
+      d_pi_Y  <- sqrt(T2_perm)
+
+      T2_Y <- rowSums((Z_Y^2) / rep(evalues, each = nrow(Z_Y)))
+      d_Y  <- sqrt(T2_Y)
+    }
+  }
+
 
   if (length(d_pi_Y) == 0) stop("No valid permutation distances to fit a distribution.")
 
+  # SHASHo fit
   suppressMessages({
     distribution_fit <- tryCatch({
       gamlss::gamlss(
@@ -356,11 +458,10 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
   p_values <- 1 - gamlss.dist::pSHASHo(d_Y, mu = mu, sigma = sigma, nu = nu, tau = tau)
   p_value  <- stats::median(p_values)
 
-  response_name <- as.character(formula[[2]])
   data_d <- data.frame(
     D = c(d_Y, d_pi_Y),
     Source_Type = c(rep("Original", length(d_Y)), rep("Permutation", length(d_pi_Y))),
-    Response = response_name
+    Response = resp_name
   )
 
   results_list <- list(
@@ -374,3 +475,5 @@ svem_significance_test <- function(formula, data, mixture_groups = NULL,
   class(results_list) <- "svem_significance_test"
   results_list
 }
+
+

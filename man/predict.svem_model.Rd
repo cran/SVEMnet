@@ -9,6 +9,8 @@
   newdata,
   debias = FALSE,
   se.fit = FALSE,
+  interval = FALSE,
+  level = 0.95,
   agg = c("parms", "mean"),
   ...
 )
@@ -21,7 +23,13 @@
 \item{debias}{Logical; default is FALSE. If TRUE, apply the linear calibration
 fit (y ~ y_pred) learned during training when available.}
 
-\item{se.fit}{Logical; if TRUE, returns standard errors (default FALSE).}
+\item{se.fit}{Logical; if TRUE, returns standard errors based on the bootstrap
+spread when member predictions are available (default FALSE).}
+
+\item{interval}{Logical; if TRUE, returns percentile confidence limits based
+on bootstrap predictions when available (default FALSE).}
+
+\item{level}{Confidence level for the percentile interval. Default 0.95.}
 
 \item{agg}{Aggregation method for ensemble predictions. One of "parms" (default)
 or "mean". "parms" uses the aggregated coefficients stored in object$parms
@@ -31,34 +39,38 @@ bootstrap members equally and optionally applies the debias calibration.}
 \item{...}{Additional arguments (currently unused).}
 }
 \value{
-A numeric vector of predictions, or a list with components \code{fit} and
-\code{se.fit} when \code{se.fit = TRUE}.
+A numeric vector of predictions, or a list with components as follows:
+\itemize{
+\item fit: predictions
+\item se.fit: bootstrap standard errors when se.fit = TRUE
+\item lwr, upr: percentile confidence limits when interval = TRUE
+}
 }
 \description{
-Generates predictions from a fitted svem_model.
+Generates predictions from a fitted svem_model, with optional bootstrap
+standard errors and percentile confidence intervals.
 }
 \details{
 The function uses the training terms, factor levels (xlevels), and contrasts
 saved by SVEMnet(). The terms object environment is set to baseenv() to avoid
 unexpected lookup of objects in the original environment.
 
-Column handling is strict but robust:
+Column handling follows these rules:
 \itemize{
-\item We require that the set of columns produced by \code{model.matrix} on
-\code{newdata} matches the set used in training.
-\item If \code{model.matrix} drops some training columns (e.g., a factor
-collapses to a single level in \code{newdata}), we add those missing columns
-as zeros so coefficients align.
-\item We then reorder columns to the exact training order before multiplying.
+\item The set of columns produced by model.matrix on newdata is aligned to those
+used in training.
+\item Any training columns dropped by model.matrix are added back as zeros.
+\item Columns are reordered to the exact training order before multiplication.
 }
 
-Rows in \code{newdata} that contain unseen factor levels will yield NA predictions
-(and NA standard errors if \code{se.fit=TRUE}); a warning is issued indicating how
-many rows were affected.
+Rows in newdata that contain unseen factor levels will yield NA predictions
+(and NA standard errors and intervals if requested); a warning is issued indicating
+how many rows were affected.
 
-When \code{agg="mean"}, the predictive SE is the bootstrap spread (row-wise sd of
-member predictions). If \code{debias=TRUE} and the calibration slope is available and
-finite, SEs are scaled by abs(slope).
+When agg = "mean", se.fit is the row-wise sd of member predictions. If debias = TRUE
+and a finite calibration slope is available, both member predictions and their sd
+are transformed by the calibration before aggregation. Percentile intervals are
+computed from the transformed member predictions.
 }
 \examples{
 set.seed(1)
@@ -67,11 +79,9 @@ X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
 y  <- 1 + 0.8*X1 - 0.5*X2 + 0.2*X3 + rnorm(n, 0, 0.3)
 dat <- data.frame(y, X1, X2, X3)
 fit <- SVEMnet(y ~ (X1 + X2 + X3)^2, dat, nBoot = 30, relaxed = TRUE)
-pred <- predict(fit, dat)
-head(pred)
 
-# With SEs and debias
-out <- predict(fit, dat, debias = TRUE, se.fit = TRUE, agg = "mean")
+# Mean aggregation with SEs and 95 percent CIs
+out <- predict(fit, dat, debias = TRUE, se.fit = TRUE, interval = TRUE, agg = "mean")
 str(out)
 
 }

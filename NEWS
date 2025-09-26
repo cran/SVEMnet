@@ -1,5 +1,8 @@
 # NEWS for SVEMnet
 
+[2.2.4]
+- Added new functions to automatically build interaction and curvature effects from list of main effects. Added a Monte Carlo optimization function. Removed wGIC objective.
+
 [2.1.2]
 - Added relaxed option to SVEMnet, default to TRUE. Default objective "auto" uses weighted BIC when the number of rows of the model matrix is <= 1.3 times the number of columns, and weighted AIC otherwise.
 

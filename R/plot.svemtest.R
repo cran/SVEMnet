@@ -13,7 +13,7 @@
 #' they will be combined into a single plot alongside \code{x}.
 #'
 #' @import ggplot2
-#' @name plot_svem_significance_tests
+#' @name plot.svem_significance_test
 #' @aliases plot_svem_significance_tests
 #' @export
 #' @method plot svem_significance_test

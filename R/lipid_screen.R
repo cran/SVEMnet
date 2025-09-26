@@ -1,0 +1,103 @@
+#' Lipid formulation screening data
+#'
+#' An example dataset for modeling Potency, Size, and PDI as functions of
+#' formulation and process settings. Percent composition columns are stored as
+#' proportions in 0, 1 (e.g., 4.19% is 0.0419). This table is intended for
+#' demonstration of SVEMnet multi-response modeling and random-search optimization.
+#'
+#' @format A data frame with N rows and the following columns:
+#' \describe{
+#'   \item{RunID}{character. Optional identifier.}
+#'   \item{PEG}{numeric. Proportion (0–1).}
+#'   \item{Helper}{numeric. Proportion (0–1).}
+#'   \item{Ionizable}{numeric. Proportion (0–1).}
+#'   \item{Cholesterol}{numeric. Proportion (0–1).}
+#'   \item{Ionizable_Lipid_Type}{factor.}
+#'   \item{N_P_ratio}{numeric.}
+#'   \item{flow_rate}{numeric.}
+#'   \item{Potency}{numeric. Response.}
+#'   \item{Size}{numeric. Response (e.g., nm).}
+#'   \item{PDI}{numeric. Response (polydispersity index).}
+#'   \item{Notes}{character. Optional.}
+#' }
+#'
+#' @details
+#' This dataset accompanies examples showing:
+#' \itemize{
+#'   \item fitting three SVEM models (Potency, Size, PDI) on a shared expanded basis,
+#'   \item generating shared random predictor points with \code{svem_random_table_multi()},
+#'   \item optimizing a weighted multi-response goal with \code{svem_optimize_random()}.
+#' }
+#'
+#' @source Simulated screening table supplied by the package author.
+#'
+#' @examples
+#' \donttest{
+#' library(SVEMnet)
+#'
+#' # 1) Load the bundled dataset
+#' data(lipid_screen)
+#' str(lipid_screen)
+#'
+#' # 2) Build a deterministic expansion using bigexp_terms()
+#' #    Provide main effects only on the RHS; expansion width is controlled via arguments.
+#' spec <- bigexp_terms(
+#'   Potency ~ PEG + Helper + Ionizable + Cholesterol +
+#'     Ionizable_Lipid_Type + N_P_ratio + flow_rate,
+#'   data               = lipid_screen,
+#'   factorial_order    = 3,       # up to 3-way interactions
+#'   include_pure_cubic = TRUE,
+#'   include_pc_3way    = FALSE
+#' )
+#'
+#' # 3) Reuse the same locked expansion for other responses
+#' form_pot <- bigexp_formula(spec, "Potency")
+#' form_siz <- bigexp_formula(spec, "Size")
+#' form_pdi <- bigexp_formula(spec, "PDI")
+#'
+#' # 4) Fit SVEM models with the shared factor space/expansion
+#' set.seed(1)
+#' fit_pot <- SVEMnet(form_pot, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
+#' fit_siz <- SVEMnet(form_siz, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
+#' fit_pdi <- SVEMnet(form_pdi, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
+#'
+#' # 5) Collect models in a named list by response
+#' objs <- list(Potency = fit_pot, Size = fit_siz, PDI = fit_pdi)
+#'
+#' # 6) Define multi-response goals and weights
+#' #    Maximize Potency (0.7), minimize Size (0.2), minimize PDI (0.1)
+#' goals <- list(
+#'   Potency = list(goal = "max", weight = 0.7),
+#'   Size    = list(goal = "min", weight = 0.2),
+#'   PDI     = list(goal = "min", weight = 0.1)
+#' )
+#'
+#' # Mixture constraints: components sum to 1, with bounds
+#' mix <- list(list(
+#'   vars  = c("PEG", "Helper", "Ionizable", "Cholesterol"),
+#'   lower = c(0.01, 0.10, 0.10, 0.10),
+#'   upper = c(0.05, 0.60, 0.60, 0.60),
+#'   total = 1.0
+#' ))
+#'
+#' opt_out <- svem_optimize_random(
+#'   objects        = objs,
+#'   goals          = goals,
+#'   n              = 5000,
+#'   mixture_groups = mix,
+#'   agg            = "mean",
+#'   debias         = FALSE,
+#'   ci             = TRUE,
+#'   level          = 0.95,
+#'   k_candidates   = 5,
+#'   top_frac       = 0.01,
+#'   verbose        = TRUE
+#' )
+#'
+#' # Inspect results
+#' opt_out$best_x
+#' opt_out$best_pred
+#' opt_out$best_ci
+#' opt_out$candidates
+#' }
+"lipid_screen"

@@ -617,6 +617,8 @@ glmnet_with_cv <- function(formula, data,
                 family = fam, relaxed = relaxed, relax_cv_fallbacks = total_fallbacks,
                 cv_object = cv_obj_to_keep)
   )
-  class(result) <- c("svem_model", "svem_cv")
+
+  class(result) <- c("svem_cv", "svem_model")  # or just "svem_cv"
+
   return(result)
 }

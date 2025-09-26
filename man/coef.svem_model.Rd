@@ -4,17 +4,22 @@
 \alias{coef.svem_model}
 \title{Coefficient Nonzero Percentages from an SVEM Model}
 \usage{
-\method{coef}{svem_model}(object, tol = 1e-07, ...)
+\method{coef}{svem_model}(object, tol = 1e-07, plot = TRUE, print_table = TRUE, ...)
 }
 \arguments{
 \item{object}{An object of class \code{svem_model}.}
 
 \item{tol}{Numeric tolerance for "nonzero" (default \code{1e-7}).}
 
+\item{plot}{Logical; if \code{TRUE}, draws a quick ggplot summary (default \code{TRUE}).}
+
+\item{print_table}{Logical; if \code{TRUE}, prints a compact table (default \code{TRUE}).}
+
 \item{...}{Unused.}
 }
 \value{
-Invisibly returns a data frame with variables and percentages.
+Invisibly returns a data frame with columns:
+\code{Variable}, \code{Percent of Bootstraps Nonzero}.
 }
 \description{
 Calculates the percentage of bootstrap iterations in which each coefficient

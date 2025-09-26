@@ -15,16 +15,19 @@ svem_significance_test(
   nBoot = 100,
   glmnet_alpha = c(1),
   weight_scheme = c("SVEM"),
-  objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+  objective = c("auto", "wAIC", "wBIC", "wSSE"),
   auto_ratio_cutoff = 1.3,
-  gamma = 2,
   relaxed = FALSE,
-  verbose = TRUE,
+  verbose = FALSE,
+  spec = NULL,
+  response = NULL,
+  use_spec_contrasts = TRUE,
   ...
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be tested.}
+\item{formula}{A formula specifying the model to be tested. If \code{spec} is provided,
+the right-hand side is ignored and replaced by the locked expansion in \code{spec}.}
 
 \item{data}{A data frame containing the variables in the model.}
 
@@ -54,14 +57,11 @@ distribution (default: 150).}
 
 \item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
 path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"},
-\code{"wGIC"}, \code{"wSSE"} (default: \code{"auto"}).}
+\code{"wSSE"} (default: \code{"auto"}).}
 
 \item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
 \code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
 \code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.}
-
-\item{gamma}{Penalty weight used only when \code{objective = "wGIC"} (default 2).
-Passed to \code{SVEMnet()}.}
 
 \item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner
 \code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
@@ -70,7 +70,21 @@ glmnet path is used. This value is passed through to \code{SVEMnet()}.
 Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
 (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.}
 
-\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
+\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{FALSE}).}
+
+\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
+the test reuses its locked expansion. The working formula becomes
+\code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
+\code{response} if supplied, otherwise from the left-hand side of \code{formula}.
+Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
+when available.}
+
+\item{response}{Optional character name for the response variable to use when \code{spec}
+is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.}
+
+\item{use_spec_contrasts}{Logical; default \code{TRUE}. When \code{spec} is supplied and
+\code{use_spec_contrasts=TRUE}, the function temporarily replays \code{spec$settings$contrasts_options}
+for deterministic coding, then restores the caller's options on exit.}
 
 \item{...}{Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
 (for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
@@ -102,6 +116,11 @@ their observed ranges, and categorical predictors are sampled from
 their observed levels.
 }
 \details{
+This function can optionally reuse a deterministic, locked expansion built
+with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
+ensure that categorical levels, contrasts, and the polynomial/interaction structure are
+identical across repeated calls and across multiple responses of the same factor space.
+
 If no mixture groups are supplied, this function behaves identically
 to a standard SVEM-based whole-model test, sampling non-mixture continuous
 variables via a maximin Latin hypercube within their observed ranges,
@@ -110,7 +129,37 @@ and categorical variables from their observed levels.
 Internally, predictions at evaluation points use \code{predict.svem_model()}
 with \code{se.fit = TRUE}. Rows with unseen categorical levels are returned
 as \code{NA} and are excluded from distance summaries via \code{complete.cases()}.
+
+When reusing a \code{spec}, you can fit many responses independently over the
+same encoded factor space by calling this function repeatedly with different
+\code{response} values.
+}
+\references{
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+
+Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+
+Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+
+Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
+
+Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
+
+Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+
+Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
+
+Friedman, J. H., Hastie, T., and Tibshirani, R. (2010).
+Regularization Paths for Generalized Linear Models via Coordinate Descent.
+Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
 }
 \seealso{
-\code{SVEMnet()}, \code{predict.svem_model()}
+\code{SVEMnet()}, \code{predict.svem_model()}, \code{bigexp_terms()}, \code{bigexp_formula()}
 }

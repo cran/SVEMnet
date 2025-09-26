@@ -5,76 +5,87 @@
 #' with an option to use glmnet's built-in relaxed elastic net (Meinshausen 2007).
 #' Supports searching over multiple alpha values in the Elastic Net penalty.
 #'
-#' @param formula A formula specifying the model to be fitted.
+#' You can pass either:
+#' - a standard model formula, e.g. y ~ X1 + X2 + X3 + I(X1^2) + (X1 + X2 + X3)^2
+#' - a bigexp_spec created by bigexp_terms(), in which case SVEMnet will prepare
+#'   the data deterministically (locked types/levels) and, if requested, swap
+#'   the response to fit multiple independent responses over the same expansion.
+#'
+#' @param formula A formula specifying the model to be fitted, OR a bigexp_spec
+#'   created by \code{bigexp_terms()}.
 #' @param data A data frame containing the variables in the model.
 #' @param nBoot Number of bootstrap iterations (default 200).
-#' @param glmnet_alpha Elastic Net mixing parameter(s). May be a vector with entries in the range between 0 and 1, inclusive,
-#'   where alpha = 1 is Lasso and alpha = 0 is Ridge. Defaults to c(0.25, 0.5, 0.75, 1).
+#' @param glmnet_alpha Elastic Net mixing parameter(s). May be a vector with
+#'   entries in the range between 0 and 1, inclusive, where alpha = 1 is Lasso
+#'   and alpha = 0 is Ridge. Defaults to \code{c(0.25, 0.5, 0.75, 1)}.
 #' @param weight_scheme Weighting scheme for SVEM (default "SVEM").
-#'   One of "SVEM", "FWR", or "Identity".
+#'   One of \code{"SVEM"}, \code{"FWR"}, or \code{"Identity"}.
 #' @param objective Objective used to pick lambda on each bootstrap path
-#'   (default "auto"). One of "auto", "wAIC", "wBIC", "wGIC", or "wSSE".
+#'   (default "auto"). One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}.
 #' @param auto_ratio_cutoff Single cutoff for the automatic rule when
-#'   objective = "auto" (default 1.3). Let r = n_X / p_X, where n_X is the
-#'   number of training rows and p_X is the number of predictors in the model
-#'   matrix after dropping the intercept column. If r >= auto_ratio_cutoff,
+#'   \code{objective = "auto"} (default 1.3). Let \code{r = n_X / p_X}, where \code{n_X} is the
+#'   number of training rows and \code{p_X} is the number of predictors in the model
+#'   matrix after dropping the intercept column. If \code{r >= auto_ratio_cutoff},
 #'   SVEMnet uses wAIC; otherwise it uses wBIC.
-#' @param gamma Penalty weight used only when objective = "wGIC" (numeric, default 2).
-#'   Setting gamma = 2 reproduces wAIC. Larger values approach a BIC-like penalty.
 #' @param relaxed Logical, TRUE or FALSE (default TRUE). When TRUE, use glmnet's
 #'   relaxed elastic net path and select both lambda and relaxed gamma on each bootstrap.
-#'   When FALSE, fit the standard glmnet path (equivalent to gamma = 1).
-#'   Note: if relaxed = TRUE and glmnet_alpha includes 0 (ridge), alpha = 0 is dropped.
-#' @param ... Additional args passed to glmnet() (e.g., penalty.factor,
-#'   lower.limits, upper.limits, offset, standardize.response, etc.).
-#'   Any user-supplied weights are ignored so SVEM can supply its own bootstrap weights.
-#'   Any user-supplied standardize is ignored; SVEMnet always uses standardize = TRUE.
+#'   When FALSE, fit the standard glmnet path. Note: if \code{relaxed = TRUE} and
+#'   \code{glmnet_alpha} includes 0 (ridge), alpha = 0 is dropped.
+#' @param response Optional character. When \code{formula} is a \code{bigexp_spec}, this names
+#'   the response column to use on the LHS; defaults to the response stored in the spec.
+#' @param unseen How to treat unseen factor levels when \code{formula} is a \code{bigexp_spec}:
+#'   \code{"warn_na"} (default; convert to NA with a warning) or \code{"error"} (stop).
+#' @param ... Additional args passed to \code{glmnet()} (e.g., \code{penalty.factor},
+#'   \code{lower.limits}, \code{upper.limits}, \code{offset}, \code{standardize.response}, etc.).
+#'   Any user-supplied \code{weights} are ignored so SVEM can supply its own bootstrap weights.
+#'   Any user-supplied \code{standardize} is ignored; SVEMnet always uses \code{standardize = TRUE}.
 #'
-#' @return An object of class svem_model with elements:
+#' @return An object of class \code{svem_model} with elements:
 #' \itemize{
-#'   \item parms: averaged coefficients (including intercept).
-#'   \item parms_debiased: averaged coefficients adjusted by the calibration fit.
-#'   \item debias_fit: lm(y ~ y_pred) calibration model used for debiasing (or NULL).
-#'   \item coef_matrix: per-bootstrap coefficient matrix.
-#'   \item nBoot, glmnet_alpha, best_alphas, best_lambdas, weight_scheme, relaxed.
-#'   \item best_relax_gammas: per-bootstrap relaxed gamma chosen (NA if relaxed = FALSE).
-#'   \item objective_input, objective_used, objective (same as objective_used),
-#'         auto_used, auto_decision, auto_rule, gamma (when wGIC).
-#'   \item dropped_alpha0_for_relaxed: whether alpha = 0 was removed because relaxed = TRUE.
-#'   \item schema: list(feature_names, terms_str, xlevels, contrasts, terms_hash) for safe predict.
-#'   \item sampling_schema: list(
-#'         predictor_vars, var_classes,
-#'         num_ranges = rbind(min=..., max=...) for numeric raw predictors,
-#'         factor_levels = list(...) for factor/character raw predictors).
-#'   \item diagnostics: list with k_summary (median and IQR of selected size),
-#'         fallback_rate, n_eff_summary, alpha_freq, relax_gamma_freq.
-#'   \item actual_y, training_X, y_pred, y_pred_debiased, nobs, nparm, formula, terms,
-#'         xlevels, contrasts.
+#'   \item \code{parms}: averaged coefficients (including intercept).
+#'   \item \code{parms_debiased}: averaged coefficients adjusted by the calibration fit.
+#'   \item \code{debias_fit}: \code{lm(y ~ y_pred)} calibration model used for debiasing (or \code{NULL}).
+#'   \item \code{coef_matrix}: per-bootstrap coefficient matrix.
+#'   \item \code{nBoot}, \code{glmnet_alpha}, \code{best_alphas}, \code{best_lambdas}, \code{weight_scheme}, \code{relaxed}.
+#'   \item \code{best_relax_gammas}: per-bootstrap relaxed gamma chosen (NA if \code{relaxed = FALSE}).
+#'   \item \code{objective_input}, \code{objective_used}, \code{objective} (same as \code{objective_used}),
+#'         \code{auto_used}, \code{auto_decision}, \code{auto_rule}.
+#'   \item \code{dropped_alpha0_for_relaxed}: whether alpha = 0 was removed because \code{relaxed = TRUE}.
+#'   \item \code{schema}: list(\code{feature_names}, \code{terms_str}, \code{xlevels}, \code{contrasts}, \code{terms_hash}) for safe predict.
+#'   \item \code{sampling_schema}: list(
+#'         \code{predictor_vars}, \code{var_classes},
+#'         \code{num_ranges} = rbind(min=..., max=...) for numeric raw predictors,
+#'         \code{factor_levels} = list(...) for factor/character raw predictors).
+#'   \item \code{diagnostics}: list with \code{k_summary} (median and IQR of selected size),
+#'         \code{fallback_rate}, \code{n_eff_summary}, \code{alpha_freq}, \code{relax_gamma_freq}.
+#'   \item \code{actual_y}, \code{training_X}, \code{y_pred}, \code{y_pred_debiased}, \code{nobs}, \code{nparm}, \code{formula}, \code{terms},
+#'         \code{xlevels}, \code{contrasts}.
+#'   \item \code{used_bigexp_spec}: logical flag indicating whether a \code{bigexp_spec} was used.
 #' }
 #'
 #' @details
 #' SVEM applies fractional bootstrap weights to training data and anti-correlated
-#' weights for validation when weight_scheme = "SVEM". For each bootstrap, glmnet
-#' paths are fit for each alpha in glmnet_alpha, and the lambda (and, if relaxed = TRUE,
+#' weights for validation when \code{weight_scheme = "SVEM"}. For each bootstrap, glmnet
+#' paths are fit for each alpha in \code{glmnet_alpha}, and the lambda (and, if \code{relaxed = TRUE},
 #' relaxed gamma) minimizing a weighted validation criterion is selected.
 #'
-#' Predictors are always standardized internally via glmnet::glmnet(..., standardize = TRUE).
+#' Predictors are always standardized internally via \code{glmnet::glmnet(..., standardize = TRUE)}.
 #'
-#' When relaxed = TRUE, coef(fit, s = lambda, gamma = g) is used to obtain the
+#' When \code{relaxed = TRUE}, \code{coef(fit, s = lambda, gamma = g)} is used to obtain the
 #' coefficient path at each relaxed gamma in the internal grid. Metrics are computed
 #' from validation-weighted errors and model size is taken as the number of nonzero
 #' coefficients including the intercept (support size), keeping selection consistent
-#' between standard and relaxed paths. When relaxed = FALSE, gamma is fixed at 1.
+#' between standard and relaxed paths.
 #'
 #' Automatic objective rule ("auto"): This function uses a single ratio cutoff,
-#' auto_ratio_cutoff, applied to r = n_X / p_X, where p_X is computed from
-#' the model matrix with the intercept column removed. If r >= auto_ratio_cutoff
+#' \code{auto_ratio_cutoff}, applied to \code{r = n_X / p_X}, where \code{p_X} is computed from
+#' the model matrix with the intercept column removed. If \code{r >= auto_ratio_cutoff}
 #' the selection criterion is wAIC; otherwise it is wBIC.
 #'
 #' Implementation notes for safety:
-#' - The training terms object is stored with environment set to baseenv() to avoid
+#' - The training terms object is stored with environment set to \code{baseenv()} to avoid
 #'   accidental lookups in the calling environment.
-#' - A compact schema (feature names, xlevels, contrasts) is stored to let predict()
+#' - A compact schema (feature names, xlevels, contrasts) is stored to let \code{predict()}
 #'   reconstruct the design matrix deterministically.
 #' - A lightweight sampling schema (numeric ranges and factor levels for raw predictors)
 #'   is cached to enable random-table generation without needing the original data.
@@ -83,46 +94,7 @@
 #' Development of this package was assisted by GPT o1-preview for structuring parts of the code
 #' and documentation.
 #'
-#' @references
-#' Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using
-#' Bootstrapping Techniques With Applications to Biopharmaceuticals. JMP Discovery Conference.
-#' https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true
-#'
-#' Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated
-#' Ensemble Models (SVEM). Chemometrics and Intelligent Laboratory Systems, 249, 105122.
-#' doi:10.1016/j.chemolab.2024.105122
-#'
-#' Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with
-#' Mixture Experiments. JMP Discovery Conference. doi:10.13140/RG.2.2.34598.40003/1
-#'
-#' Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for
-#' Design of Experiments. Chemometrics and Intelligent Laboratory Systems, 219, 104439.
-#' doi:10.1016/j.chemolab.2021.104439
-#'
-#' Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the
-#' Fractional-Random-Weight Bootstrap. The American Statistician, 74(4), 345-358.
-#' doi:10.1080/00031305.2020.1731599
-#'
-#' Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture
-#' Designs, Neural Networks and SVEM. JMP Discovery Conference.
-#' https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841
-#'
-#' Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using
-#' Bootstrapping Techniques With Applications to Biopharmaceuticals. JMP Discovery Conference - Europe.
-#' https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true
-#'
-#' Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and
-#' Analysis of Experiments. JMP Discovery Conference - Europe.
-#' https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634
-#'
-#' Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity:
-#' It's All About Prediction. JMP Discovery Conference.
-#'
-#' Friedman, J. H., Hastie, T., & Tibshirani, R. (2010). Regularization Paths for Generalized
-#' Linear Models via Coordinate Descent. Journal of Statistical Software, 33(1), 1-22.
-#'
-#' Meinshausen, N. (2007).
-#' Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+#' @template ref-svem
 #'
 #' @importFrom stats runif lm predict coef var model.frame model.matrix model.response delete.response IQR median
 #' @importFrom glmnet glmnet
@@ -138,6 +110,7 @@
 #' y <- 1 + 2*X1 - 1.5*X2 + 0.5*X3 + 1.2*(X1*X2) + 0.8*(X1^2) + eps
 #' dat <- data.frame(y, X1, X2, X3)
 #'
+#' # Minimal hand-written expansion
 #' mod_relax <- SVEMnet(
 #'   y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
 #'   data          = dat,
@@ -145,24 +118,78 @@
 #'   nBoot         = 75,
 #'   objective     = "auto",
 #'   weight_scheme = "SVEM",
-#'   relaxed       = FALSE #to run faster to pass CRAN checks
+#'   relaxed       = FALSE
 #' )
 #'
 #' pred_in_raw <- predict(mod_relax, dat, debias = FALSE)
 #' pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 #'
+#' \donttest{
+#' # ---------------------------------------------------------------------------
+#' # Big expansion (full factorial + response surface + partial cubic)
+#' # Build once, reuse for one or more responses
+#' # ---------------------------------------------------------------------------
+#' spec <- bigexp_terms(
+#'   y ~ X1 + X2 + X3, data = dat,
+#'   factorial_order    = 3,      # allow 3-way factorials
+#'   include_pc_3way    = FALSE,  # set TRUE to add I(X^2):Z:W
+#'   include_pure_cubic = FALSE
+#' )
+#'
+#' # Fit using the spec (auto-prepares data)
+#' fit_y <- SVEMnet(
+#'   spec, dat,
+#'   glmnet_alpha  = c(1, 0.5),
+#'   nBoot         = 50,
+#'   objective     = "auto",
+#'   weight_scheme = "SVEM",
+#'   relaxed       = FALSE
+#' )
+#'
+#' # A second, independent response over the same expansion
+#' set.seed(99)
+#' dat$y2 <- 0.5 + 1.4*X1 - 0.6*X2 + 0.2*X3 + rnorm(n, 0, 0.4)
+#' fit_y2 <- SVEMnet(
+#'   spec, dat, response = "y2",
+#'   glmnet_alpha  = c(1, 0.5),
+#'   nBoot         = 50,
+#'   objective     = "auto",
+#'   weight_scheme = "SVEM",
+#'   relaxed       = FALSE
+#' )
+#'
+#' p1  <- predict(fit_y,  dat)
+#' p2  <- predict(fit_y2, dat, debias = TRUE)
+#'
+#' # Show that a new batch expands identically under the same spec
+#' newdat <- data.frame(
+#'   y  = y,
+#'   X1 = X1 + rnorm(n, 0, 0.05),
+#'   X2 = X2 + rnorm(n, 0, 0.05),
+#'   X3 = X3 + rnorm(n, 0, 0.05)
+#' )
+#' prep_new <- bigexp_prepare(spec, newdat)
+#' stopifnot(identical(
+#'   colnames(model.matrix(spec$formula, bigexp_prepare(spec, dat)$data)),
+#'   colnames(model.matrix(spec$formula, prep_new$data))
+#' ))
+#' preds_new <- predict(fit_y, prep_new$data)
+#' }
+#'
 #' @export
 SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75, 1),
                     weight_scheme = c("SVEM", "FWR", "Identity"),
-                    objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+                    objective = c("auto", "wAIC", "wBIC", "wSSE"),
                     auto_ratio_cutoff = 1.3,
-                    gamma = 2,
                     relaxed = TRUE,
+                    response = NULL,
+                    unseen = c("warn_na","error"),
                     ...) {
 
   # ---- argument checks ----
   objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
+  unseen        <- match.arg(unseen)
 
   if (!is.logical(relaxed) || length(relaxed) != 1L || is.na(relaxed)) {
     stop("'relaxed' must be a single logical TRUE or FALSE.")
@@ -182,13 +209,32 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
   }
   auto_ratio_cutoff <- as.numeric(auto_ratio_cutoff)
 
-  # ---- model frame / matrix ----
+  # ---- model frame / matrix construction --------------------------------------
   data <- as.data.frame(data)
-  mf   <- stats::model.frame(formula, data, na.action = stats::na.omit)
-  if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+  using_spec <- inherits(formula, "bigexp_spec")
+
+  if (using_spec) {
+    spec <- formula
+    # Choose formula to use (swap LHS if response provided)
+    if (is.null(response)) {
+      f_use <- spec$formula
+    } else {
+      rhs_txt <- paste(deparse(spec$formula[[3]]), collapse = " ")
+      f_use <- stats::as.formula(paste(response, "~", rhs_txt))
+    }
+    # Coerce to locked types/levels; handle unseen levels
+    prep <- bigexp_prepare(spec, data, unseen = unseen)
+    mf   <- stats::model.frame(f_use, prep$data, na.action = stats::na.omit)
+    if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+    X    <- stats::model.matrix(f_use, mf)
+  } else {
+    f_use <- formula
+    mf    <- stats::model.frame(f_use, data, na.action = stats::na.omit)
+    if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+    X     <- stats::model.matrix(f_use, mf)
+  }
 
   y <- stats::model.response(mf)
-  X <- stats::model.matrix(formula, mf)
 
   # drop intercept column (glmnet adds its own)
   int_idx <- which(colnames(X) %in% c("(Intercept)", "Intercept"))
@@ -224,6 +270,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
         factor_levels[[v]] <- levels(mf[[v]])
       } else if (is.character(mf[[v]])) {
         lev <- sort(unique(as.character(mf[[v]])))
+        xlevels[[v]] <- lev
         factor_levels[[v]] <- lev
       }
     }
@@ -244,7 +291,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0, dimnames = list(c("min","max"), NULL))
   }
 
-  # ---- objective selection (auto) ----
+  # ---- objective selection (auto) ---------------------------------------------
   auto_rule      <- c(ratio_cutoff = auto_ratio_cutoff)
   auto_used      <- identical(objective, "auto")
   auto_decision  <- NA_character_
@@ -253,16 +300,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     if (is.finite(r_tmp) && r_tmp >= auto_ratio_cutoff) { auto_decision <- "wAIC"; "wAIC" } else { auto_decision <- "wBIC"; "wBIC" }
   } else objective
 
-  # ---- wGIC sanity checks ----
-  if (objective_used == "wGIC") {
-    if (!is.numeric(gamma) || length(gamma) != 1L || !is.finite(gamma) || gamma < 0) stop("'gamma' must be >= 0.")
-    if (gamma == 0) warning("gamma = 0 implies no complexity penalty (wGIC ~ wSSE).")
-    if (gamma < 0.2) warning("gamma is very small (< 0.2); selection may behave close to wSSE.")
-    bic_like <- log(max(2, n))
-    if (gamma > 3 * bic_like) warning("gamma is much larger than a BIC-like penalty (3*log(n)); selection may underfit.")
-  }
-
-  # ---- drop ridge when relaxed ----
+  # ---- drop ridge when relaxed ------------------------------------------------
   dropped_alpha0_for_relaxed <- FALSE
   if (isTRUE(relax_flag) && any(glmnet_alpha == 0)) {
     warning("Dropping alpha = 0 (ridge) for relaxed fits; ridge + relaxed is not supported here.")
@@ -270,7 +308,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     dropped_alpha0_for_relaxed <- TRUE
   }
 
-  # ---- containers ----
+  # ---- containers -------------------------------------------------------------
   coef_matrix  <- matrix(NA_real_, nrow = nBoot, ncol = p + 1L)
   colnames(coef_matrix) <- c("(Intercept)", colnames(X))
   best_alphas       <- rep(NA_real_, nBoot)
@@ -280,12 +318,12 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
   fallbacks         <- integer(nBoot)
   n_eff_keep        <- numeric(nBoot)
 
-  # ---- capture and sanitize user '...' so SVEM controls weights ----
+  # ---- capture and sanitize user '...' so SVEM controls weights ---------------
   dots <- list(...)
   if (length(dots)) {
     if ("weights" %in% names(dots)) { warning("Ignoring user 'weights'; SVEM uses bootstrap weights."); dots$weights <- NULL }
     if ("standardize" %in% names(dots)) { warning("Ignoring user 'standardize'; SVEMnet always standardizes."); dots$standardize <- NULL }
-    protected <- c("x","y","alpha","intercept","relax","standardize","nlambda","maxit","lambda.min.ratio","gamma","lambda")
+    protected <- c("x","y","alpha","intercept","relax","standardize","nlambda","maxit","lambda.min.ratio","lambda")
     dots <- dots[setdiff(names(dots), protected)]
   }
 
@@ -297,7 +335,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     (if (count_intercept) 1L else 0L) + k_slope
   }
 
-  # ---- bootstrap loop ----
+  # ---- bootstrap loop ---------------------------------------------------------
   for (i in seq_len(nBoot)) {
     eps <- .Machine$double.eps
     if (weight_scheme == "SVEM") {
@@ -371,7 +409,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
                          "wSSE" = val_errors,
                          "wAIC" = { out <- rep(Inf, L); mask <- (k_slope < n_eff_adm); out[mask] <- n_like * log(mse_w[mask]) + 2 * k_eff[mask]; out },
                          "wBIC" = { out <- rep(Inf, L); mask <- (k_slope < n_eff_adm); out[mask] <- n_like * log(mse_w[mask]) + logN_pen * k_eff[mask]; out },
-                         { out <- rep(Inf, L); mask <- (k_slope < n_eff_adm); out[mask] <- n_like * log(mse_w[mask]) + gamma * k_eff[mask]; out })
+                         stop("Unknown objective: ", objective_used))
         metric[!is.finite(metric)] <- Inf
         if (!any(is.finite(metric))) next
 
@@ -407,7 +445,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     k_sel_vec[i]         <- best_k
   }
 
-  # ---- finalize ----
+  # ---- finalize ---------------------------------------------------------------
   valid_rows <- rowSums(!is.finite(coef_matrix)) == 0
   if (!any(valid_rows)) stop("All bootstrap iterations failed to produce valid coefficients.")
   coef_matrix        <- coef_matrix[valid_rows, , drop = FALSE]
@@ -451,12 +489,14 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     k_summary = c(k_median = stats::median(k_sel_vec), k_iqr = stats::IQR(k_sel_vec)),
     fallback_rate = mean(fallbacks),
     n_eff_summary = summary(n_eff_keep),
-    relax_gamma_freq = if (isTRUE(relax_flag)) prop.table(table(round(best_relax_gammas, 2))) else NULL
+    relax_gamma_freq =  if (isTRUE(relax_flag) && any(is.finite(best_relax_gammas))) {
+      prop.table(table(round(best_relax_gammas, 2)))
+    } else NULL
   )
   tf <- table(best_alphas[is.finite(best_alphas)])
   diagnostics$alpha_freq <- if (length(tf)) as.numeric(tf) / sum(tf) else numeric()
 
-  # ---- schema for safe predict ----
+  # ---- schema for safe predict ------------------------------------------------
   feature_names <- colnames(X)
   terms_str <- tryCatch(paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
                         error = function(e) NA_character_)
@@ -473,7 +513,7 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     terms_hash    = safe_hash(terms_str)
   )
 
-  # ---- sampling schema for random-table generation ----
+  # ---- sampling schema for random-table generation ----------------------------
   sampling_schema <- list(
     predictor_vars = predictor_vars,
     var_classes    = var_classes,
@@ -500,7 +540,6 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     auto_used         = auto_used,
     auto_decision     = if (auto_used) auto_decision else NA_character_,
     auto_rule         = auto_rule,
-    gamma             = if (objective_used == "wGIC") gamma else NA_real_,
     diagnostics       = diagnostics,
     actual_y          = y_numeric,
     training_X        = X,
@@ -508,12 +547,13 @@ SVEMnet <- function(formula, data, nBoot = 200, glmnet_alpha = c(0.25, 0.5, 0.75
     y_pred_debiased   = y_pred_debiased,
     nobs              = nobs,
     nparm             = nparm,
-    formula           = formula,
+    formula           = f_use,
     terms             = terms_clean,
     xlevels           = xlevels,
     contrasts         = contrasts_used,
     schema            = schema,
-    sampling_schema   = sampling_schema
+    sampling_schema   = sampling_schema,
+    used_bigexp_spec  = using_spec
   )
   class(result) <- c("svem_model", "SVEMnet")
   result

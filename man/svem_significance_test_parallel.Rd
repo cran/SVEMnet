@@ -15,18 +15,21 @@ svem_significance_test_parallel(
   nBoot = 100,
   glmnet_alpha = c(1),
   weight_scheme = c("SVEM"),
-  objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+  objective = c("auto", "wAIC", "wBIC", "wSSE"),
   auto_ratio_cutoff = 1.3,
-  gamma = 2,
   relaxed = FALSE,
   verbose = TRUE,
   nCore = parallel::detectCores(),
   seed = NULL,
+  spec = NULL,
+  response = NULL,
+  use_spec_contrasts = TRUE,
   ...
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be tested.}
+\item{formula}{A formula specifying the model to be tested. If \code{spec} is provided,
+the right-hand side is ignored and replaced by the locked expansion in \code{spec}.}
 
 \item{data}{A data frame containing the variables in the model.}
 
@@ -35,9 +38,8 @@ groups. Each element of the list should be a list with components
 \code{vars} (character vector of column names), \code{lower} (numeric vector of
 lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
 of upper bounds of the same length), and \code{total} (scalar specifying the
-sum of the mixture variables). All mixture variables must be
-included in \code{vars}, and no variable can appear in more than one
-mixture group. Defaults to \code{NULL} (no mixtures).}
+sum of the mixture variables). All mixture variables must be included in \code{vars},
+and no variable can appear in more than one mixture group. Defaults to \code{NULL}.}
 
 \item{nPoint}{Number of random points in the factor space (default: 2000).}
 
@@ -55,27 +57,39 @@ distribution (default: 150).}
 \item{weight_scheme}{Weighting scheme for SVEM (default: "SVEM").}
 
 \item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
-path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"},
-\code{"wGIC"}, \code{"wSSE"} (default: \code{"auto"}).}
+path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, \code{"wSSE"}
+(default: \code{"auto"}).  (Note: \code{"wGIC"} is no longer supported.)}
 
 \item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
 \code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
 \code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.}
 
-\item{gamma}{Penalty weight used only when \code{objective = "wGIC"} (default 2).
-Passed to \code{SVEMnet()}.}
-
-\item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner \code{SVEMnet()}
-fits use glmnet's relaxed elastic net path and select both lambda and relaxed gamma
-on each bootstrap. When \code{FALSE}, the standard glmnet path is used. This value
-is passed through to \code{SVEMnet()}. Any \code{relaxed} provided via \code{...}
-is ignored with a warning.}
+\item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner
+\code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
+lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
+glmnet path is used. This value is passed through to \code{SVEMnet()}.
+Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
+(\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.}
 
 \item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
 
 \item{nCore}{Number of CPU cores for parallel processing (default: all available cores).}
 
-\item{seed}{Optional integer seed for reproducible parallel RNG (default: NULL).}
+\item{seed}{Optional integer seed for reproducible parallel RNG (default: \code{NULL}).}
+
+\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
+the test reuses its locked expansion. The working formula becomes
+\code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
+\code{response} if supplied, otherwise from the left-hand side of \code{formula}.
+Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
+when available.}
+
+\item{response}{Optional character name for the response variable to use when \code{spec}
+is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.}
+
+\item{use_spec_contrasts}{Logical; default \code{TRUE}. When \code{spec} is supplied and
+\code{use_spec_contrasts=TRUE}, the function replays \code{spec$settings$contrasts_options}
+on the parallel workers for deterministic coding.}
 
 \item{...}{Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
 (for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
@@ -94,6 +108,11 @@ parallelizing the SVEM fits for originals and permutations.
 Identical in logic to \code{svem_significance_test()} but runs the expensive
 SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
 (including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
+
+This parallel version can optionally reuse a deterministic, locked expansion built
+with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
+ensure that categorical levels, contrasts, and the polynomial/interaction structure are
+identical across repeated calls and across multiple responses of the same factor space.
 }
 \examples{
 \donttest{
@@ -150,8 +169,7 @@ SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
   )
   print(res$p_value)
 }
-
 }
 \seealso{
-\code{svem_significance_test}
+\code{svem_significance_test}, \code{bigexp_terms}, \code{bigexp_formula}
 }

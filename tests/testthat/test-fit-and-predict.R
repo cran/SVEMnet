@@ -1,0 +1,26 @@
+testthat::skip_on_cran()
+test_that("SVEMnet fits and predicts (parms vs mean)", {
+  skip_if_not_installed("SVEMnet")
+  set.seed(2)
+  d <- gen_toy_df(80, with_factor = TRUE)
+  fit <- SVEMnet::SVEMnet(y ~ (X1 + X2 + X3 + F)^2 + A + B + C, d, nBoot = 30, glmnet_alpha = 1)
+  p1 <- predict(fit, d[1:10, ], agg = "parms")
+  expect_type(p1, "double")
+  p2 <- predict(fit, d[1:10, ], agg = "mean")
+  expect_type(p2, "double")
+  expect_equal(length(p1), 10L)
+  expect_equal(length(p2), 10L)
+})
+
+test_that("SVEMnet relaxed path runs", {
+  skip_on_cran()
+  set.seed(4)
+  n <- 40
+  X1 <- rnorm(n); X2 <- rnorm(n)
+  y  <- 1 + X1 - 0.5*X2 + rnorm(n, 0, 0.3)
+  d  <- data.frame(y, X1, X2)
+  fit <- SVEMnet(y ~ X1 + X2, d, nBoot = 20, glmnet_alpha = c(1, 0.5), relaxed = TRUE)
+  p   <- predict(fit, d[1:5, ], agg = "mean")
+  expect_type(p, "double")
+  expect_true(length(p) == 5)
+})

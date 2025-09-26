@@ -1,44 +1,48 @@
 #' Predict Method for SVEM Models
 #'
-#' Generates predictions from a fitted svem_model.
+#' Generates predictions from a fitted svem_model, with optional bootstrap
+#' standard errors and percentile confidence intervals.
 #'
 #' @param object An object of class svem_model (created by SVEMnet()).
 #' @param newdata A data frame of new predictor values.
 #' @param debias Logical; default is FALSE. If TRUE, apply the linear calibration
 #'   fit (y ~ y_pred) learned during training when available.
-#' @param se.fit Logical; if TRUE, returns standard errors (default FALSE).
+#' @param se.fit Logical; if TRUE, returns standard errors based on the bootstrap
+#'   spread when member predictions are available (default FALSE).
+#' @param interval Logical; if TRUE, returns percentile confidence limits based
+#'   on bootstrap predictions when available (default FALSE).
+#' @param level Confidence level for the percentile interval. Default 0.95.
 #' @param agg Aggregation method for ensemble predictions. One of "parms" (default)
 #'   or "mean". "parms" uses the aggregated coefficients stored in object$parms
 #'   (or parms_debiased if debias=TRUE). "mean" averages predictions from individual
 #'   bootstrap members equally and optionally applies the debias calibration.
 #' @param ... Additional arguments (currently unused).
 #'
-#' @importFrom stats terms reformulate na.pass sd delete.response coef model.frame model.matrix
-#' @return A numeric vector of predictions, or a list with components \code{fit} and
-#'   \code{se.fit} when \code{se.fit = TRUE}.
+#' @importFrom stats terms reformulate na.pass sd delete.response coef model.frame model.matrix quantile
+#' @return A numeric vector of predictions, or a list with components as follows:
+#'   - fit: predictions
+#'   - se.fit: bootstrap standard errors when se.fit = TRUE
+#'   - lwr, upr: percentile confidence limits when interval = TRUE
 #'
 #' @details
 #' The function uses the training terms, factor levels (xlevels), and contrasts
 #' saved by SVEMnet(). The terms object environment is set to baseenv() to avoid
 #' unexpected lookup of objects in the original environment.
 #'
-#' Column handling is strict but robust:
-#' \itemize{
-#'   \item We require that the set of columns produced by \code{model.matrix} on
-#'   \code{newdata} matches the set used in training.
-#'   \item If \code{model.matrix} drops some training columns (e.g., a factor
-#'   collapses to a single level in \code{newdata}), we add those missing columns
-#'   as zeros so coefficients align.
-#'   \item We then reorder columns to the exact training order before multiplying.
-#' }
+#' Column handling follows these rules:
+#'   - The set of columns produced by model.matrix on newdata is aligned to those
+#'     used in training.
+#'   - Any training columns dropped by model.matrix are added back as zeros.
+#'   - Columns are reordered to the exact training order before multiplication.
 #'
-#' Rows in \code{newdata} that contain unseen factor levels will yield NA predictions
-#' (and NA standard errors if \code{se.fit=TRUE}); a warning is issued indicating how
-#' many rows were affected.
+#' Rows in newdata that contain unseen factor levels will yield NA predictions
+#' (and NA standard errors and intervals if requested); a warning is issued indicating
+#' how many rows were affected.
 #'
-#' When \code{agg="mean"}, the predictive SE is the bootstrap spread (row-wise sd of
-#' member predictions). If \code{debias=TRUE} and the calibration slope is available and
-#' finite, SEs are scaled by abs(slope).
+#' When agg = "mean", se.fit is the row-wise sd of member predictions. If debias = TRUE
+#' and a finite calibration slope is available, both member predictions and their sd
+#' are transformed by the calibration before aggregation. Percentile intervals are
+#' computed from the transformed member predictions.
 #'
 #' @examples
 #' set.seed(1)
@@ -47,16 +51,15 @@
 #' y  <- 1 + 0.8*X1 - 0.5*X2 + 0.2*X3 + rnorm(n, 0, 0.3)
 #' dat <- data.frame(y, X1, X2, X3)
 #' fit <- SVEMnet(y ~ (X1 + X2 + X3)^2, dat, nBoot = 30, relaxed = TRUE)
-#' pred <- predict(fit, dat)
-#' head(pred)
 #'
-#' # With SEs and debias
-#' out <- predict(fit, dat, debias = TRUE, se.fit = TRUE, agg = "mean")
+#' # Mean aggregation with SEs and 95 percent CIs
+#' out <- predict(fit, dat, debias = TRUE, se.fit = TRUE, interval = TRUE, agg = "mean")
 #' str(out)
 #'
 #' @export
 #' @method predict svem_model
 predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
+                               interval = FALSE, level = 0.95,
                                agg = c("parms", "mean"), ...) {
   agg <- match.arg(agg)
 
@@ -64,8 +67,11 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
   if (is.null(object$terms) || is.null(object$parms)) {
     stop("The fitted object is missing required components (terms/parms).")
   }
+  if (!is.numeric(level) || length(level) != 1L || level <= 0 || level >= 1) {
+    stop("`level` must be a single number in (0,1).")
+  }
 
-  # Use training terms but nuke environment to be safe
+  # Use training terms but set a safe environment
   terms_obj <- stats::delete.response(object$terms)
   environment(terms_obj) <- baseenv()
 
@@ -85,8 +91,9 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
     }
   }
 
-  # Build model frame/matrix (no xlev arg now; we've already coerced)
+  # Build model frame/matrix
   ctr <- if (!is.null(object$contrasts)) object$contrasts else NULL
+  if (!is.null(ctr) && !is.list(ctr)) ctr <- as.list(ctr)
   mf  <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
   mm  <- stats::model.matrix(terms_obj, data = mf, contrasts.arg = ctr)
 
@@ -94,12 +101,12 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
   int_col <- which(colnames(mm) == "(Intercept)")
   if (length(int_col)) mm <- mm[, -int_col, drop = FALSE]
 
-  # Rows with NA columns (typically unseen levels)
-  bad_rows <- rowSums(is.na(mm)) > 0L
+  # Rows with non-finite entries (typically unseen levels producing NA)
+  bad_rows <- rowSums(!is.finite(mm)) > 0L
   if (any(bad_rows)) {
     warning(sum(bad_rows),
             " row(s) in newdata contain unseen or missing levels; returning NA for those rows.")
-    mm[is.na(mm)] <- 0
+    mm[!is.finite(mm)] <- 0
   }
 
   # Determine training column order to mirror
@@ -108,7 +115,15 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
   } else if (!is.null(object$schema$feature_names)) {
     object$schema$feature_names
   } else {
-    colnames(mm)  # last resort: no reordering possible
+    colnames(mm)  # last resort
+  }
+
+  # Informative message if newdata had extra columns not seen in training
+  extra_cols <- setdiff(colnames(mm), train_cols)
+  if (length(extra_cols)) {
+    message("Ignoring ", length(extra_cols), " column(s) not present at training: ",
+            paste(utils::head(extra_cols, 5L), collapse = ", "),
+            if (length(extra_cols) > 5L) " ..." else "")
   }
 
   # Build a design matrix in training order (zero-fill missing)
@@ -118,29 +133,26 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
   if (length(common_cols)) {
     mm_use[, common_cols] <- mm[, common_cols, drop = FALSE]
   }
+  storage.mode(mm_use) <- "double"
 
-  # Coefficients (includes "(Intercept)")
-  coefs <- object$parms
+  # Aggregate-coefficient prediction ("parms")
+  # Use parms_debiased when debias=TRUE and available, else parms
+  coefs <- if (debias && !is.null(object$parms_debiased)) object$parms_debiased else object$parms
   beta  <- stats::setNames(numeric(length(train_cols) + 1L),
                            c("(Intercept)", train_cols))
   common_beta <- intersect(names(coefs), names(beta))
   beta[common_beta] <- coefs[common_beta]
-
-  # If we don't have member coefs, clamp features
-  have_members <- !is.null(object$coef_matrix) && is.matrix(object$coef_matrix)
-
-  if (se.fit || agg == "mean") {
-    if (!have_members) {
-      stop("se.fit=TRUE or agg='mean' requires bootstrap member predictions (coef_matrix), ",
-           "which glmnet_with_cv() objects do not have.")
-    }
-  }
-
-  # Predict via aggregate coefficients ("parms") — works for both fit types
   preds_parms <- as.numeric(beta[1L] + mm_use %*% beta[-1L])
 
-  # Optionally compute member-based predictions (SVEMnet fits only)
-  if (se.fit || agg == "mean") {
+  # Member predictions available?
+  have_members <- !is.null(object$coef_matrix) && is.matrix(object$coef_matrix)
+  if ((se.fit || interval || agg == "mean") && !have_members) {
+    stop("se.fit = TRUE, interval = TRUE, or agg = 'mean' requires bootstrap member predictions (coef_matrix). ",
+         "Re-fit with SVEMnet(..., nBoot >= 2) to populate coef_matrix.")
+  }
+
+  # If we need member predictions, compute them
+  if (se.fit || interval || agg == "mean") {
     coef_matrix <- object$coef_matrix  # nBoot x (p+1)
     m  <- nrow(mm_use)
     nb <- nrow(coef_matrix)
@@ -148,38 +160,61 @@ predict.svem_model <- function(object, newdata, debias = FALSE, se.fit = FALSE,
     betas      <- coef_matrix[, -1, drop = FALSE]
     pred_mat   <- mm_use %*% t(betas) + matrix(intercepts, nrow = m, ncol = nb, byrow = TRUE)
 
-    # mean aggregation (optionally debias via calibration)
-    preds_mean <- rowMeans(pred_mat)
+    # If debiasing, apply to each member, not just the mean
     if (debias && !is.null(object$debias_fit)) {
       ab <- stats::coef(object$debias_fit)
-      if (length(ab) >= 2 && is.finite(ab[2])) preds_mean <- ab[1] + ab[2] * preds_mean
+      if (length(ab) >= 2 && all(is.finite(ab[1:2]))) {
+        pred_mat <- ab[1] + ab[2] * pred_mat
+      }
     }
 
-    # choose output path
-    preds_out <- if (agg == "parms") preds_parms else preds_mean
+    # Mean aggregation
+    preds_mean <- rowMeans(pred_mat)
 
+    # SE from member spread
     if (se.fit) {
       se <- apply(pred_mat, 1, stats::sd)
-      if (debias && !is.null(object$debias_fit)) {
-        ab <- stats::coef(object$debias_fit)
-        if (length(ab) >= 2 && is.finite(ab[2])) se <- abs(ab[2]) * se
-      }
-      if (any(bad_rows)) { preds_out[bad_rows] <- NA_real_; se[bad_rows] <- NA_real_ }
+    }
+
+    # Percentile intervals
+    if (interval) {
+      alpha <- 1 - level
+      qs <- t(apply(pred_mat, 1, stats::quantile, probs = c(alpha / 2, 1 - alpha / 2), na.rm = TRUE, names = FALSE))
+      lwr <- qs[, 1]
+      upr <- qs[, 2]
+    }
+
+    # Choose base fit to return
+    preds_out <- if (agg == "parms") preds_parms else preds_mean
+
+    # Mask bad rows
+    if (any(bad_rows)) {
+      preds_out[bad_rows] <- NA_real_
+      if (se.fit) se[bad_rows] <- NA_real_
+      if (interval) { lwr[bad_rows] <- NA_real_; upr[bad_rows] <- NA_real_ }
+    }
+
+    # Assemble return
+    if (se.fit && interval) {
+      return(list(fit = preds_out, se.fit = se, lwr = lwr, upr = upr))
+    } else if (se.fit) {
       return(list(fit = preds_out, se.fit = se))
+    } else if (interval) {
+      return(list(fit = preds_out, lwr = lwr, upr = upr))
     } else {
-      if (any(bad_rows)) preds_out[bad_rows] <- NA_real_
       return(preds_out)
     }
-  } else {
-    # parms-only path
-    if (debias && !is.null(object$debias_fit)) {
-      ok <- !is.na(preds_parms)
-      if (any(ok)) {
-        preds_parms[ok] <- as.numeric(stats::predict(object$debias_fit,
-                                                     newdata = data.frame(y_pred = preds_parms[ok])))
-      }
-    }
-    if (any(bad_rows)) preds_parms[bad_rows] <- NA_real_
-    return(preds_parms)
   }
+
+  # parms-only path (no member use)
+  if (interval) {
+    stop("interval = TRUE requires bootstrap member predictions; agg = 'parms' without coef_matrix cannot produce intervals. ",
+         "Re-fit with SVEMnet(..., nBoot >= 2) to populate coef_matrix.")
+  }
+  if (se.fit) {
+    stop("se.fit = TRUE requires bootstrap member predictions; agg = 'parms' without coef_matrix cannot produce SEs. ",
+         "Re-fit with SVEMnet(..., nBoot >= 2) to populate coef_matrix.")
+  }
+  if (any(bad_rows)) preds_parms[bad_rows] <- NA_real_
+  preds_parms
 }

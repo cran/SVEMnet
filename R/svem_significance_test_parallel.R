@@ -7,17 +7,64 @@
 #' SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
 #' (including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
 #'
-#' @inheritParams svem_significance_test
-#' @param relaxed Logical; default \code{FALSE}. When \code{TRUE}, inner \code{SVEMnet()}
-#'   fits use glmnet's relaxed elastic net path and select both lambda and relaxed gamma
-#'   on each bootstrap. When \code{FALSE}, the standard glmnet path is used. This value
-#'   is passed through to \code{SVEMnet()}. Any \code{relaxed} provided via \code{...}
-#'   is ignored with a warning.
+#' This parallel version can optionally reuse a deterministic, locked expansion built
+#' with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
+#' ensure that categorical levels, contrasts, and the polynomial/interaction structure are
+#' identical across repeated calls and across multiple responses of the same factor space.
+#'
+#' @param formula A formula specifying the model to be tested. If \code{spec} is provided,
+#'   the right-hand side is ignored and replaced by the locked expansion in \code{spec}.
+#' @param data A data frame containing the variables in the model.
+#' @param mixture_groups Optional list describing one or more mixture factor
+#'   groups. Each element of the list should be a list with components
+#'   \code{vars} (character vector of column names), \code{lower} (numeric vector of
+#'   lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
+#'   of upper bounds of the same length), and \code{total} (scalar specifying the
+#'   sum of the mixture variables). All mixture variables must be included in \code{vars},
+#'   and no variable can appear in more than one mixture group. Defaults to \code{NULL}.
+#' @param nPoint Number of random points in the factor space (default: 2000).
+#' @param nSVEM Number of SVEM fits on the original data (default: 10).
+#' @param nPerm Number of SVEM fits on permuted responses for the reference
+#'   distribution (default: 150).
+#' @param percent Percentage of variance to capture in the SVD (default: 90).
+#' @param nBoot Number of bootstrap iterations within each SVEM fit (default: 100).
+#' @param glmnet_alpha The alpha parameter(s) for glmnet (default: \code{c(1)}).
+#' @param weight_scheme Weighting scheme for SVEM (default: "SVEM").
+#' @param objective Objective used inside \code{SVEMnet()} to pick the bootstrap
+#'   path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, \code{"wSSE"}
+#'   (default: \code{"auto"}).  (Note: \code{"wGIC"} is no longer supported.)
+#' @param auto_ratio_cutoff Single cutoff for the automatic rule when
+#'   \code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
+#'   \code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.
+#' @param relaxed Logical; default \code{FALSE}. When \code{TRUE}, inner
+#'   \code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
+#'   lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
+#'   glmnet path is used. This value is passed through to \code{SVEMnet()}.
+#'   Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
+#'   (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.
+#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).
 #' @param nCore Number of CPU cores for parallel processing (default: all available cores).
-#' @param seed Optional integer seed for reproducible parallel RNG (default: NULL).
+#' @param seed Optional integer seed for reproducible parallel RNG (default: \code{NULL}).
+#' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
+#'   the test reuses its locked expansion. The working formula becomes
+#'   \code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
+#'   \code{response} if supplied, otherwise from the left-hand side of \code{formula}.
+#'   Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
+#'   when available.
+#' @param response Optional character name for the response variable to use when \code{spec}
+#'   is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.
+#' @param use_spec_contrasts Logical; default \code{TRUE}. When \code{spec} is supplied and
+#'   \code{use_spec_contrasts=TRUE}, the function replays \code{spec$settings$contrasts_options}
+#'   on the parallel workers for deterministic coding.
+#' @param ... Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
+#'   (for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
+#'   \code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
+#'   setting is controlled by the \code{relaxed} argument of this function and
+#'   any \code{relaxed} value passed via \code{...} is ignored with a warning.
+#'
 #' @return A list of class \code{svem_significance_test} containing the test results.
 #'
-#' @seealso \code{svem_significance_test}
+#' @seealso \code{svem_significance_test}, \code{bigexp_terms}, \code{bigexp_formula}
 #'
 #' @importFrom lhs maximinLHS
 #' @importFrom gamlss gamlss gamlss.control
@@ -26,7 +73,7 @@
 #' @importFrom stats median complete.cases rgamma coef predict
 #' @importFrom foreach foreach %dopar%
 #' @importFrom doParallel registerDoParallel
-#' @importFrom parallel makeCluster stopCluster clusterSetRNGStream detectCores
+#' @importFrom parallel makeCluster stopCluster clusterSetRNGStream detectCores clusterCall
 #' @examples
 #' \donttest{
 #'   set.seed(1)
@@ -82,7 +129,6 @@
 #'   )
 #'   print(res$p_value)
 #' }
-#'
 #' @export
 svem_significance_test_parallel <- function(
     formula, data, mixture_groups = NULL,
@@ -90,30 +136,57 @@ svem_significance_test_parallel <- function(
     percent = 90, nBoot = 100,
     glmnet_alpha = c(1),
     weight_scheme = c("SVEM"),
-    objective = c("auto", "wAIC", "wBIC", "wGIC", "wSSE"),
+    objective = c("auto", "wAIC", "wBIC", "wSSE"),
     auto_ratio_cutoff = 1.3,
-    gamma = 2,
     relaxed = FALSE,
     verbose = TRUE,
     nCore = parallel::detectCores(),
-    seed = NULL, ...
+    seed = NULL,
+    spec = NULL,
+    response = NULL,
+    use_spec_contrasts = TRUE,
+    ...
 ) {
-  # Arg checks / choices
+  # --- basic choices ---
   objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
+  data <- as.data.frame(data)
 
-  # Parallel RNG (stream per worker)
+  # Determine response and working formula (optionally from spec)
+  if (!is.null(spec)) {
+    resp_name <- if (!is.null(response)) {
+      if (!is.character(response) || length(response) != 1L || !nzchar(response))
+        stop("response must be a non-empty character scalar when provided.")
+      response
+    } else {
+      as.character(formula[[2]])
+    }
+    if (!resp_name %in% names(data)) stop("Response '", resp_name, "' not found in 'data'.")
+    f_use <- bigexp_formula(spec, resp_name)
+  } else {
+    f_use <- formula
+    resp_name <- as.character(formula[[2]])
+  }
+
+  # Choose contrasts options (spec's, if requested)
+  contrasts_opts <- if (!is.null(spec) && isTRUE(use_spec_contrasts)) {
+    spec$settings$contrasts_options %||% getOption("contrasts")
+  } else {
+    getOption("contrasts")
+  }
+
+  # --- parallel RNG & cluster setup ---
   RNGkind("L'Ecuyer-CMRG")
   if (!is.null(seed)) set.seed(seed)
 
-  # Cluster setup
   nCore <- max(1L, as.integer(`%||%`(nCore, parallel::detectCores())))
   cl <- parallel::makeCluster(nCore)
   doParallel::registerDoParallel(cl)
   on.exit(parallel::stopCluster(cl), add = TRUE)
   if (!is.null(seed)) parallel::clusterSetRNGStream(cl, iseed = seed)
 
-  data <- as.data.frame(data)
+  # Set contrasts options on workers without referencing a missing symbol
+  parallel::clusterCall(cl, function(opts) { options(contrasts = opts); NULL }, contrasts_opts)
 
   # Sanitize ... so explicit 'relaxed' here cannot be overridden
   dots <- list(...)
@@ -122,17 +195,22 @@ svem_significance_test_parallel <- function(
     dots$relaxed <- NULL
   }
 
-  # Training design summary
-  mf <- stats::model.frame(formula, data)
+  # Training design pieces
+  mf <- stats::model.frame(f_use, data)
   y  <- stats::model.response(mf)
-  X  <- stats::model.matrix(formula, mf)
-  intercept_col <- which(colnames(X) == "(Intercept)")
-  if (length(intercept_col) > 0) X <- X[, -intercept_col, drop = FALSE]
 
-  predictor_vars  <- base::all.vars(stats::delete.response(stats::terms(formula, data = data)))
-  predictor_types <- sapply(data[predictor_vars], class)
-  continuous_vars  <- predictor_vars[!predictor_types %in% c("factor", "character")]
-  categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character")]
+  # For sampling, decide which raw columns are categorical vs continuous
+  if (!is.null(spec)) {
+    predictor_vars  <- spec$vars
+    is_cat          <- spec$is_cat
+    categorical_vars <- names(is_cat)[is_cat]
+    continuous_vars  <- names(is_cat)[!is_cat]
+  } else {
+    predictor_vars  <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data)))
+    predictor_types <- sapply(data[predictor_vars], function(z) class(z)[1L])
+    categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character", "logical")]
+    continuous_vars  <- setdiff(predictor_vars, categorical_vars)
+  }
 
   # Mixture bookkeeping
   mixture_vars <- character(0)
@@ -145,14 +223,28 @@ svem_significance_test_parallel <- function(
   }
   nonmix_continuous_vars <- setdiff(continuous_vars, mixture_vars)
 
-  # Non-mixture continuous via maximin LHS over observed ranges
+  # Non-mixture continuous via maximin LHS over ranges (prefer spec$num_range)
   if (length(nonmix_continuous_vars) > 0) {
-    ranges <- sapply(data[nonmix_continuous_vars], function(col) range(col, na.rm = TRUE))
+    if (!is.null(spec) && ncol(spec$num_range) > 0) {
+      rng_mat <- spec$num_range[, colnames(spec$num_range) %in% nonmix_continuous_vars, drop = FALSE]
+      missing <- setdiff(nonmix_continuous_vars, colnames(rng_mat))
+      if (length(missing)) {
+        add <- sapply(data[missing], function(col) range(col, na.rm = TRUE))
+        rownames(add) <- c("min","max")
+        rng_mat <- cbind(rng_mat, add)
+      }
+      rng_mat <- rng_mat[, nonmix_continuous_vars, drop = FALSE]
+    } else {
+      rng_mat <- sapply(data[nonmix_continuous_vars], function(col) range(col, na.rm = TRUE))
+      rownames(rng_mat) <- c("min","max")
+    }
+
     T_continuous_raw <- as.matrix(lhs::maximinLHS(nPoint, length(nonmix_continuous_vars)))
     T_continuous <- matrix(NA_real_, nrow = nPoint, ncol = length(nonmix_continuous_vars))
     colnames(T_continuous) <- nonmix_continuous_vars
     for (i in seq_along(nonmix_continuous_vars)) {
-      T_continuous[, i] <- T_continuous_raw[, i] * (ranges[2, i] - ranges[1, i]) + ranges[1, i]
+      lo <- rng_mat["min", i]; hi <- rng_mat["max", i]
+      T_continuous[, i] <- T_continuous_raw[, i] * (hi - lo) + lo
     }
     T_continuous <- as.data.frame(T_continuous)
   } else {
@@ -178,7 +270,6 @@ svem_significance_test_parallel <- function(
 
     res <- matrix(NA_real_, nrow = n, ncol = k)
     filled <- 0L; tries <- 0L
-
     while (filled < n && tries < max_tries) {
       m <- max(oversample * (n - filled), 1L)
       g <- matrix(stats::rgamma(m * k, shape = alpha, rate = 1), ncol = k, byrow = TRUE)
@@ -228,25 +319,31 @@ svem_significance_test_parallel <- function(
     T_mixture <- as.data.frame(T_mixture)
   }
 
-  # Categorical sampling (use observed levels; keep training levels attribute for factors)
+  # Categorical sampling
   T_categorical <- NULL
   if (length(categorical_vars) > 0) {
     T_categorical <- vector("list", length(categorical_vars))
     names(T_categorical) <- categorical_vars
     for (v in categorical_vars) {
-      x <- data[[v]]
-      if (is.factor(x)) {
-        obs_lev <- levels(base::droplevels(x))
-        T_categorical[[v]] <- factor(
-          sample(obs_lev, nPoint, replace = TRUE),
-          levels = levels(x) # keep original full level set
-        )
+      if (!is.null(spec)) {
+        lv <- spec$levels[[v]]
+        if (is.null(lv)) lv <- sort(unique(as.character(data[[v]])))
+        T_categorical[[v]] <- factor(sample(lv, nPoint, replace = TRUE), levels = lv)
       } else {
-        obs_lev <- sort(unique(as.character(x)))
-        T_categorical[[v]] <- factor(
-          sample(obs_lev, nPoint, replace = TRUE),
-          levels = obs_lev
-        )
+        x <- data[[v]]
+        if (is.factor(x)) {
+          obs_lev <- levels(base::droplevels(x))
+          T_categorical[[v]] <- factor(
+            sample(obs_lev, nPoint, replace = TRUE),
+            levels = levels(x)
+          )
+        } else {
+          obs_lev <- sort(unique(as.character(x)))
+          T_categorical[[v]] <- factor(
+            sample(obs_lev, nPoint, replace = TRUE),
+            levels = obs_lev
+          )
+        }
       }
     }
     T_categorical <- as.data.frame(T_categorical, stringsAsFactors = FALSE)
@@ -261,7 +358,7 @@ svem_significance_test_parallel <- function(
   y_mean <- mean(y)
 
   # --- Originals: parallel SVEM fits ---
-  if (isTRUE(verbose)) message("Fitting SVEM models to original data with mixture handling (parallel)...")
+  if (isTRUE(verbose)) message("Fitting SVEM models to original data (parallel)...")
   M_Y <- foreach::foreach(
     i = 1:nSVEM,
     .combine = rbind,
@@ -269,9 +366,9 @@ svem_significance_test_parallel <- function(
   ) %dopar% {
     svem_model <- tryCatch({
       do.call(SVEMnet::SVEMnet, c(list(
-        formula = formula, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
+        formula = f_use, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
         weight_scheme = weight_scheme, objective = objective,
-        auto_ratio_cutoff = auto_ratio_cutoff, gamma = gamma,
+        auto_ratio_cutoff = auto_ratio_cutoff,
         relaxed = relaxed
       ), dots))
     }, error = function(e) {
@@ -297,13 +394,13 @@ svem_significance_test_parallel <- function(
   ) %dopar% {
     y_perm <- sample(y, replace = FALSE)
     data_perm <- data
-    data_perm[[as.character(formula[[2]])]] <- y_perm
+    data_perm[[resp_name]] <- y_perm
 
     svem_model_perm <- tryCatch({
       do.call(SVEMnet::SVEMnet, c(list(
-        formula = formula, data = data_perm, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
+        formula = f_use, data = data_perm, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
         weight_scheme = weight_scheme, objective = objective,
-        auto_ratio_cutoff = auto_ratio_cutoff, gamma = gamma,
+        auto_ratio_cutoff = auto_ratio_cutoff,
         relaxed = relaxed
       ), dots))
     }, error = function(e) {
@@ -322,7 +419,7 @@ svem_significance_test_parallel <- function(
       elapsed_time <- Sys.time() - start_time_perm
       elapsed_secs <- as.numeric(elapsed_time, units = "secs")
       estimated_total_secs <- (elapsed_secs / jloop) * nPerm
-      remaining_secs <- estimated_total_secs - elapsed_secs
+      remaining_secs <- pmax(0, estimated_total_secs - elapsed_secs)
       remaining_time_formatted <- sprintf(
         "%02d:%02d:%02d",
         floor(remaining_secs / 3600),
@@ -351,24 +448,40 @@ svem_significance_test_parallel <- function(
   M_Y_centered <- sweep(M_Y, 2, col_means_M_pi_Y, "-")
   tilde_M_Y    <- sweep(M_Y_centered, 2, col_sds_M_pi_Y, "/")
 
-  # SVD and distances
+  # SVD and distances (hardened, same logic)
   svd_res <- svd(tilde_M_pi_Y)
   s <- svd_res$d
   V <- svd_res$v
 
   evalues_temp <- s^2
-  evalues_temp <- evalues_temp / sum(evalues_temp) * ncol(tilde_M_pi_Y)
+  # explained-variance percent (same as before; the ncol() factor cancels)
   cumsum_evalues <- cumsum(evalues_temp) / sum(evalues_temp) * 100
-  k_idx <- which(cumsum_evalues >= percent)[1]
-  if (is.na(k_idx)) k_idx <- length(evalues_temp)
-  evalues  <- evalues_temp[1:k_idx]
-  evectors <- V[, 1:k_idx, drop = FALSE]
 
-  T2_perm <- rowSums((tilde_M_pi_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_pi_Y %*% evectors))
+  k_idx <- which(cumsum_evalues >= percent)[1L]
+  if (!length(k_idx) || is.na(k_idx)) k_idx <- length(evalues_temp)
+  # guard against asking for more PCs than exist
+  k_idx <- min(k_idx, ncol(V))
+
+  evalues  <- evalues_temp[seq_len(k_idx)]
+  evectors <- V[, seq_len(k_idx), drop = FALSE]
+
+  # force matrices to avoid accidental data.frames
+  tilde_M_pi_Y <- as.matrix(tilde_M_pi_Y)
+  tilde_M_Y    <- as.matrix(tilde_M_Y)
+
+  # Project, then divide component-wise by eigenvalues (avoid diag() shape traps)
+  Z_pi <- tilde_M_pi_Y %*% evectors   # nPerm x k
+  Z_Y  <- tilde_M_Y    %*% evectors   # nSVEM x k
+
+  # numerical guard: zero/NA eigenvalues
+  evalues[!is.finite(evalues) | evalues <= 0] <- 1e-12
+
+  T2_perm <- rowSums((Z_pi^2) / rep(evalues, each = nrow(Z_pi)))
   d_pi_Y  <- sqrt(T2_perm)
 
-  T2_Y <- rowSums((tilde_M_Y %*% evectors %*% diag(1 / evalues)) * (tilde_M_Y %*% evectors))
+  T2_Y <- rowSums((Z_Y^2) / rep(evalues, each = nrow(Z_Y)))
   d_Y  <- sqrt(T2_Y)
+
 
   if (length(d_pi_Y) == 0) stop("No valid permutation distances to fit a distribution.")
 
@@ -396,11 +509,10 @@ svem_significance_test_parallel <- function(
   p_values <- 1 - gamlss.dist::pSHASHo(d_Y, mu = mu, sigma = sigma, nu = nu, tau = tau)
   p_value  <- stats::median(p_values)
 
-  response_name <- as.character(formula[[2]])
   data_d <- data.frame(
     D = c(d_Y, d_pi_Y),
     Source_Type = c(rep("Original", length(d_Y)), rep("Permutation", length(d_pi_Y))),
-    Response = response_name
+    Response = resp_name
   )
 
   results_list <- list(
@@ -415,4 +527,5 @@ svem_significance_test_parallel <- function(
   results_list
 }
 
+# internal helper
 `%||%` <- function(a, b) if (!is.null(a)) a else b
