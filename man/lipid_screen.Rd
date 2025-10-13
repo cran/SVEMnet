@@ -67,18 +67,18 @@ form_pdi <- bigexp_formula(spec, "PDI")
 
 # 4) Fit SVEM models with the shared factor space/expansion
 set.seed(1)
-fit_pot <- SVEMnet(form_pot, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
-fit_siz <- SVEMnet(form_siz, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
-fit_pdi <- SVEMnet(form_pdi, lipid_screen, nBoot = 60, glmnet_alpha = 1, relaxed = TRUE)
+fit_pot <- SVEMnet(form_pot, lipid_screen, nBoot = 100, glmnet_alpha = 1, relaxed = TRUE)
+fit_siz <- SVEMnet(form_siz, lipid_screen, nBoot = 100, glmnet_alpha = 1, relaxed = TRUE)
+fit_pdi <- SVEMnet(form_pdi, lipid_screen, nBoot = 100, glmnet_alpha = 1, relaxed = TRUE)
 
 # 5) Collect models in a named list by response
 objs <- list(Potency = fit_pot, Size = fit_siz, PDI = fit_pdi)
 
 # 6) Define multi-response goals and weights
-#    Maximize Potency (0.7), minimize Size (0.2), minimize PDI (0.1)
+#    Maximize Potency (0.6), minimize Size (0.3), minimize PDI (0.1)
 goals <- list(
-  Potency = list(goal = "max", weight = 0.7),
-  Size    = list(goal = "min", weight = 0.2),
+  Potency = list(goal = "max", weight = 0.6),
+  Size    = list(goal = "min", weight = 0.3),
   PDI     = list(goal = "min", weight = 0.1)
 )
 
@@ -93,9 +93,8 @@ mix <- list(list(
 opt_out <- svem_optimize_random(
   objects        = objs,
   goals          = goals,
-  n              = 5000,
+  n              = 1e5,
   mixture_groups = mix,
-  agg            = "mean",
   debias         = FALSE,
   ci             = TRUE,
   level          = 0.95,

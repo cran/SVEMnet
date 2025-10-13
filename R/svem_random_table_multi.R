@@ -10,13 +10,15 @@
 #'   A single model is also accepted and treated as a length-one list.
 #' @param n Number of random points to generate. Default is \code{1000}.
 #' @param mixture_groups Optional list of mixture constraint groups. Each group is a list
-#'   with elements \code{vars}, \code{lower}, \code{upper}, \code{total}. The variables in
-#'   \code{vars} must be numeric-like predictors present in all models. The sampler uses a
-#'   truncated Dirichlet so that elementwise bounds are respected and \code{sum(vars) = total}.
+#'   with elements \code{vars}, \code{lower}, \code{upper}, \code{total}.
 #' @param debias Logical; if \code{TRUE}, apply each model's calibration during prediction
 #'   when available. Default is \code{FALSE}.
 #' @param range_tol Numeric tolerance for comparing numeric ranges across models.
 #'   Default is \code{1e-8}.
+#' @param numeric_sampler Sampler for non-mixture numeric predictors:
+#'   \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
+#'   If \code{"random"} is selected and the \pkg{lhs} package is available,
+#'   \code{lhs::randomLHS} is used; otherwise plain \code{runif}.
 #'
 #' @return A list with three data frames:
 #' \itemize{
@@ -38,11 +40,16 @@
 #' The function stops with an informative error message if any of these checks fail.
 #'
 #' @section Sampling strategy:
-#' Non-mixture numeric variables are sampled with a maximin Latin hypercube over the
-#' cached numeric ranges. Mixture variables are sampled jointly within each specified
-#' group using a truncated Dirichlet so that elementwise bounds and the total sum
-#' are satisfied. Categorical variables are sampled from the cached factor levels.
-#' The same random predictor table is fed to each model so response columns are directly comparable.
+#' Non-mixture numeric variables are sampled using a selectable method:
+#' \itemize{
+#'   \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available, else uniform.
+#'   \item \code{"maximin"}: maximin Latin hypercube (space-filling; slower).
+#'   \item \code{"uniform"}: independent uniform draws within numeric ranges (fastest).
+#' }
+#' Mixture variables (if any) are sampled jointly within each specified group using
+#' a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
+#' Categorical variables are sampled from cached factor levels. The same random
+#' predictor table is fed to each model so response columns are directly comparable.
 #'
 #' @section Notes on mixtures:
 #' Each mixture group should list only numeric-like variables. Bounds are interpreted
@@ -69,55 +76,35 @@
 #' mix <- list(list(vars=c("A","B","C"),
 #'                  lower=c(0,0,0), upper=c(1,1,1), total=1))
 #'
-#' res <- svem_random_table_multi(
-#'   list(fit1, fit2), n = 200, mixture_groups = mix,
-#'   debias = FALSE
+#' # Fast random sampler
+#' tab_fast <- svem_random_table_multi(
+#'   objects        = list(fit1, fit2), n = 2000, mixture_groups = mix,
+#'   debias         = FALSE, numeric_sampler = "random"
 #' )
-#' head(res$all)
+#' head(tab_fast$all)
 #'
-#' # Lipid screening example with composition group
-#' data(lipid_screen)
-#' spec <- bigexp_terms(
-#'   Potency ~ PEG + Helper + Ionizable + Cholesterol +
-#'     Ionizable_Lipid_Type + N_P_ratio + flow_rate,
-#'   data = lipid_screen, factorial_order = 3
+#' # Uniform sampler (fastest)
+#' tab_uni <- svem_random_table_multi(
+#'   objects        = list(fit1, fit2), n = 2000,
+#'   debias         = FALSE, numeric_sampler = "uniform"
 #' )
-#' fP <- bigexp_formula(spec, "Potency")
-#' fS <- bigexp_formula(spec, "Size")
-#' fD <- bigexp_formula(spec, "PDI")
-#' mP <- SVEMnet(fP, lipid_screen, nBoot = 30)
-#' mS <- SVEMnet(fS, lipid_screen, nBoot = 30)
-#' mD <- SVEMnet(fD, lipid_screen, nBoot = 30)
-#'
-#' mixL <- list(list(
-#'   vars  = c("Cholesterol","PEG","Ionizable","Helper"),
-#'   lower = c(0.10, 0.01, 0.10, 0.10),
-#'   upper = c(0.60, 0.05, 0.60, 0.60),
-#'   total = 1
-#' ))
-#'
-#' tab <- svem_random_table_multi(
-#'   objects        = list(Potency = mP, Size = mS, PDI = mD),
-#'   n              = 1000,
-#'   mixture_groups = mixL,
-#'   debias         = FALSE
-#' )
-#' head(tab$all)
+#' head(tab_uni$all)
 #' }
 #'
-#' @importFrom lhs maximinLHS
+#' @importFrom lhs maximinLHS randomLHS
 #' @importFrom stats rgamma
 #' @export
 svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
-                                    debias = FALSE, range_tol = 1e-8) {
+                                    debias = FALSE, range_tol = 1e-8,
+                                    numeric_sampler = c("random","maximin","uniform")) {
+  numeric_sampler <- match.arg(numeric_sampler)
+
   # ---- validate inputs ----
   if (inherits(objects, "svem_model")) objects <- list(objects)
   if (!is.list(objects) || length(objects) < 1L)
     stop("'objects' must be a non-empty list of 'svem_model' fits.")
   if (!all(vapply(objects, function(o) inherits(o, "svem_model"), logical(1))))
     stop("All elements of 'objects' must be 'svem_model' objects.")
-
-  # All must have sampling_schema
   if (!all(vapply(objects, function(o) is.list(o$sampling_schema), logical(1))))
     stop("Each 'svem_model' must contain a valid $sampling_schema. Refit with updated SVEMnet().")
 
@@ -168,19 +155,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     }
     if (!ranges_equal(ref_ranges, s_ranges, range_tol))
       stop(msg, "numeric ranges differ from the reference (beyond tolerance).")
-  }
-
-  # Prevent duplicate responses
-  resp_names <- vapply(objects, function(o) {
-    nm <- tryCatch(as.character(o$formula[[2L]]), error = function(e) NA_character_)
-    if (!is.character(nm) || !nzchar(nm)) NA_character_ else nm
-  }, character(1))
-  if (anyNA(resp_names))
-    stop("At least one model has an invalid or missing response name.")
-  if (any(duplicated(resp_names))) {
-    dupes <- unique(resp_names[duplicated(resp_names)])
-    stop("Duplicate response names across models: ", paste(dupes, collapse = ", "),
-         ". Fit responses must be unique.")
   }
 
   # Aliases
@@ -247,7 +221,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     res
   }
 
-  # ---- sample non-mixture numerics ----
+  # ---- sample non-mixture numerics (selectable, faster by default) ----
   nonmix_num <- setdiff(is_num, mixture_vars)
   T_num <- NULL
   if (length(nonmix_num)) {
@@ -257,13 +231,27 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
         if (!all(is.finite(r)) || r[1] >= r[2]) c(0, 1) else r
       } else c(0, 1)
     }, numeric(2))
-    U <- as.matrix(lhs::maximinLHS(n, length(nonmix_num)))
-    T_num <- matrix(NA_real_, nrow = n, ncol = length(nonmix_num))
+    rownames(rng) <- c("min","max")
+    lo <- rng["min", ]; hi <- rng["max", ]; width <- hi - lo
+    q  <- length(nonmix_num)
+
+    use_lhs <- function() isTRUE(requireNamespace("lhs", quietly = TRUE))
+    U <- switch(numeric_sampler,
+                "maximin" = {
+                  if (!use_lhs()) stop("numeric_sampler = 'maximin' requires the 'lhs' package.")
+                  lhs::maximinLHS(n, q)
+                },
+                "random" = {
+                  if (use_lhs()) lhs::randomLHS(n, q) else matrix(runif(n * q), nrow = n, ncol = q)
+                },
+                "uniform" = {
+                  matrix(runif(n * q), nrow = n, ncol = q)
+                }
+    )
+    # map to ranges
+    T_num <- sweep(U, 2, width, `*`)
+    T_num <- sweep(T_num, 2, lo, `+`)
     colnames(T_num) <- nonmix_num
-    for (j in seq_along(nonmix_num)) {
-      lo <- rng[1, j]; hi <- rng[2, j]
-      T_num[, j] <- lo + (hi - lo) * U[, j]
-    }
     T_num <- as.data.frame(T_num)
   }
 

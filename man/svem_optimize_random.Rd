@@ -7,7 +7,7 @@
 svem_optimize_random(
   objects,
   goals,
-  n = 10000,
+  n = 50000,
   mixture_groups = NULL,
   debias = FALSE,
   agg = c("parms", "mean"),
@@ -15,7 +15,10 @@ svem_optimize_random(
   level = 0.95,
   top_frac = 0.01,
   k_candidates = 0,
-  verbose = TRUE
+  verbose = TRUE,
+  combine = c("geom", "mean"),
+  geom_floor = 1e-06,
+  numeric_sampler = c("random", "maximin", "uniform")
 )
 }
 \arguments{
@@ -41,25 +44,37 @@ via \code{predict(..., interval = TRUE)} or \code{predict_with_ci(...)}.}
 
 \item{level}{Confidence level for percentile intervals (default \code{0.95}).}
 
-\item{top_frac}{Fraction \code{(0, 1]} of highest-score rows to cluster (default \code{0.01}).}
+\item{top_frac}{Fraction in \code{(0, 1]} of highest-score rows to cluster (default \code{0.01}).}
 
 \item{k_candidates}{Integer number of diverse candidates (medoids) to return (default \code{0}).
 If \code{0}, no clustering is performed.}
 
 \item{verbose}{Logical; print a compact summary of the run and results.}
+
+\item{combine}{How to combine normalized per-response scores. Use \code{"geom"} for
+weighted geometric mean (default) or \code{"mean"} for weighted arithmetic mean.}
+
+\item{geom_floor}{Small positive floor in \code{(0,1)} used only for \code{combine = "geom"}.
+Each normalized score z in \code{[0,1]} is mapped to \code{z_adj = geom_floor + (1 - geom_floor) * z}
+before taking logs to avoid \code{log(0)}. Default \code{1e-6}.}
+
+\item{numeric_sampler}{Sampler for non-mixture numeric predictors passed to
+\code{svem_random_table_multi}. One of \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
+"random" uses \code{lhs::randomLHS} when available, otherwise plain \code{runif}.}
 }
 \value{
 A list with:
-\itemize{
-\item \code{best_idx}: Row index of the selected best design in the sampled table.
-\item \code{best_x}: Predictors at the best design.
-\item \code{best_pred}: Named numeric vector of predicted responses at \code{best_x}.
-\item \code{best_ci}: Data frame of percentile limits when \code{ci = TRUE}; otherwise \code{NULL}.
-\item \code{candidates}: Data frame of \code{k_candidates} diverse candidates (medoids; existing rows) with
-predictors, predictions, optional CIs, and score; \code{NULL} if \code{k_candidates = 0}.
-\item \code{score_table}: Sampled table with response columns, normalized and weighted contributions, and final score.
-\item \code{weights}: Normalized weights used in scoring.
-\item \code{goals}: Tidy data frame describing each response goal, weight, and target.
+\describe{
+\item{best_idx}{Row index of the selected best design in the sampled table.}
+\item{best_x}{Predictors at the best design.}
+\item{best_pred}{Named numeric vector of predicted responses at \code{best_x}.}
+\item{best_ci}{Data frame of percentile limits when \code{ci = TRUE}; otherwise \code{NULL}.}
+\item{candidates}{Data frame of \code{k_candidates} diverse candidates (medoids; existing rows) with
+predictors, predictions, optional CIs, and score; \code{NULL} if \code{k_candidates = 0}.}
+\item{score_table}{Sampled table with response columns, normalized contributions,
+weighted contributions, optional log-weighted terms (when \code{combine = "geom"}), and final score.}
+\item{weights}{Normalized weights used in scoring.}
+\item{goals}{Tidy data frame describing each response goal, weight, and target.}
 }
 }
 \description{
@@ -72,13 +87,18 @@ sampling and mixture constraints.
 }
 \section{Scoring}{
 
-Each response is normalized on the sampled range and combined via a weighted sum:
+Each response is normalized on the sampled range with \code{normalize01} mapping to \code{[0,1]}:
 \itemize{
-\item \code{"max"}: \code{normalize01(y)}
-\item \code{"min"}: \code{normalize01(-y)}
-\item \code{"target"}: \code{normalize01(-abs(y - target))}
+\item \code{goal = "max"} uses \code{normalize01(y)}.
+\item \code{goal = "min"} uses \code{normalize01(-y)}.
+\item \code{goal = "target"} uses \code{normalize01(-abs(y - target))}.
 }
-The \code{normalize01} function maps to \code{[0,1]} using the sampled minimum and maximum.
+Then the normalized values are combined across responses:
+\itemize{
+\item \code{combine = "mean"}: weighted arithmetic mean, computed as \code{sum_r w_r * z_r}.
+\item \code{combine = "geom"}: weighted geometric mean, computed as
+\code{exp( sum_r w_r * log(z_adj_r) )} with \code{z_adj_r = geom_floor + (1 - geom_floor) * z_r}.
+}
 }
 
 \section{Diverse candidates}{
@@ -107,19 +127,31 @@ goals <- list(
   y2 = list(goal = "target", weight = 0.4, target = 0.9)
 )
 
+# Default combine = "geom" and numeric_sampler = "random"
 out <- svem_optimize_random(
   objects      = objs,
   goals        = goals,
-  n            = 3000,
+  n            = 5000,
   agg          = "mean",
   debias       = FALSE,
   ci           = TRUE,
   level        = 0.95,
   k_candidates = 5,
   top_frac     = 0.02,
+  numeric_sampler = "random",
   verbose      = TRUE
 )
 out$best_x; head(out$candidates)
+
+# Use arithmetic mean instead, with fastest uniform sampler
+out_mean <- svem_optimize_random(
+  objects      = objs,
+  goals        = goals,
+  n            = 5000,
+  combine      = "mean",
+  numeric_sampler = "uniform",
+  verbose      = FALSE
+)
 
 # Mixture-constrained lipid example (composition sums to 1)
 data(lipid_screen)
@@ -160,6 +192,7 @@ opt <- svem_optimize_random(
   level          = 0.95,
   k_candidates   = 5,
   top_frac       = 0.01,
+  numeric_sampler = "random",
   verbose        = TRUE
 )
 opt$best_x; head(opt$candidates)

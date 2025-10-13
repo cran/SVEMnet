@@ -21,32 +21,46 @@
 #' @param ci Logical; if \code{TRUE}, compute percentile confidence intervals when available
 #'   via \code{predict(..., interval = TRUE)} or \code{predict_with_ci(...)}.
 #' @param level Confidence level for percentile intervals (default \code{0.95}).
-#' @param top_frac Fraction \code{(0, 1]} of highest-score rows to cluster (default \code{0.01}).
+#' @param top_frac Fraction in \code{(0, 1]} of highest-score rows to cluster (default \code{0.01}).
 #' @param k_candidates Integer number of diverse candidates (medoids) to return (default \code{0}).
 #'   If \code{0}, no clustering is performed.
 #' @param verbose Logical; print a compact summary of the run and results.
+#' @param combine How to combine normalized per-response scores. Use \code{"geom"} for
+#'   weighted geometric mean (default) or \code{"mean"} for weighted arithmetic mean.
+#' @param geom_floor Small positive floor in \code{(0,1)} used only for \code{combine = "geom"}.
+#'   Each normalized score z in \code{[0,1]} is mapped to \code{z_adj = geom_floor + (1 - geom_floor) * z}
+#'   before taking logs to avoid \code{log(0)}. Default \code{1e-6}.
+#' @param numeric_sampler Sampler for non-mixture numeric predictors passed to
+#'   \code{svem_random_table_multi}. One of \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
+#'   "random" uses \code{lhs::randomLHS} when available, otherwise plain \code{runif}.
 #'
 #' @return A list with:
-#' \itemize{
-#'   \item \code{best_idx}: Row index of the selected best design in the sampled table.
-#'   \item \code{best_x}: Predictors at the best design.
-#'   \item \code{best_pred}: Named numeric vector of predicted responses at \code{best_x}.
-#'   \item \code{best_ci}: Data frame of percentile limits when \code{ci = TRUE}; otherwise \code{NULL}.
-#'   \item \code{candidates}: Data frame of \code{k_candidates} diverse candidates (medoids; existing rows) with
-#'         predictors, predictions, optional CIs, and score; \code{NULL} if \code{k_candidates = 0}.
-#'   \item \code{score_table}: Sampled table with response columns, normalized and weighted contributions, and final score.
-#'   \item \code{weights}: Normalized weights used in scoring.
-#'   \item \code{goals}: Tidy data frame describing each response goal, weight, and target.
+#' \describe{
+#'   \item{best_idx}{Row index of the selected best design in the sampled table.}
+#'   \item{best_x}{Predictors at the best design.}
+#'   \item{best_pred}{Named numeric vector of predicted responses at \code{best_x}.}
+#'   \item{best_ci}{Data frame of percentile limits when \code{ci = TRUE}; otherwise \code{NULL}.}
+#'   \item{candidates}{Data frame of \code{k_candidates} diverse candidates (medoids; existing rows) with
+#'         predictors, predictions, optional CIs, and score; \code{NULL} if \code{k_candidates = 0}.}
+#'   \item{score_table}{Sampled table with response columns, normalized contributions,
+#'         weighted contributions, optional log-weighted terms (when \code{combine = "geom"}), and final score.}
+#'   \item{weights}{Normalized weights used in scoring.}
+#'   \item{goals}{Tidy data frame describing each response goal, weight, and target.}
 #' }
 #'
 #' @section Scoring:
-#' Each response is normalized on the sampled range and combined via a weighted sum:
+#' Each response is normalized on the sampled range with \code{normalize01} mapping to \code{[0,1]}:
 #' \itemize{
-#'   \item \code{"max"}: \code{normalize01(y)}
-#'   \item \code{"min"}: \code{normalize01(-y)}
-#'   \item \code{"target"}: \code{normalize01(-abs(y - target))}
+#'   \item \code{goal = "max"} uses \code{normalize01(y)}.
+#'   \item \code{goal = "min"} uses \code{normalize01(-y)}.
+#'   \item \code{goal = "target"} uses \code{normalize01(-abs(y - target))}.
 #' }
-#' The \code{normalize01} function maps to \code{[0,1]} using the sampled minimum and maximum.
+#' Then the normalized values are combined across responses:
+#' \itemize{
+#'   \item \code{combine = "mean"}: weighted arithmetic mean, computed as \code{sum_r w_r * z_r}.
+#'   \item \code{combine = "geom"}: weighted geometric mean, computed as
+#'         \code{exp( sum_r w_r * log(z_adj_r) )} with \code{z_adj_r = geom_floor + (1 - geom_floor) * z_r}.
+#' }
 #'
 #' @section Diverse candidates:
 #' We take the top \code{top_frac} fraction by score, compute Gower distances on predictors,
@@ -72,19 +86,31 @@
 #'   y2 = list(goal = "target", weight = 0.4, target = 0.9)
 #' )
 #'
+#' # Default combine = "geom" and numeric_sampler = "random"
 #' out <- svem_optimize_random(
 #'   objects      = objs,
 #'   goals        = goals,
-#'   n            = 3000,
+#'   n            = 5000,
 #'   agg          = "mean",
 #'   debias       = FALSE,
 #'   ci           = TRUE,
 #'   level        = 0.95,
 #'   k_candidates = 5,
 #'   top_frac     = 0.02,
+#'   numeric_sampler = "random",
 #'   verbose      = TRUE
 #' )
 #' out$best_x; head(out$candidates)
+#'
+#' # Use arithmetic mean instead, with fastest uniform sampler
+#' out_mean <- svem_optimize_random(
+#'   objects      = objs,
+#'   goals        = goals,
+#'   n            = 5000,
+#'   combine      = "mean",
+#'   numeric_sampler = "uniform",
+#'   verbose      = FALSE
+#' )
 #'
 #' # Mixture-constrained lipid example (composition sums to 1)
 #' data(lipid_screen)
@@ -125,6 +151,7 @@
 #'   level          = 0.95,
 #'   k_candidates   = 5,
 #'   top_frac       = 0.01,
+#'   numeric_sampler = "random",
 #'   verbose        = TRUE
 #' )
 #' opt$best_x; head(opt$candidates)
@@ -136,7 +163,7 @@
 #' @export
 svem_optimize_random <- function(objects,
                                  goals,
-                                 n = 10000,
+                                 n = 50000,
                                  mixture_groups = NULL,
                                  debias = FALSE,
                                  agg = c("parms", "mean"),
@@ -144,8 +171,13 @@ svem_optimize_random <- function(objects,
                                  level = 0.95,
                                  top_frac = 0.01,
                                  k_candidates = 0,
-                                 verbose = TRUE) {
+                                 verbose = TRUE,
+                                 combine = c("geom", "mean"),
+                                 geom_floor = 1e-6,
+                                 numeric_sampler = c("random","maximin","uniform")) {
   agg <- match.arg(agg)
+  combine <- match.arg(combine)
+  numeric_sampler <- match.arg(numeric_sampler)
 
   # --- validate inputs ---
   if (!is.list(objects) || !length(objects))
@@ -199,10 +231,10 @@ svem_optimize_random <- function(objects,
   goal_df$weight <- if (sw > 0) goal_df$weight / sw else rep(1 / nrow(goal_df), nrow(goal_df))
   wts <- stats::setNames(goal_df$weight, goal_df$response)
 
-  # --- sample and predict (serial) ---
+  # --- sample and predict (sampler selectable) ---
   sampled_raw <- svem_random_table_multi(
     objects = objects, n = n, mixture_groups = mixture_groups,
-    debias = debias
+    debias = debias, numeric_sampler = numeric_sampler
   )
 
   # support both structured and plain data.frame returns
@@ -246,12 +278,27 @@ svem_optimize_random <- function(objects,
   scored <- sampled
   for (nm in names(contrib_cols))  scored[[nm]] <- contrib_cols[[nm]]
   for (nm in names(weighted_cols)) scored[[nm]] <- weighted_cols[[nm]]
-  scored$score <- Reduce(`+`, weighted_cols)
+
+  if (combine == "mean") {
+    scored$score <- Reduce(`+`, weighted_cols)
+  } else {
+    # Geometric mean: exp( sum_r w_r * log(z_adj) ), where z_adj = geom_floor + (1 - geom_floor) * z
+    log_terms <- list()
+    for (r in resp_cols) {
+      z  <- contrib_cols[[paste0(r, "_norm")]]
+      z_adj <- (1 - geom_floor) * z + geom_floor
+      lw <- as.numeric(wts[r]) * log(z_adj)
+      log_terms[[r]] <- lw
+      scored[[paste0(r, "_logw")]] <- lw
+    }
+    scored$score <- exp(Reduce(`+`, log_terms))
+  }
 
   # --- best row and predictions ---
   best_idx <- which.max(scored$score)
   predictor_cols <- setdiff(colnames(scored),
-                            c(resp_cols, names(contrib_cols), names(weighted_cols), "score"))
+                            c(resp_cols, names(contrib_cols), names(weighted_cols), "score",
+                              paste0(resp_cols, "_logw")))
   best_x <- scored[best_idx, predictor_cols, drop = FALSE]
 
   best_pred <- vapply(resp_cols, function(r) {
@@ -269,14 +316,6 @@ svem_optimize_random <- function(objects,
         !is.null(res1$lwr) && !is.null(res1$upr)) {
       return(c(lwr = as.numeric(res1$lwr[1]), upr = as.numeric(res1$upr[1])))
     }
-    if (isTRUE(exists("predict_with_ci", mode = "function"))) {
-      res2 <- try(predict_with_ci(obj, newdata = newx, debias = debias, level = level), silent = TRUE)
-      if (!inherits(res2, "try-error") && is.data.frame(res2) &&
-          all(c("lwr", "upr") %in% names(res2))) {
-        return(c(lwr = as.numeric(res2$lwr[1]), upr = as.numeric(res2$upr[1])))
-      }
-    }
-    warning("Could not compute percentile CI; returning NA.")
     c(lwr = NA_real_, upr = NA_real_)
   }
 
@@ -335,27 +374,11 @@ svem_optimize_random <- function(objects,
     cat("Points sampled:", n, "\n")
     cat("Aggregation:", agg, "  Debias:", debias, "  CI:", ci,
         if (ci) paste0(" (level=", level, ")"), "\n")
+    cat("Combine:", combine,
+        if (combine == "geom") paste0("  geom_floor=", format(geom_floor, digits = 6)), "\n")
+    cat("Numeric sampler:", numeric_sampler, "\n")
     if (k_candidates > 0)
       cat("Diverse candidates:", k_candidates, "  Top fraction:", top_frac, "\n")
-    cat("\nGoals and weights:\n")
-    print(data.frame(Response = goal_df$response,
-                     Goal     = goal_df$goal,
-                     Weight   = round(goal_df$weight, 4),
-                     Target   = ifelse(is.na(goal_df$target), "", format(goal_df$target)),
-                     row.names = NULL))
-    cat("\nBest score:", format(scored$score[best_idx], digits = 6), "at row", best_idx, "\n")
-    cat("Predictors at best row:\n")
-    print(best_x)
-    cat("\nPredicted responses at best row:\n")
-    print(as.data.frame(t(best_pred)))
-    if (ci && !is.null(best_ci)) {
-      cat("\nPercentile confidence limits at best row:\n")
-      print(best_ci)
-    }
-    if (!is.null(candidates)) {
-      cat("\nDiverse high-score candidates (medoids):\n")
-      print(utils::head(candidates, k_candidates))
-    }
   }
 
   list(

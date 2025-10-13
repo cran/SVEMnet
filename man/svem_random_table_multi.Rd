@@ -9,7 +9,8 @@ svem_random_table_multi(
   n = 1000,
   mixture_groups = NULL,
   debias = FALSE,
-  range_tol = 1e-08
+  range_tol = 1e-08,
+  numeric_sampler = c("random", "maximin", "uniform")
 )
 }
 \arguments{
@@ -20,15 +21,18 @@ A single model is also accepted and treated as a length-one list.}
 \item{n}{Number of random points to generate. Default is \code{1000}.}
 
 \item{mixture_groups}{Optional list of mixture constraint groups. Each group is a list
-with elements \code{vars}, \code{lower}, \code{upper}, \code{total}. The variables in
-\code{vars} must be numeric-like predictors present in all models. The sampler uses a
-truncated Dirichlet so that elementwise bounds are respected and \code{sum(vars) = total}.}
+with elements \code{vars}, \code{lower}, \code{upper}, \code{total}.}
 
 \item{debias}{Logical; if \code{TRUE}, apply each model's calibration during prediction
 when available. Default is \code{FALSE}.}
 
 \item{range_tol}{Numeric tolerance for comparing numeric ranges across models.
 Default is \code{1e-8}.}
+
+\item{numeric_sampler}{Sampler for non-mixture numeric predictors:
+\code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
+If \code{"random"} is selected and the \pkg{lhs} package is available,
+\code{lhs::randomLHS} is used; otherwise plain \code{runif}.}
 }
 \value{
 A list with three data frames:
@@ -58,11 +62,16 @@ The function stops with an informative error message if any of these checks fail
 }
 \section{Sampling strategy}{
 
-Non-mixture numeric variables are sampled with a maximin Latin hypercube over the
-cached numeric ranges. Mixture variables are sampled jointly within each specified
-group using a truncated Dirichlet so that elementwise bounds and the total sum
-are satisfied. Categorical variables are sampled from the cached factor levels.
-The same random predictor table is fed to each model so response columns are directly comparable.
+Non-mixture numeric variables are sampled using a selectable method:
+\itemize{
+\item \code{"random"}: random Latin hypercube when \pkg{lhs} is available, else uniform.
+\item \code{"maximin"}: maximin Latin hypercube (space-filling; slower).
+\item \code{"uniform"}: independent uniform draws within numeric ranges (fastest).
+}
+Mixture variables (if any) are sampled jointly within each specified group using
+a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
+Categorical variables are sampled from cached factor levels. The same random
+predictor table is fed to each model so response columns are directly comparable.
 }
 
 \section{Notes on mixtures}{
@@ -90,40 +99,19 @@ fit2 <- SVEMnet(y2 ~ X1 + X2 + A + B + C + F, d, nBoot = 40)
 mix <- list(list(vars=c("A","B","C"),
                  lower=c(0,0,0), upper=c(1,1,1), total=1))
 
-res <- svem_random_table_multi(
-  list(fit1, fit2), n = 200, mixture_groups = mix,
-  debias = FALSE
+# Fast random sampler
+tab_fast <- svem_random_table_multi(
+  objects        = list(fit1, fit2), n = 2000, mixture_groups = mix,
+  debias         = FALSE, numeric_sampler = "random"
 )
-head(res$all)
+head(tab_fast$all)
 
-# Lipid screening example with composition group
-data(lipid_screen)
-spec <- bigexp_terms(
-  Potency ~ PEG + Helper + Ionizable + Cholesterol +
-    Ionizable_Lipid_Type + N_P_ratio + flow_rate,
-  data = lipid_screen, factorial_order = 3
+# Uniform sampler (fastest)
+tab_uni <- svem_random_table_multi(
+  objects        = list(fit1, fit2), n = 2000,
+  debias         = FALSE, numeric_sampler = "uniform"
 )
-fP <- bigexp_formula(spec, "Potency")
-fS <- bigexp_formula(spec, "Size")
-fD <- bigexp_formula(spec, "PDI")
-mP <- SVEMnet(fP, lipid_screen, nBoot = 30)
-mS <- SVEMnet(fS, lipid_screen, nBoot = 30)
-mD <- SVEMnet(fD, lipid_screen, nBoot = 30)
-
-mixL <- list(list(
-  vars  = c("Cholesterol","PEG","Ionizable","Helper"),
-  lower = c(0.10, 0.01, 0.10, 0.10),
-  upper = c(0.60, 0.05, 0.60, 0.60),
-  total = 1
-))
-
-tab <- svem_random_table_multi(
-  objects        = list(Potency = mP, Size = mS, PDI = mD),
-  n              = 1000,
-  mixture_groups = mixL,
-  debias         = FALSE
-)
-head(tab$all)
+head(tab_uni$all)
 }
 
 }

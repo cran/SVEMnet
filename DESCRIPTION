@@ -2,8 +2,8 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 2.2.4
-Date: 2025-09-25
+Version: 2.3.1
+Date: 2025-10-13
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
@@ -12,7 +12,7 @@ Authors@R:
            comment = c(ORCID = "0000-0002-5933-8706"))
 Description: Implements Self-Validated Ensemble Models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) using elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). SVEM averages predictions from multiple models fitted to fractionally weighted bootstraps of the data, tuned with anti-correlated validation weights. Also implements the randomized permutation whole-model test for SVEM (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>).
 Depends: R (>= 3.5.0)
-Imports: glmnet (>= 4.1-2), stats, cluster, ggplot2, lhs, foreach,
+Imports: glmnet (>= 4.1-4), stats, cluster, ggplot2, lhs, foreach,
         doParallel, parallel, gamlss, gamlss.dist
 Suggests: covr, knitr, rmarkdown, testthat (>= 3.0.0), withr, vdiffr
 VignetteBuilder: knitr
@@ -22,9 +22,9 @@ RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 LazyData: true
 NeedsCompilation: no
-Packaged: 2025-09-25 23:10:29 UTC; andre
+Packaged: 2025-10-13 23:29:20 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2025-09-26 07:20:10 UTC
+Date/Publication: 2025-10-13 23:50:02 UTC
