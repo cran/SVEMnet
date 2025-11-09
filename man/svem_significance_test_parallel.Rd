@@ -19,7 +19,7 @@ svem_significance_test_parallel(
   auto_ratio_cutoff = 1.3,
   relaxed = FALSE,
   verbose = TRUE,
-  nCore = parallel::detectCores(),
+  nCore = parallel::detectCores() - 1,
   seed = NULL,
   spec = NULL,
   response = NULL,
@@ -28,8 +28,9 @@ svem_significance_test_parallel(
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be tested. If \code{spec} is provided,
-the right-hand side is ignored and replaced by the locked expansion in \code{spec}.}
+\item{formula}{A formula specifying the model to be tested. If \code{spec} is
+provided, the right-hand side is ignored and replaced by the locked
+expansion in \code{spec}.}
 
 \item{data}{A data frame containing the variables in the model.}
 
@@ -38,31 +39,36 @@ groups. Each element of the list should be a list with components
 \code{vars} (character vector of column names), \code{lower} (numeric vector of
 lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
 of upper bounds of the same length), and \code{total} (scalar specifying the
-sum of the mixture variables). All mixture variables must be included in \code{vars},
-and no variable can appear in more than one mixture group. Defaults to \code{NULL}.}
+sum of the mixture variables). All mixture variables must be included in
+\code{vars}, and no variable can appear in more than one mixture group.
+Defaults to \code{NULL}.}
 
-\item{nPoint}{Number of random points in the factor space (default: 2000).}
+\item{nPoint}{Number of random points in the factor space (default: \code{2000}).}
 
-\item{nSVEM}{Number of SVEM fits on the original data (default: 10).}
+\item{nSVEM}{Number of SVEM fits on the original (unpermuted) data used to
+summarize the observed surface (default: \code{10}).}
 
-\item{nPerm}{Number of SVEM fits on permuted responses for the reference
-distribution (default: 150).}
+\item{nPerm}{Number of SVEM fits on permuted responses used to build the null
+reference distribution (default: \code{150}).}
 
-\item{percent}{Percentage of variance to capture in the SVD (default: 90).}
+\item{percent}{Percentage of variance to capture in the SVD (default: \code{90}).}
 
-\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: 100).}
+\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: \code{100}).}
 
-\item{glmnet_alpha}{The alpha parameter(s) for glmnet (default: \code{c(1)}).}
+\item{glmnet_alpha}{The alpha parameter(s) for \code{glmnet} (default: \code{c(1)}).}
 
-\item{weight_scheme}{Weighting scheme for SVEM (default: "SVEM").}
+\item{weight_scheme}{Weighting scheme for SVEM (default: \code{"SVEM"}).
+Passed to \code{SVEMnet()}.}
 
 \item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
-path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, \code{"wSSE"}
-(default: \code{"auto"}).  (Note: \code{"wGIC"} is no longer supported.)}
+path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or
+\code{"wSSE"} (default: \code{"auto"}). Note: \code{"wGIC"} is no longer
+supported.}
 
 \item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
-\code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
-\code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.}
+\code{objective = "auto"} (default \code{1.3}). With \code{r = n_X / p_X}, if
+\code{r >= auto_ratio_cutoff} wAIC is used; otherwise wBIC. Passed through
+to \code{SVEMnet()}.}
 
 \item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner
 \code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
@@ -71,49 +77,91 @@ glmnet path is used. This value is passed through to \code{SVEMnet()}.
 Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
 (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.}
 
-\item{verbose}{Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).}
+\item{verbose}{Logical; if \code{TRUE}, display progress messages
+(default: \code{TRUE}).}
 
-\item{nCore}{Number of CPU cores for parallel processing (default: all available cores).}
+\item{nCore}{Number of CPU cores for parallel processing. Default is
+\code{parallel::detectCores() - 1}, with a floor of 1.}
 
-\item{seed}{Optional integer seed for reproducible parallel RNG (default: \code{NULL}).}
+\item{seed}{Optional integer seed for reproducible parallel RNG (default:
+\code{NULL}). When supplied, the master RNG kind is set to
+\code{"L'Ecuyer-CMRG"} with \code{sample.kind = "Rounding"}, and
+\code{doRNG::registerDoRNG()} is used so that the \code{\%dorng\%} loops are
+reproducible regardless of scheduling.}
 
-\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
-the test reuses its locked expansion. The working formula becomes
+\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If
+provided, the test reuses its locked expansion. The working formula becomes
 \code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
 \code{response} if supplied, otherwise from the left-hand side of \code{formula}.
-Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
-when available.}
+Categorical sampling uses \code{spec$levels} and numeric sampling prefers
+\code{spec$num_range} when available.}
 
-\item{response}{Optional character name for the response variable to use when \code{spec}
-is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.}
+\item{response}{Optional character name for the response variable to use when
+\code{spec} is supplied. If omitted, the response is taken from the left-hand
+side of \code{formula}.}
 
-\item{use_spec_contrasts}{Logical; default \code{TRUE}. When \code{spec} is supplied and
-\code{use_spec_contrasts=TRUE}, the function replays \code{spec$settings$contrasts_options}
-on the parallel workers for deterministic coding.}
+\item{use_spec_contrasts}{Logical; default \code{TRUE}. When \code{spec} is
+supplied and \code{use_spec_contrasts = TRUE}, the function replays
+\code{spec$settings$contrasts_options} on the parallel workers for
+deterministic coding.}
 
-\item{...}{Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
-(for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
-\code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
-setting is controlled by the \code{relaxed} argument of this function and
-any \code{relaxed} value passed via \code{...} is ignored with a warning.}
+\item{...}{Additional arguments passed to \code{SVEMnet()} and then to
+\code{glmnet()} (for example: \code{penalty.factor}, \code{offset},
+\code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
+The \code{relaxed} setting is controlled by the \code{relaxed} argument of
+this function and any \code{relaxed} value passed via \code{...} is ignored
+with a warning.}
 }
 \value{
-A list of class \code{svem_significance_test} containing the test results.
+A list of class \code{svem_significance_test} with components:
+\itemize{
+\item \code{p_value}: the median whole-model p-value over original SVEM fits.
+\item \code{p_values}: vector of p-values for each original SVEM fit.
+\item \code{d_Y}: distances for the original SVEM fits.
+\item \code{d_pi_Y}: distances for the permutation fits.
+\item \code{distribution_fit}: the fitted SHASHo distribution object.
+\item \code{data_d}: data frame of distances and source labels, suitable
+for plotting.
+}
 }
 \description{
-Whole-model significance test using SVEM with support for mixture factor groups,
-parallelizing the SVEM fits for originals and permutations.
+Whole-model significance test for continuous (Gaussian) SVEM fits, with
+support for mixture factor groups and parallel SVEM refits.
 }
 \details{
-Identical in logic to \code{svem_significance_test()} but runs the expensive
-SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
-(including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
+The test follows Karl (2024): it generates a space-filling grid in the
+factor space, fits multiple SVEM models on the original data and on
+permuted responses, standardizes predictions on the grid, reduces them via
+an SVD-based low-rank representation, and summarizes each fit by a
+Mahalanobis-type distance in the reduced space. A flexible SHASHo
+distribution is then fit to the permutation distances and used to obtain
+a whole-model p-value for the observed surface.
 
-This parallel version can optionally reuse a deterministic, locked expansion built
-with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
-ensure that categorical levels, contrasts, and the polynomial/interaction structure are
-identical across repeated calls and across multiple responses of the same factor space.
+All SVEM refits (for the original and permuted responses) are run in
+parallel using \code{foreach} + \code{doParallel}. Random draws
+(including permutations and evaluation-grid sampling) are made reproducible
+across workers using \code{doRNG} together with
+\code{RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")} when a
+\code{seed} is supplied.
+
+The function can optionally reuse a deterministic, locked expansion built
+with \code{bigexp_terms()}. Provide \code{spec} (and optionally
+\code{response}) to ensure that categorical levels, contrasts, and the
+polynomial/interaction structure are identical across repeated calls and
+across multiple responses sharing the same factor space.
+
+Although the implementation calls \code{SVEMnet()} internally and will
+technically run for any supported \code{family}, the significance test is
+\emph{designed} for continuous (Gaussian) responses and should be interpreted
+in that setting.
 }
+\section{Acknowledgments}{
+
+OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+used to assist with coding and roxygen documentation; all
+content was reviewed and finalized by the author.
+}
+
 \examples{
 \donttest{
   set.seed(1)
@@ -170,6 +218,32 @@ identical across repeated calls and across multiple responses of the same factor
   print(res$p_value)
 }
 }
+\references{
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+
+Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+
+Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+
+Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
+
+Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
+
+Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+
+Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
+
+Friedman, J. H., Hastie, T., and Tibshirani, R. (2010).
+Regularization Paths for Generalized Linear Models via Coordinate Descent.
+Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+}
 \seealso{
-\code{svem_significance_test}, \code{bigexp_terms}, \code{bigexp_formula}
+\code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
 }

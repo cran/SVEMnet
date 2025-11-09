@@ -2,114 +2,215 @@
 % Please edit documentation in R/svem_optimize_random.R
 \name{svem_optimize_random}
 \alias{svem_optimize_random}
-\title{Random-Search Optimizer with Goals, Weights, Optional CIs, and Diverse Candidates}
+\title{Random-search optimizer with desirabilities, WMT reweighting, CIs,
+optimal + exploration candidates, and scored originals}
 \usage{
 svem_optimize_random(
   objects,
   goals,
+  data = NULL,
   n = 50000,
   mixture_groups = NULL,
-  debias = FALSE,
-  agg = c("parms", "mean"),
-  ci = TRUE,
   level = 0.95,
-  top_frac = 0.01,
-  k_candidates = 0,
+  top_frac = 0.02,
+  k_candidates = 5,
   verbose = TRUE,
   combine = c("geom", "mean"),
-  geom_floor = 1e-06,
-  numeric_sampler = c("random", "maximin", "uniform")
+  numeric_sampler = c("random", "maximin", "uniform"),
+  reweight_by_wmt = FALSE,
+  wmt_transform = c("neglog10", "one_minus_p"),
+  wmt_control = list(seed = 123),
+  k_exploration_candidates = 5,
+  exploration_top_frac = 0.05
 )
 }
 \arguments{
 \item{objects}{Named list of \code{svem_model} objects (from \code{SVEMnet()}).
-List names must match the response names (left-hand sides) of the models.}
+Names are treated as response identifiers (typically matching the left-hand
+sides of the model formulas).}
 
-\item{goals}{Named list per response of the form
-\code{list(goal = "max"|"min"|"target", weight = nonnegative number, target = number when goal = "target")}.
-Weights are normalized to sum to one internally.}
+\item{goals}{Named list per response. Each entry must include: \code{goal} (one of
+\code{"max"}, \code{"min"}, \code{"target"}) and a nonnegative \code{weight}. For
+\code{goal = "target"}, also provide \code{target}. Optional per-response DS controls:
+for \code{"max"}/\code{"min"}: \code{lower_acceptable} (L), \code{upper_acceptable} (U),
+\code{shape} (>= 0); for \code{"target"}: \code{tol} (symmetric) or
+\code{tol_left}/\code{tol_right}, and \code{shape_left}/\code{shape_right}. If anchors
+or tolerances are not provided, robust defaults are inferred from the sampled responses
+using the 2nd-98th percentile range.}
+
+\item{data}{Optional data frame used when \code{reweight_by_wmt = TRUE} and to
+produce \code{original_data_scored}. If \code{reweight_by_wmt = TRUE} and
+\code{data} is not supplied (or is not a data frame), the function stops.
+Each model's stored formula is evaluated on \code{data} for the WMT via
+\code{svem_significance_test_parallel()}. Any \code{mixture_groups} are forwarded.}
 
 \item{n}{Number of random samples to draw.}
 
-\item{mixture_groups}{Optional mixture constraints forwarded to \code{svem_random_table_multi()}.
-Each group may include \code{vars}, \code{lower}, \code{upper}, and \code{total}.}
+\item{mixture_groups}{Optional mixture constraints forwarded to
+\code{svem_random_table_multi()}. Each group may include \code{vars},
+\code{lower}, \code{upper}, and \code{total}.}
 
-\item{debias}{Logical; if \code{TRUE}, use debiased predictions for scoring where available.}
+\item{level}{Confidence level for percentile intervals. Default: \code{0.95}.}
 
-\item{agg}{Aggregation for point predictions, one of \code{"parms"} or \code{"mean"}.
-This is passed to \code{predict.svem_model} when applicable.}
+\item{top_frac}{Fraction in \code{(0, 1]} of highest-score rows to cluster for
+optimal candidates. Default: \code{0.02}.}
 
-\item{ci}{Logical; if \code{TRUE}, compute percentile confidence intervals when available
-via \code{predict(..., interval = TRUE)} or \code{predict_with_ci(...)}.}
-
-\item{level}{Confidence level for percentile intervals (default \code{0.95}).}
-
-\item{top_frac}{Fraction in \code{(0, 1]} of highest-score rows to cluster (default \code{0.01}).}
-
-\item{k_candidates}{Integer number of diverse candidates (medoids) to return (default \code{0}).
-If \code{0}, no clustering is performed.}
+\item{k_candidates}{Number of diverse optimal candidates (medoids) to return.
+If \code{0}, no optimality clustering is performed. Default: \code{5}.}
 
 \item{verbose}{Logical; print a compact summary of the run and results.}
 
-\item{combine}{How to combine normalized per-response scores. Use \code{"geom"} for
-weighted geometric mean (default) or \code{"mean"} for weighted arithmetic mean.}
-
-\item{geom_floor}{Small positive floor in \code{(0,1)} used only for \code{combine = "geom"}.
-Each normalized score z in \code{[0,1]} is mapped to \code{z_adj = geom_floor + (1 - geom_floor) * z}
-before taking logs to avoid \code{log(0)}. Default \code{1e-6}.}
+\item{combine}{How to combine per-response desirabilities. Use \code{"geom"} for
+weighted geometric mean (default) or \code{"mean"} for weighted arithmetic mean.
+For \code{combine = "geom"}, a small floor is applied before logging to avoid \code{log(0)}.}
 
 \item{numeric_sampler}{Sampler for non-mixture numeric predictors passed to
-\code{svem_random_table_multi}. One of \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
-"random" uses \code{lhs::randomLHS} when available, otherwise plain \code{runif}.}
+\code{svem_random_table_multi()}. One of \code{"random"} (default), \code{"maximin"},
+or \code{"uniform"}. \code{"random"} uses \code{lhs::randomLHS()} when available,
+otherwise plain \code{runif()}.}
+
+\item{reweight_by_wmt}{Logical; if \code{TRUE}, compute whole-model p-values (WMT)
+for each response on \code{data} and downweight responses with weak factor relationships
+before scoring. Requires \code{data}. \strong{Not allowed if any responses are binomial.}}
+
+\item{wmt_transform}{Transformation used to turn p-values into multipliers when
+\code{reweight_by_wmt = TRUE}. One of \code{"neglog10"}, \code{"one_minus_p"}.
+Multipliers are floored internally to avoid zeroing weights and then renormalized
+to sum to one with the user weights.}
+
+\item{wmt_control}{Optional list to override WMT defaults passed to
+\code{svem_significance_test_parallel()}. Recognized entries:
+\code{nPoint}, \code{nSVEM}, \code{nPerm}, \code{percent}, \code{nBoot},
+\code{glmnet_alpha}, \code{weight_scheme}, \code{objective},
+\code{auto_ratio_cutoff}, \code{relaxed}, \code{verbose}, \code{nCore},
+\code{seed}, \code{spec}, \code{response}, \code{use_spec_contrasts}.
+By default, \code{svem_optimize_random()} uses \code{wmt_control = list(seed = 123)},
+so WMT calls are reproducible; you can override this by passing your own
+\code{wmt_control} (with or without a \code{seed}).}
+
+\item{k_exploration_candidates}{Number of diverse exploration candidates (medoids)
+to return. If \code{0}, no exploration clustering is performed. Default: \code{5}.}
+
+\item{exploration_top_frac}{Fraction in \code{(0, 1]} of rows with the largest
+uncertainty measure to cluster for exploration candidates. Default: \code{0.05}.}
 }
 \value{
-A list with:
+A list with the following components:
 \describe{
+\item{best}{One-row data frame at the winning design with predictors,
+per-response predictions, per-response percentile CIs (if available),
+the combined \code{score}, and \code{uncertainty_measure}.}
 \item{best_idx}{Row index of the selected best design in the sampled table.}
 \item{best_x}{Predictors at the best design.}
 \item{best_pred}{Named numeric vector of predicted responses at \code{best_x}.}
-\item{best_ci}{Data frame of percentile limits when \code{ci = TRUE}; otherwise \code{NULL}.}
-\item{candidates}{Data frame of \code{k_candidates} diverse candidates (medoids; existing rows) with
-predictors, predictions, optional CIs, and score; \code{NULL} if \code{k_candidates = 0}.}
-\item{score_table}{Sampled table with response columns, normalized contributions,
-weighted contributions, optional log-weighted terms (when \code{combine = "geom"}), and final score.}
-\item{weights}{Normalized weights used in scoring.}
-\item{goals}{Tidy data frame describing each response goal, weight, and target.}
+\item{best_ci}{Data frame of percentile limits at \code{best_x}.}
+\item{candidates}{Data frame of \code{k_candidates} diverse optimal candidates
+(medoids; existing rows) with predictors, predictions, percentile CIs, the combined
+\code{score}, and \code{uncertainty_measure}; \code{NULL} if \code{k_candidates = 0}.}
+\item{exploration_best}{One-row data frame at the exploration target, with
+predictors, per-response predictions, percentile CIs, \code{score}, and
+\code{uncertainty_measure}.}
+\item{exploration_best_idx}{Row index with the largest \code{uncertainty_measure}.}
+\item{exploration_best_x}{Predictors at the exploration target.}
+\item{exploration_best_pred}{Predicted responses at \code{exploration_best_x}.}
+\item{exploration_best_ci}{Percentile CIs at \code{exploration_best_x}.}
+\item{exploration_candidates}{Data frame of \code{k_exploration_candidates} diverse
+high-uncertainty candidates (medoids; existing rows) with predictors, predictions,
+percentile CIs, \code{uncertainty_measure}, and \code{score}; \code{NULL} if
+\code{k_exploration_candidates = 0}.}
+\item{score_table}{Sampled table with responses, per-response desirabilities,
+weighted terms, optional log-weighted terms (when \code{combine = "geom"}), CI widths,
+normalized CI widths, weighted CI widths, the \code{uncertainty_measure}, and final
+\code{score}.}
+\item{original_data_scored}{If \code{data} is provided: \code{data} augmented with
+predicted responses, per-response desirabilities, combined \code{score}, and
+\code{uncertainty_measure}. Otherwise \code{NULL}.}
+\item{weights_original}{User-provided weights normalized to sum to one before WMT reweighting.}
+\item{weights_final}{Final weights after WMT multipliers and renormalization.}
+\item{wmt_p_values}{Named vector of per-response whole-model p-values when
+\code{reweight_by_wmt = TRUE}; otherwise \code{NULL}.}
+\item{wmt_multipliers}{Named vector of per-response WMT multipliers when
+\code{reweight_by_wmt = TRUE}; otherwise \code{NULL}.}
+\item{goals}{Data frame describing each response goal, weight, target, and
+echoing original and final weights and (when applicable) WMT information.}
 }
 }
 \description{
-Draws random points via \code{svem_random_table_multi}, scores them using user
-goals and weights, returns the best design point, and optionally proposes
-\code{k_candidates} diverse high-score candidates by clustering the top fraction
-of rows with Gower distance and PAM medoids. Medoids are representative
-existing rows, so proposed candidates are guaranteed to be feasible under all
-sampling and mixture constraints.
+Draw random points via \code{svem_random_table_multi}, map each response to a
+desirability in \code{[0,1]} using Derringer–Suich (DS) curves, combine them into
+a single score, optionally reweight response importances by whole-model test
+(WMT) p-values, and return: the best design, diverse high-score optimal candidates
+(PAM medoids of the top fraction), and a second set of exploration candidates that
+target high predicted uncertainty. Medoids are rows of the sampled table, so all
+candidates are feasible under sampling and mixture constraints. If \code{data} is
+provided, the function also returns that same table augmented with per-row predictions,
+DS terms, the combined score, and an uncertainty measure.
 }
-\section{Scoring}{
-
-Each response is normalized on the sampled range with \code{normalize01} mapping to \code{[0,1]}:
+\details{
+A typical closed-loop workflow for formulation or process optimization is:
+\enumerate{
+\item Fit one or more \code{SVEMnet()} models for responses of interest.
+\item Optionally run whole-model testing (WMT) to reweight response goals.
+\item Call \code{svem_optimize_random()} to generate:
 \itemize{
-\item \code{goal = "max"} uses \code{normalize01(y)}.
-\item \code{goal = "min"} uses \code{normalize01(-y)}.
-\item \code{goal = "target"} uses \code{normalize01(-abs(y - target))}.
+\item high-scoring "optimal" candidates for immediate testing, and
+\item high-uncertainty exploration candidates to improve the models.
 }
-Then the normalized values are combined across responses:
-\itemize{
-\item \code{combine = "mean"}: weighted arithmetic mean, computed as \code{sum_r w_r * z_r}.
-\item \code{combine = "geom"}: weighted geometric mean, computed as
-\code{exp( sum_r w_r * log(z_adj_r) )} with \code{z_adj_r = geom_floor + (1 - geom_floor) * z_r}.
-}
+\item Run these candidates in the lab, append the new data, refit the models,
+and repeat as needed.
 }
 
-\section{Diverse candidates}{
+See the package vignette for a full worked example of this closed-loop workflow.
 
-We take the top \code{top_frac} fraction by score, compute Gower distances on predictors,
-and run PAM to get medoids. Returning medoids rather than centroids ensures each
-candidate corresponds to an actual sampled setting that satisfies constraints.
+\strong{Multi-response scoring.} Each response is mapped to a DS desirability
+\eqn{d_r \in [0,1]}. Anchors L and U (and target-band tolerances) default to robust
+values derived from the sampled 2nd-98th percentile range when not supplied. Desirabilities are
+combined across responses using either a weighted arithmetic mean (\code{combine = "mean"})
+or a weighted geometric mean (\code{combine = "geom"}), with a small fixed floor applied
+inside the log to avoid \code{log(0)}.
+
+\strong{Whole-model reweighting (WMT).} When \code{reweight_by_wmt = TRUE}, each response
+receives a multiplier from its whole-model p-value computed by
+\code{svem_significance_test_parallel()} on \code{data}. Final weights are proportional to
+the product of the user weight and the multiplier, then renormalized to sum to one.
+Supported transforms: \code{"neglog10"} (aggressive) and \code{"one_minus_p"} (conservative).
+Multipliers are floored internally.
+
+\strong{Uncertainty and exploration.} The \code{uncertainty_measure} is the weighted sum of
+robustly normalized CI widths across responses (each width normalized using the sampled
+2nd-98th percentile range, then weighted by the final weights). The largest row is the exploration
+target; PAM medoids over the top \code{exploration_top_frac} by this measure are returned
+as exploration candidates. Both optimal and exploration candidate tables include
+\code{score} and \code{uncertainty_measure}.
+
+\emph{Implementation notes.} Point predictions use ensemble-mean aggregation
+(\code{agg = "mean"}) with \code{debias = FALSE}, both inside
+\code{svem_random_table_multi()} and in the candidate summaries. Percentile CIs use
+\code{agg = "mean"}. The geometric combiner uses a fixed floor of \code{1e-6}; the WMT
+multiplier floor is \code{1e-3}. For binomial responses, fits and CI bounds are
+clamped to \code{[0,1]}.
+}
+\section{Binomial handling}{
+
+For responses fit with \code{family = "binomial"}, this function expects
+predictions on the probability scale. Predicted fits and percentile CI bounds
+(when available) are internally clamped to \code{[0,1]} before desirability and
+uncertainty calculations. To protect current Gaussian behavior, no link-scale
+transforms are applied. \strong{Reweighting via WMT is not supported when any
+responses are binomial}; if \code{reweight_by_wmt = TRUE} and at least one response
+is binomial, the function stops with an informative error.
+}
+
+\section{Acknowledgments}{
+
+OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+used to assist with coding and roxygen documentation; all
+content was reviewed and finalized by the author.
 }
 
 \examples{
 \donttest{
+## --- Larger Gaussian-only example ---
 set.seed(1)
 n  <- 120
 X1 <- runif(n); X2 <- runif(n)
@@ -118,8 +219,8 @@ y1 <- 1 + 1.5*X1 - 0.8*X2 + 0.4*(F=="hi") + rnorm(n, 0, 0.2)
 y2 <- 0.7 + 0.4*X1 + 0.4*X2 - 0.2*(F=="hi") + rnorm(n, 0, 0.2)
 dat <- data.frame(y1, y2, X1, X2, F)
 
-m1 <- SVEMnet(y1 ~ X1 + X2 + F, dat, nBoot = 30)
-m2 <- SVEMnet(y2 ~ X1 + X2 + F, dat, nBoot = 30)
+m1 <- SVEMnet(y1 ~ X1 + X2 + F, dat, nBoot = 30, family = "gaussian")
+m2 <- SVEMnet(y2 ~ X1 + X2 + F, dat, nBoot = 30, family = "gaussian")
 objs <- list(y1 = m1, y2 = m2)
 
 goals <- list(
@@ -127,75 +228,112 @@ goals <- list(
   y2 = list(goal = "target", weight = 0.4, target = 0.9)
 )
 
-# Default combine = "geom" and numeric_sampler = "random"
 out <- svem_optimize_random(
   objects      = objs,
   goals        = goals,
   n            = 5000,
-  agg          = "mean",
-  debias       = FALSE,
-  ci           = TRUE,
   level        = 0.95,
   k_candidates = 5,
   top_frac     = 0.02,
+  k_exploration_candidates = 5,
+  exploration_top_frac     = 0.01,
   numeric_sampler = "random",
   verbose      = TRUE
 )
-out$best_x; head(out$candidates)
+out$best
+head(out$candidates)
+out$exploration_best
+head(out$exploration_candidates)
 
-# Use arithmetic mean instead, with fastest uniform sampler
-out_mean <- svem_optimize_random(
-  objects      = objs,
-  goals        = goals,
-  n            = 5000,
-  combine      = "mean",
-  numeric_sampler = "uniform",
-  verbose      = FALSE
-)
-
-# Mixture-constrained lipid example (composition sums to 1)
-data(lipid_screen)
-spec <- bigexp_terms(
-  Potency ~ PEG + Helper + Ionizable + Cholesterol +
-    Ionizable_Lipid_Type + N_P_ratio + flow_rate,
-  data = lipid_screen, factorial_order = 3
-)
-fP <- bigexp_formula(spec, "Potency")
-fS <- bigexp_formula(spec, "Size")
-fD <- bigexp_formula(spec, "PDI")
-mP <- SVEMnet(fP, lipid_screen, nBoot = 40)
-mS <- SVEMnet(fS, lipid_screen, nBoot = 40)
-mD <- SVEMnet(fD, lipid_screen, nBoot = 40)
-objs2 <- list(Potency = mP, Size = mS, PDI = mD)
-
-goals2 <- list(
-  Potency = list(goal = "max", weight = 0.7),
-  Size    = list(goal = "min", weight = 0.2),
-  PDI     = list(goal = "min", weight = 0.1)
-)
-
-mixL <- list(list(
-  vars  = c("Cholesterol","PEG","Ionizable","Helper"),
-  lower = c(0.10, 0.01, 0.10, 0.10),
-  upper = c(0.60, 0.05, 0.60, 0.60),
-  total = 1
-))
-
-opt <- svem_optimize_random(
-  objects        = objs2,
-  goals          = goals2,
-  n              = 8000,
-  mixture_groups = mixL,
-  agg            = "mean",
-  debias         = FALSE,
-  ci             = TRUE,
-  level          = 0.95,
-  k_candidates   = 5,
-  top_frac       = 0.01,
+## Optional: reweight goals by whole-model p-values (Gaussian-only).
+out_wmt <- svem_optimize_random(
+  objects         = objs,
+  goals           = goals,
+  data            = dat,
+  n               = 5000,
+  level           = 0.95,
+  k_candidates    = 5,
+  top_frac        = 0.02,
+  k_exploration_candidates = 5,
+  exploration_top_frac     = 0.01,
   numeric_sampler = "random",
-  verbose        = TRUE
+  reweight_by_wmt = TRUE,
+  wmt_transform   = "neglog10",
+  verbose         = TRUE
 )
-opt$best_x; head(opt$candidates)
+out_wmt$weights_original
+out_wmt$weights_final
+out_wmt$wmt_p_values
+head(out_wmt$candidates)
+head(out_wmt$exploration_candidates)
+head(out_wmt$original_data_scored)
+
+## --- Smaller mixed example: one Gaussian + one Binomial (probability scale) ---
+set.seed(42)
+n  <- 80
+X1 <- runif(n); X2 <- runif(n); G <- factor(sample(c("lo","hi"), n, TRUE))
+
+# Gaussian response
+yg <- 2 + 1.1*X1 - 0.7*X2 + 0.5*(G=="hi") + rnorm(n, 0, 0.25)
+
+# Binomial response (probability via logistic link)
+eta <- -0.3 + 1.2*X1 - 0.4*X2 + 0.6*(G=="hi")
+p   <- 1/(1 + exp(-eta))
+yb  <- rbinom(n, 1, p)
+
+dmix <- data.frame(yg, yb, X1, X2, G)
+
+mg <- SVEMnet(yg ~ X1 + X2 + G, dmix, nBoot = 30, family = "gaussian")
+mb <- SVEMnet(yb ~ X1 + X2 + G, dmix, nBoot = 30, family = "binomial", relaxed = FALSE)
+
+objs_mix <- list(yg = mg, yb = mb)
+goals_mix <- list(
+  yg = list(goal = "max", weight = 0.5),
+  yb = list(goal = "max", weight = 0.5)  # maximize event probability
+)
+
+out_mix <- svem_optimize_random(
+  objects      = objs_mix,
+  goals        = goals_mix,
+  n            = 3000,
+  level        = 0.95,
+  k_candidates = 3,
+  top_frac     = 0.03,
+  numeric_sampler = "random",
+  reweight_by_wmt = FALSE,  # required when any response is binomial
+  verbose      = TRUE
+)
+out_mix$best
+head(out_mix$candidates)
 }
 
+}
+\references{
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+
+Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+
+Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+
+Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
+
+Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
+
+Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+
+Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
+
+Friedman, J. H., Hastie, T., and Tibshirani, R. (2010).
+Regularization Paths for Generalized Linear Models via Coordinate Descent.
+Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+}
+\seealso{
+\code{\link[=SVEMnet]{SVEMnet()}}, \code{\link[=svem_random_table_multi]{svem_random_table_multi()}}, \code{\link[=predict.svem_model]{predict.svem_model()}}
 }

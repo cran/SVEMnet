@@ -2,28 +2,69 @@
 % Please edit documentation in R/bigexp.R
 \name{bigexp_prepare}
 \alias{bigexp_prepare}
-\title{Prepare data to match a bigexp_spec (stable expansion across datasets)}
+\title{Prepare data to match a \code{bigexp_spec}}
 \usage{
 bigexp_prepare(spec, data, unseen = c("warn_na", "error"))
 }
 \arguments{
-\item{spec}{Object returned by \code{\link[=bigexp_terms]{bigexp_terms()}}.}
+\item{spec}{Object returned by \code{\link{bigexp_terms}}.}
 
-\item{data}{New data frame (train/test/future batches).}
+\item{data}{New data frame (for example, training, test, or future batches).}
 
 \item{unseen}{How to handle unseen factor levels in \code{data}:
-\code{"warn_na"} (default; convert to \code{NA} with a warning) or \code{"error"} (stop).}
+\code{"warn_na"} (default) maps unseen levels to \code{NA} and issues a
+warning, or \code{"error"} stops with an error if any unseen levels are
+encountered.}
 }
 \value{
-\code{list(formula = spec$formula, data = coerced_data)}
+A list with two elements:
+\itemize{
+\item \code{formula}: the expanded formula stored in the spec.
+\item \code{data}: a copy of the input data coerced to match the spec.
+}
 }
 \description{
-Coerces new data to the types/levels locked in \code{spec} so that
-\code{model.matrix(spec$formula, data)} yields the same columns and order
-every time, even if some factor levels are absent in the new batch.
+\code{bigexp_prepare()} coerces a new data frame so that it matches a
+previously built \code{\link{bigexp_terms}} spec. It:
+\itemize{
+\item applies the locked factor levels for categorical predictors,
+\item enforces that continuous variables remain numeric, and
+\item optionally warns about or errors on unseen factor levels.
+}
+}
+\details{
+The goal is that \code{model.matrix(spec$formula, data)} (or
+\code{\link{bigexp_model_matrix}}) will produce the same set of columns in
+the same order across all datasets prepared with the same spec, even if some
+levels are missing in a particular batch.
 }
 \examples{
-# spec <- bigexp_terms(y ~ X1 + X2 + G, train)
-# new_in <- bigexp_prepare(spec, newdata)
-# fit <- some_model(new_in$formula, data = new_in$data, ...)
+set.seed(1)
+train <- data.frame(
+  y  = rnorm(10),
+  X1 = rnorm(10),
+  X2 = rnorm(10),
+  G  = factor(sample(c("A", "B"), 10, replace = TRUE))
+)
+
+spec <- bigexp_terms(
+  y ~ X1 + X2 + G,
+  data             = train,
+  factorial_order  = 2,
+  polynomial_order = 2
+)
+
+newdata <- data.frame(
+  y  = rnorm(5),
+  X1 = rnorm(5),
+  X2 = rnorm(5),
+  G  = factor(sample(c("A", "B"), 5, replace = TRUE))
+)
+
+prep <- bigexp_prepare(spec, newdata)
+str(prep$data)
+
+}
+\seealso{
+\code{\link{bigexp_terms}}, \code{\link{bigexp_model_matrix}}
 }

@@ -2,26 +2,68 @@
 % Please edit documentation in R/coef.R
 \name{coef.svem_model}
 \alias{coef.svem_model}
-\title{Coefficient Nonzero Percentages from an SVEM Model}
+\title{Coefficients for SVEM Models}
 \usage{
-\method{coef}{svem_model}(object, tol = 1e-07, plot = TRUE, print_table = TRUE, ...)
+\method{coef}{svem_model}(object, debiased = FALSE, ...)
 }
 \arguments{
 \item{object}{An object of class \code{svem_model}.}
 
-\item{tol}{Numeric tolerance for "nonzero" (default \code{1e-7}).}
+\item{debiased}{Logical; if \code{TRUE} and available (Gaussian fits),
+return \code{parms_debiased} instead of \code{parms}. Default \code{FALSE}.}
 
-\item{plot}{Logical; if \code{TRUE}, draws a quick ggplot summary (default \code{TRUE}).}
-
-\item{print_table}{Logical; if \code{TRUE}, prints a compact table (default \code{TRUE}).}
-
-\item{...}{Unused.}
+\item{...}{Unused (for S3 compatibility).}
 }
 \value{
-Invisibly returns a data frame with columns:
-\code{Variable}, \code{Percent of Bootstraps Nonzero}.
+A named numeric vector of coefficients (including intercept).
 }
 \description{
-Calculates the percentage of bootstrap iterations in which each coefficient
-(excluding the intercept) is nonzero, using a small tolerance.
+Returns averaged coefficients from an \code{svem_model}.
+}
+\details{
+For Gaussian models, you can optionally return the debiased coefficients
+(if available) via \code{debiased = TRUE}. For Binomial models, \code{debiased}
+is ignored and the averaged coefficients are returned.
+}
+\examples{
+\donttest{
+  set.seed(1)
+  n  <- 200
+  x1 <- rnorm(n)
+  x2 <- rnorm(n)
+  eps <- rnorm(n, sd = 0.3)
+  y_g <- 1 + 2*x1 - 0.5*x2 + eps
+  dat_g <- data.frame(y_g, x1, x2)
+
+  # Small nBoot to keep runtime light in examples
+  fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g, nBoot = 30, relaxed = TRUE)
+
+  # Averaged coefficients
+  cc <- coef(fit_g)
+  head(cc)
+
+  # Debiased (only if available for Gaussian fits)
+  ccd <- coef(fit_g, debiased = TRUE)
+  head(ccd)
+
+  # Binomial example (0/1 outcome)
+  set.seed(2)
+  n  <- 250
+  x1 <- rnorm(n)
+  x2 <- rnorm(n)
+  eta <- -0.4 + 1.1*x1 - 0.7*x2
+  p   <- 1/(1+exp(-eta))
+  y_b <- rbinom(n, 1, p)
+  dat_b <- data.frame(y_b, x1, x2)
+
+  fit_b <- SVEMnet(y_b ~ x1 + x2, data = dat_b, family = "binomial",
+                   nBoot = 30, relaxed = TRUE)
+
+  # Averaged coefficients (binomial)
+  coef(fit_b)
+}
+
+}
+\seealso{
+\code{\link{svem_nonzero}} for bootstrap nonzero percentages and a quick plot.
 }

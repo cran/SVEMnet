@@ -2,20 +2,59 @@
 % Please edit documentation in R/plot.svemnet.R
 \name{plot.svem_model}
 \alias{plot.svem_model}
-\title{Plot Method for SVEM Models}
+\title{Plot Method for SVEM Models (Gaussian / Generic)}
 \usage{
 \method{plot}{svem_model}(x, plot_debiased = FALSE, ...)
 }
 \arguments{
 \item{x}{An object of class \code{svem_model}.}
 
-\item{plot_debiased}{Logical; if \code{TRUE}, includes debiased predictions if available.}
+\item{plot_debiased}{Logical; if \code{TRUE}, include debiased predictions
+(when available) as an additional series. Default \code{FALSE}.}
 
-\item{...}{Additional aesthetics passed to \code{geom_point()}.}
+\item{...}{Additional aesthetics passed to \code{ggplot2::geom_point()}.}
 }
 \value{
-A \code{ggplot} object.
+A \code{ggplot2} object.
 }
 \description{
-Plots actual versus predicted values for an \code{svem_model}.
+Plots actual versus predicted values for an \code{svem_model}. This is the
+default plot for models fit with \code{SVEMnet(..., family = "gaussian")} and
+any other non-binomial models that share the \code{svem_model} class.
+}
+\details{
+Points show fitted values against observed responses; the dashed line is the
+45-degree identity. If available and requested, debiased predictions are included
+as a second series.
+
+This method assumes the fitted object stores the training response in
+\code{$actual_y} and in-sample predictions in \code{$y_pred}, as produced
+by \code{SVEMnet()} and \code{glmnet_with_cv()}.
+}
+\examples{
+\dontrun{
+  ## --- Gaussian example: simulate, fit, and plot --------------------------
+  set.seed(2026)
+  n  <- 300
+  X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
+  eps <- rnorm(n, sd = 0.4)
+  y_g <- 1.2 + 2*X1 - 0.7*X2 + 0.3*X3 + 1.1*(X1*X2) + 0.8*(X1^2) + eps
+  dat_g <- data.frame(y_g, X1, X2, X3)
+
+  fit_g <- SVEMnet(
+    y_g ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
+    data          = dat_g,
+    family        = "gaussian",
+    glmnet_alpha  = c(1, 0.5),
+    nBoot         = 60,
+    objective     = "auto",
+    weight_scheme = "SVEM",
+    relaxed       = TRUE
+  )
+
+  # Actual vs predicted (with and without debias overlay)
+  plot(fit_g, plot_debiased = FALSE)
+  plot(fit_g, plot_debiased = TRUE)
+}
+
 }

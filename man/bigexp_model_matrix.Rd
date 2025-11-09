@@ -2,21 +2,41 @@
 % Please edit documentation in R/bigexp.R
 \name{bigexp_model_matrix}
 \alias{bigexp_model_matrix}
-\title{Build a model matrix using the spec's stored contrasts (if present)}
+\title{Build a model matrix using the spec's stored contrasts}
 \usage{
 bigexp_model_matrix(spec, data)
 }
 \arguments{
-\item{spec}{A "bigexp_spec".}
+\item{spec}{A "bigexp_spec" object.}
 
 \item{data}{A data frame to prepare and encode.}
 }
 \value{
-The design matrix returned by \code{model.matrix()}.
+The design matrix returned by model.matrix(), with columns ordered
+consistently with the spec and its locked factor levels.
 }
 \description{
-Build a model matrix using the spec's stored contrasts (if present)
+bigexp_model_matrix() combines bigexp_prepare() and model.matrix() so that
+you can obtain a design matrix that matches the locked spec, including
+any stored contrast settings.
 }
 \examples{
-# MM <- bigexp_model_matrix(spec, newdata)
+set.seed(1)
+df3 <- data.frame(
+  y  = rnorm(10),
+  X1 = rnorm(10),
+  X2 = rnorm(10)
+)
+
+spec3 <- bigexp_terms(
+  y ~ X1 + X2,
+  data             = df3,
+  factorial_order  = 2,
+  polynomial_order = 2
+)
+
+MM3 <- bigexp_model_matrix(spec3, df3)
+dim(MM3)
+head(colnames(MM3))
+
 }

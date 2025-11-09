@@ -2,60 +2,144 @@
 % Please edit documentation in R/bigexp.R
 \name{bigexp_terms}
 \alias{bigexp_terms}
-\title{Create a deterministic expansion spec for wide polynomial/interaction models}
+\title{Create a deterministic expansion spec for wide polynomial and interaction models}
 \usage{
 bigexp_terms(
   formula,
   data,
   factorial_order = 3L,
   discrete_threshold = 2L,
-  include_pure_cubic = FALSE,
+  polynomial_order = 3L,
+  include_pc_2way = TRUE,
   include_pc_3way = FALSE,
   intercept = TRUE
 )
 }
 \arguments{
-\item{formula}{Main-effects formula on the RHS (no \code{:}/\code{^}/\code{I()} there). \code{y ~ .} allowed.}
+\item{formula}{Main-effects formula of the form \code{y ~ X1 + X2 + G} or
+\code{y ~ .}. The right-hand side should contain main effects only; do not
+include \code{:} (interactions), \code{^} (factorial shortcuts), or
+\code{I()} powers here. The helper will generate interactions and polynomial
+terms automatically.}
 
 \item{data}{Data frame used to decide types and lock factor levels.}
 
-\item{factorial_order}{Integer, 2 or 3 (default 3).}
+\item{factorial_order}{Integer >= 1. Maximum order of factorial interactions
+among the main effects. For example, 1 gives main effects only, 2 gives
+up to two-way interactions, 3 gives up to three-way interactions, and so on.}
 
-\item{discrete_threshold}{Numeric predictors with <= this many unique finite
-values are treated as categorical (default 2).}
+\item{discrete_threshold}{Numeric predictors with at most this many unique
+finite values are treated as categorical. Default is \code{2}.}
 
-\item{include_pure_cubic}{Logical; include \code{I(X^3)} for continuous predictors (default FALSE).}
+\item{polynomial_order}{Integer >= 1. Maximum polynomial degree for continuous
+predictors. A value of 1 means only linear terms; 2 adds squares \code{I(X^2)};
+3 adds cubes \code{I(X^3)}; in general, all powers \code{I(X^k)} for
+\code{k} from 2 up to \code{polynomial_order} are added.}
 
-\item{include_pc_3way}{Logical; include partial-cubic 3-ways \code{I(X^2):Z:W} (default FALSE).}
+\item{include_pc_2way}{Logical. If \code{TRUE} (default) and
+\code{polynomial_order >= 2}, include partial-cubic two-way terms of the
+form \code{Z:I(X^2)}.}
 
-\item{intercept}{Include intercept (default TRUE).}
+\item{include_pc_3way}{Logical. If \code{TRUE} and \code{polynomial_order >= 2},
+include partial-cubic three-way terms \code{I(X^2):Z:W}.}
+
+\item{intercept}{Logical. If \code{TRUE} (default), include an intercept in the
+expansion; if \code{FALSE}, the generated RHS drops the intercept.}
 }
 \value{
 An object of class \code{"bigexp_spec"} with components:
 \itemize{
-\item \code{formula} — expanded formula (\code{y ~ ...}) using the training response.
-\item \code{rhs} — the right-hand-side expansion string, reusable for any response.
-\item \code{vars} — predictor names (in the order discovered from \code{formula}/\code{data}).
-\item \code{is_cat} — named logical: categorical vs continuous.
-\item \code{levels} — list of locked factor levels (level order preserved).
-\item \code{num_range} — 2 x p matrix of ranges for continuous vars (informational).
-\item \code{settings} — list of expansion settings, including saved contrasts.
+\item \code{formula}: expanded formula of the form \code{y ~ <big expansion>},
+using the response from the input formula.
+\item \code{rhs}: right-hand side expansion string (reusable for any response).
+\item \code{vars}: character vector of predictor names in the order discovered
+from the formula and data.
+\item \code{is_cat}: named logical vector indicating which predictors are
+treated as categorical (\code{TRUE}) versus continuous (\code{FALSE}).
+\item \code{levels}: list of locked factor levels for categorical predictors.
+\item \code{num_range}: 2 x p numeric matrix of ranges for continuous variables
+(rows \code{c("min","max")}).
+\item \code{settings}: list of expansion settings, including
+\code{factorial_order}, \code{polynomial_order},
+\code{discrete_threshold}, \code{include_pc_2way},
+\code{include_pc_3way}, \code{intercept}, and stored contrast
+information.
 }
 }
 \description{
-Builds a specification that locks variable types and factor levels from \code{data},
-then encodes a large expansion:
+\code{bigexp_terms()} builds a specification object that:
 \itemize{
-\item Full factorial up to 2- or 3-way among the listed main effects
-\item Response surface (squares of continuous predictors)
-\item Partial cubic crosses (I(X^2):Z, optionally 3-way I(X^2):Z:W)
+\item decides which predictors are treated as continuous or categorical,
+\item locks factor levels from the supplied data,
+\item records the contrast settings used when the model matrix is first built, and
+\item constructs a reusable right-hand side (RHS) string for a large expansion.
 }
 }
 \details{
-Provide a main-effects formula (e.g., \code{y ~ X1 + X2 + G} or \code{y ~ .}).
-The function constructs the complex RHS and records factor levels so that
-future datasets expand identically.
+The expansion can include:
+\itemize{
+\item full factorial interactions among the listed main effects, up to a
+chosen order;
+\item polynomial terms \code{I(X^k)} for continuous predictors up to a
+chosen degree; and
+\item optional partial-cubic interactions of the form \code{Z:I(X^2)} and
+\code{I(X^2):Z:W}.
+}
+
+Predictor types are inferred from \code{data}:
+\itemize{
+\item factors, characters, and logicals are treated as categorical;
+\item numeric predictors with at most \code{discrete_threshold} distinct
+finite values are treated as categorical; and
+\item all other numeric predictors are treated as continuous, and their
+observed ranges are stored.
+}
+
+Once built, a \code{"bigexp_spec"} can be reused to create consistent
+expansions for new datasets via \code{\link{bigexp_prepare}},
+\code{\link{bigexp_formula}}, and \code{\link{bigexp_model_matrix}}. The RHS
+and contrast settings are locked, so the same spec applied to different data
+produces design matrices with the same columns in the same order (up to
+missing levels for specific batches).
 }
 \examples{
-# spec <- bigexp_terms(y ~ X1 + X2 + G, data = df, factorial_order = 3)
+## Example 1: small design with one factor
+set.seed(1)
+df <- data.frame(
+  y  = rnorm(20),
+  X1 = rnorm(20),
+  X2 = rnorm(20),
+  G  = factor(sample(c("A", "B"), 20, replace = TRUE))
+)
+
+## Two-way interactions and up to cubic terms in X1 and X2
+spec <- bigexp_terms(
+  y ~ X1 + X2 + G,
+  data             = df,
+  factorial_order  = 2,
+  polynomial_order = 3
+)
+
+print(spec)
+
+## Inspect the resulting design matrix
+MM <- bigexp_model_matrix(spec, df)
+dim(MM)
+head(colnames(MM))
+
+## Example 2: pure main effects (no interactions, no polynomial terms)
+spec_main <- bigexp_terms(
+  y ~ X1 + X2 + G,
+  data             = df,
+  factorial_order  = 1,  # main effects only
+  polynomial_order = 1   # no I(X^2) or higher
+)
+
+MM_main <- bigexp_model_matrix(spec_main, df)
+head(colnames(MM_main))
+
+}
+\seealso{
+\code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},
+\code{\link{bigexp_model_matrix}}, \code{\link{bigexp_train}}
 }

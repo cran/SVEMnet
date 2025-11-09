@@ -8,13 +8,14 @@ SVEMnet(
   formula,
   data,
   nBoot = 200,
-  glmnet_alpha = c(0.25, 0.5, 0.75, 1),
-  weight_scheme = c("SVEM", "FWR", "Identity"),
+  glmnet_alpha = c(0.5, 1),
+  weight_scheme = c("SVEM", "FRW_plain", "Identity"),
   objective = c("auto", "wAIC", "wBIC", "wSSE"),
   auto_ratio_cutoff = 1.3,
   relaxed = TRUE,
   response = NULL,
   unseen = c("warn_na", "error"),
+  family = c("gaussian", "binomial"),
   ...
 )
 }
@@ -28,13 +29,33 @@ created by \code{bigexp_terms()}.}
 
 \item{glmnet_alpha}{Elastic Net mixing parameter(s). May be a vector with
 entries in the range between 0 and 1, inclusive, where alpha = 1 is Lasso
-and alpha = 0 is Ridge. Defaults to \code{c(0.25, 0.5, 0.75, 1)}.}
+and alpha = 0 is Ridge. Defaults to \code{c(0.5, 1)}.}
 
-\item{weight_scheme}{Weighting scheme for SVEM (default "SVEM").
-One of \code{"SVEM"}, \code{"FWR"}, or \code{"Identity"}.}
+\item{weight_scheme}{Character; weighting scheme used to generate bootstrap
+training and validation weights (default \code{"SVEM"}).
+One of:
+\itemize{
+\item \code{"SVEM"}: Self-Validated Ensemble Model weights. For each
+bootstrap, independent \eqn{U_i \sim \mathrm{Uniform}(0,1)} are drawn
+and converted to anti-correlated FRW copies
+\eqn{w_i^{\mathrm{train}} = -\log U_i} and
+\eqn{w_i^{\mathrm{valid}} = -\log(1-U_i)}, each rescaled to have mean 1.
+This is the default and implements the SVEM scheme of Lemkus et al.
+\item \code{"FRW_plain"}: Fractional–random–weight (FRW) regression
+without self-validation. A single FRW weight vector
+\eqn{w_i = -\log U_i} (rescaled to mean 1) is used for both training
+and validation. This reproduces the fractional-random-weight bootstrap
+regression of Xu et al. (2020) and related work, with one weighted fit
+and no self-validation split.
+\item \code{"Identity"}: Uses unit weights for both training and
+validation (no resampling). This is primarily useful with
+\code{nBoot = 1} when you want a single glmnet fit whose penalty
+is chosen via the selected information criterion (wAIC/wBIC/wSSE),
+while still using SVEMnet’s formula expansion and diagnostics.
+}}
 
 \item{objective}{Objective used to pick lambda on each bootstrap path
-(default "auto"). One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}.}
+(default \code{"auto"}). One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}.}
 
 \item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
 \code{objective = "auto"} (default 1.3). Let \code{r = n_X / p_X}, where \code{n_X} is the
@@ -42,16 +63,27 @@ number of training rows and \code{p_X} is the number of predictors in the model
 matrix after dropping the intercept column. If \code{r >= auto_ratio_cutoff},
 SVEMnet uses wAIC; otherwise it uses wBIC.}
 
-\item{relaxed}{Logical, TRUE or FALSE (default TRUE). When TRUE, use glmnet's
-relaxed elastic net path and select both lambda and relaxed gamma on each bootstrap.
-When FALSE, fit the standard glmnet path. Note: if \code{relaxed = TRUE} and
-\code{glmnet_alpha} includes 0 (ridge), alpha = 0 is dropped.}
+\item{relaxed}{Logical, TRUE or FALSE (default TRUE). When TRUE (for
+\code{family = "gaussian"}), use glmnet's relaxed elastic net path and
+select both lambda and relaxed gamma on each bootstrap. When FALSE,
+fit the standard glmnet path. Note: if \code{relaxed = TRUE} and
+\code{glmnet_alpha} includes 0 (ridge), alpha = 0 is dropped. For
+\code{family = "binomial"}, relaxed fits are currently disabled for
+stability: SVEMnet behaves as if \code{relaxed = FALSE}, and a warning
+is issued if \code{relaxed = TRUE} is requested.}
 
 \item{response}{Optional character. When \code{formula} is a \code{bigexp_spec}, this names
 the response column to use on the LHS; defaults to the response stored in the spec.}
 
 \item{unseen}{How to treat unseen factor levels when \code{formula} is a \code{bigexp_spec}:
 \code{"warn_na"} (default; convert to NA with a warning) or \code{"error"} (stop).}
+
+\item{family}{Character scalar specifying the model family.
+One of \code{"gaussian"} (default) or \code{"binomial"}.
+SVEMnet currently assumes the canonical identity link for Gaussian
+and the canonical logit link for binomial. For \code{"binomial"},
+the response must be numeric 0/1, logical, or a factor with exactly
+two levels (the second level is treated as 1).}
 
 \item{...}{Additional args passed to \code{glmnet()} (e.g., \code{penalty.factor},
 \code{lower.limits}, \code{upper.limits}, \code{offset}, \code{standardize.response}, etc.).
@@ -77,8 +109,8 @@ An object of class \code{svem_model} with elements:
 \code{factor_levels} = list(...) for factor/character raw predictors).
 \item \code{diagnostics}: list with \code{k_summary} (median and IQR of selected size),
 \code{fallback_rate}, \code{n_eff_summary}, \code{alpha_freq}, \code{relax_gamma_freq}.
-\item \code{actual_y}, \code{training_X}, \code{y_pred}, \code{y_pred_debiased}, \code{nobs}, \code{nparm}, \code{formula}, \code{terms},
-\code{xlevels}, \code{contrasts}.
+\item \code{actual_y}, \code{training_X}, \code{y_pred}, \code{y_pred_debiased}, \code{nobs}, \code{nparm},
+\code{formula}, \code{terms}, \code{xlevels}, \code{contrasts}.
 \item \code{used_bigexp_spec}: logical flag indicating whether a \code{bigexp_spec} was used.
 }
 }
@@ -97,23 +129,63 @@ the data deterministically (locked types/levels) and, if requested, swap
 the response to fit multiple independent responses over the same expansion.
 }
 
+In many applications, \code{SVEMnet()} is used as part of a closed-loop
+optimization workflow:
+models are fit on current experimental data, whole-model tests (WMT) are
+optionally used to reweight response goals, and then
+\code{svem_optimize_random()} proposes both optimal and exploration
+candidates for the next experimental round.
+See the \code{lipid_screen} help page for a worked example.
+
 SVEM applies fractional bootstrap weights to training data and anti-correlated
 weights for validation when \code{weight_scheme = "SVEM"}. For each bootstrap, glmnet
 paths are fit for each alpha in \code{glmnet_alpha}, and the lambda (and, if \code{relaxed = TRUE},
 relaxed gamma) minimizing a weighted validation criterion is selected.
 
-Predictors are always standardized internally via \code{glmnet::glmnet(..., standardize = TRUE)}.
+\strong{Weighting schemes.}
+With \code{weight_scheme = "SVEM"} (the default), SVEMnet uses the
+fractional-random-weight (FRW) construction with an explicit
+self-validation split: for each bootstrap replicate and observation
+\eqn{i}, a shared \eqn{U_i \sim \mathrm{Uniform}(0,1)} is drawn and
+converted into anti-correlated train/validation copies
+\eqn{w_i^{\mathrm{train}} = -\log U_i} and
+\eqn{w_i^{\mathrm{valid}} = -\log(1-U_i)}, each rescaled so that their
+mean is 1. This keeps all rows in every fit while inducing a stable
+out-of-bag–style validation set for selecting \eqn{\lambda} (and, if used,
+the relaxed \eqn{\gamma}).
 
-When \code{relaxed = TRUE}, \code{coef(fit, s = lambda, gamma = g)} is used to obtain the
-coefficient path at each relaxed gamma in the internal grid. Metrics are computed
-from validation-weighted errors and model size is taken as the number of nonzero
-coefficients including the intercept (support size), keeping selection consistent
-between standard and relaxed paths.
+With \code{weight_scheme = "FRW_plain"}, SVEMnet instead uses a single FRW
+weight vector \eqn{w_i = -\log U_i} for \emph{both} training and validation
+(one weighted fit, no self-validation split). It is included mainly for
+historical comparison and method-teaching; for small-sample prediction we
+recommend the default \code{"SVEM"} scheme.
 
-Automatic objective rule ("auto"): This function uses a single ratio cutoff,
-\code{auto_ratio_cutoff}, applied to \code{r = n_X / p_X}, where \code{p_X} is computed from
-the model matrix with the intercept column removed. If \code{r >= auto_ratio_cutoff}
-the selection criterion is wAIC; otherwise it is wBIC.
+Finally, \code{weight_scheme = "Identity"} sets both training and
+validation weights to 1. In combination with \code{nBoot = 1}, this
+effectively wraps a single \code{glmnet} fit and chooses \eqn{\lambda}
+(and, for Gaussian models, the relaxed \eqn{\gamma}) by the chosen
+information criterion (wAIC or wBIC), without any bootstrap variation.
+This can be useful when you want classical AIC/BIC selection on top of
+a deterministic expansion, but do not want or need ensembling.
+
+Predictors are always standardized internally via
+\code{glmnet::glmnet(..., standardize = TRUE)}.
+
+When \code{relaxed = TRUE} and \code{family = "gaussian"},
+\code{coef(fit, s = lambda, gamma = g)} is used to obtain the coefficient
+path at each relaxed gamma in the internal grid (by default
+\code{c(0.2, 0.6, 1)}). Metrics are computed from validation-weighted
+errors and model size is taken as the number of nonzero coefficients
+including the intercept (support size), keeping selection consistent
+between standard and relaxed paths. For \code{family = "binomial"},
+relaxed fits are currently disabled for numerical stability, so only
+the standard glmnet path is used even if \code{relaxed = TRUE}.
+
+Automatic objective rule (\code{"auto"}): This function uses a single ratio
+cutoff, \code{auto_ratio_cutoff}, applied to \code{r = n_X / p_X}, where
+\code{p_X} is computed from the model matrix with the intercept column
+removed. If \code{r >= auto_ratio_cutoff} the selection criterion is wAIC;
+otherwise it is wBIC.
 
 Implementation notes for safety:
 \itemize{
@@ -124,11 +196,22 @@ reconstruct the design matrix deterministically.
 \item A lightweight sampling schema (numeric ranges and factor levels for raw predictors)
 is cached to enable random-table generation without needing the original data.
 }
+
+For \code{family = "gaussian"}, the loss used in validation is a weighted SSE,
+and wAIC/wBIC are computed from a Gaussian log-likelihood proxy.
+
+For \code{family = "binomial"}, the validation loss is the weighted binomial
+deviance, and wAIC/wBIC are computed as \code{deviance + 2 * k} or
+\code{deviance + log(n_eff) * k}, where \code{k} is the number of active
+parameters (1 for the intercept plus the number of nonzero parameters) and
+\code{n_eff} is the effective validation size. The response must be numeric
+0/1 or a two-level factor; internally it is converted to 0/1.
 }
 \section{Acknowledgments}{
 
-Development of this package was assisted by GPT o1-preview for structuring parts of the code
-and documentation.
+OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+used to assist with coding and roxygen documentation; all
+content was reviewed and finalized by the author.
 }
 
 \examples{
@@ -158,14 +241,15 @@ pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 
 \donttest{
 # ---------------------------------------------------------------------------
-# Big expansion (full factorial + response surface + partial cubic)
+# Big expansion (full factorial + polynomial surface + partial-cubic crosses)
 # Build once, reuse for one or more responses
 # ---------------------------------------------------------------------------
 spec <- bigexp_terms(
-  y ~ X1 + X2 + X3, data = dat,
-  factorial_order    = 3,      # allow 3-way factorials
-  include_pc_3way    = FALSE,  # set TRUE to add I(X^2):Z:W
-  include_pure_cubic = FALSE
+  y ~ X1 + X2 + X3,
+  data            = dat,
+  factorial_order = 3,  # up to 3-way interactions among X1, X2, X3
+  polynomial_order = 3, # include I(X^3) for each continuous predictor
+  include_pc_3way = FALSE
 )
 
 # Fit using the spec (auto-prepares data)
@@ -206,6 +290,31 @@ stopifnot(identical(
   colnames(model.matrix(spec$formula, prep_new$data))
 ))
 preds_new <- predict(fit_y, prep_new$data)
+
+
+#' ## ---- Binomial example ------------------------------------------------
+set.seed(2)
+n  <- 120
+X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
+eta <- -0.3 + 1.1*X1 - 0.8*X2 + 0.5*X1*X3
+p   <- plogis(eta)
+yb  <- rbinom(n, 1, p)
+db  <- data.frame(yb = yb, X1 = X1, X2 = X2, X3 = X3)
+
+fit_b <- SVEMnet(
+  yb ~ (X1 + X2 + X3)^2, db,
+  nBoot = 50, glmnet_alpha = c(1, 0.5), relaxed = FALSE, family = "binomial"
+)
+
+## Probabilities, link, and classes
+p_resp <- predict(fit_b, db, type = "response")
+p_link <- predict(fit_b, db, type = "link")
+y_hat  <- predict(fit_b, db, type = "class")      # 0/1 labels (no SE/interval)
+
+## Mean-aggregation with uncertainty on probability scale
+out_b <- predict(fit_b, db, type = "response",
+                 se.fit = TRUE, interval = TRUE, level = 0.9)
+str(out_b)
 }
 
 }

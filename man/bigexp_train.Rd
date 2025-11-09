@@ -7,29 +7,53 @@
 bigexp_train(formula, data, ...)
 }
 \arguments{
-\item{formula}{Main-effects formula (e.g., \code{y ~ X1 + X2 + G} or \code{y ~ .}).}
+\item{formula}{Main-effects formula such as y ~ X1 + X2 + G or y ~ .
+Only main effects should appear on the right hand side.}
 
-\item{data}{Training data frame (used to lock types/levels and prepare).}
+\item{data}{Training data frame used to lock types and levels.}
 
-\item{...}{Additional arguments forwarded to \code{\link[=bigexp_terms]{bigexp_terms()}}
-(e.g., \code{factorial_order}, \code{discrete_threshold},
-\code{include_pure_cubic}, \code{include_pc_3way}, \code{intercept}).}
+\item{...}{Additional arguments forwarded to bigexp_terms(), such as
+factorial_order, discrete_threshold, polynomial_order, include_pc_2way,
+include_pc_3way, and intercept.}
 }
 \value{
-A list with components:
+An object of class "bigexp_train" which is a list with components:
 \itemize{
-\item \code{spec} — the "bigexp_spec" object.
-\item \code{formula} — the expanded formula (\code{spec$formula}).
-\item \code{data} — the coerced training data ready for modeling.
+\item spec: the "bigexp_spec" object returned by bigexp_terms()
+\item formula: the expanded formula spec$formula
+\item data: the prepared training data ready for modeling
 }
 }
 \description{
-Convenience wrapper around \code{\link[=bigexp_terms]{bigexp_terms()}} and \code{\link[=bigexp_prepare]{bigexp_prepare()}}. It creates
-the deterministic expansion spec from the training data and immediately
-prepares that same training data to match the locked types/levels.
-Prefer the two-step API in documentation, but this is handy for quick scripts.
+bigexp_train() is a convenience wrapper around bigexp_terms() and
+bigexp_prepare(). It:
+\itemize{
+\item Builds a deterministic expansion spec from the training data
+\item Immediately prepares that same data to match the locked types and levels
+}
+}
+\details{
+This is handy when you want a single object that contains both the spec
+and the expanded training data ready to pass into a modeling function.
+For more control, you can call bigexp_terms() and bigexp_prepare()
+explicitly instead.
 }
 \examples{
-# tr <- bigexp_train(y ~ X1 + X2 + X3, dat, factorial_order = 3)
-# fit <- SVEMnet(tr$formula, data = tr$data, ...)
+set.seed(1)
+df5 <- data.frame(
+  y  = rnorm(20),
+  X1 = rnorm(20),
+  X2 = rnorm(20)
+)
+
+tr <- bigexp_train(
+  y ~ X1 + X2,
+  data             = df5,
+  factorial_order  = 2,
+  polynomial_order = 3
+)
+
+str(tr$data)
+tr$formula
+
 }

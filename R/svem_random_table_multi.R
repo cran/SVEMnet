@@ -3,22 +3,28 @@
 #' Samples the original predictor factor space cached in fitted \code{svem_model}
 #' objects and computes predictions from each model at the same random points.
 #' Intended for multiple responses built over the same factor space and a
-#' deterministic factor expansion.
+#' deterministic factor expansion (so that a shared sampling schema is available).
 #'
-#' @param objects A list of fitted \code{svem_model} objects returned by \code{SVEMnet()}.
-#'   Each object must contain \code{$sampling_schema} produced by the updated \code{SVEMnet()}.
-#'   A single model is also accepted and treated as a length-one list.
+#' Predictions are computed via \code{predict.svem_model(..., agg = "mean")}, i.e.
+#' by averaging per-bootstrap member predictions on the requested scale. No
+#' refitting is performed.
+#'
+#' @param objects A list of fitted \code{svem_model} objects returned by
+#'   \code{SVEMnet()}. Each object must contain \code{$sampling_schema} produced
+#'   by the updated \code{SVEMnet()} implementation. A single model is also
+#'   accepted and treated as a length-one list.
 #' @param n Number of random points to generate. Default is \code{1000}.
-#' @param mixture_groups Optional list of mixture constraint groups. Each group is a list
-#'   with elements \code{vars}, \code{lower}, \code{upper}, \code{total}.
-#' @param debias Logical; if \code{TRUE}, apply each model's calibration during prediction
-#'   when available. Default is \code{FALSE}.
+#' @param mixture_groups Optional list of mixture constraint groups. Each group
+#'   is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
+#'   (see \emph{Notes on mixtures}).
+#' @param debias Logical; if \code{TRUE}, apply each model's calibration during
+#'   prediction when available (for Gaussian fits). Default is \code{FALSE}.
 #' @param range_tol Numeric tolerance for comparing numeric ranges across models.
 #'   Default is \code{1e-8}.
 #' @param numeric_sampler Sampler for non-mixture numeric predictors:
 #'   \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
 #'   If \code{"random"} is selected and the \pkg{lhs} package is available,
-#'   \code{lhs::randomLHS} is used; otherwise plain \code{runif}.
+#'   \code{lhs::randomLHS()} is used; otherwise plain \code{runif()}.
 #'
 #' @return A list with three data frames:
 #' \itemize{
@@ -26,8 +32,8 @@
 #'   \item \code{pred}: one column per response, aligned to \code{data} rows.
 #'   \item \code{all}: \code{cbind(data, pred)} for convenience.
 #' }
-#' Each prediction column is named by the model's response (left-hand side). If a response
-#' name would collide with a predictor name, \code{".pred"} is appended.
+#' Each prediction column is named by the model's response (left-hand side). If a
+#' response name would collide with a predictor name, \code{".pred"} is appended.
 #'
 #' @details
 #' All models must share an identical predictor schema:
@@ -39,11 +45,14 @@
 #' }
 #' The function stops with an informative error message if any of these checks fail.
 #'
+#'Models may be Gaussian or binomial; binomial predictions are returned on the probability scale by default.
+#'
 #' @section Sampling strategy:
 #' Non-mixture numeric variables are sampled using a selectable method:
 #' \itemize{
-#'   \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available, else uniform.
-#'   \item \code{"maximin"}: maximin Latin hypercube (space-filling; slower).
+#'   \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available,
+#'         else independent uniforms on each range.
+#'   \item \code{"maximin"}: maximin Latin hypercube (more space-filling; slower).
 #'   \item \code{"uniform"}: independent uniform draws within numeric ranges (fastest).
 #' }
 #' Mixture variables (if any) are sampled jointly within each specified group using
@@ -54,9 +63,11 @@
 #' @section Notes on mixtures:
 #' Each mixture group should list only numeric-like variables. Bounds are interpreted
 #' on the original scale of those variables. If \code{total} equals the sum of lower
-#' bounds, the sampler returns the lower-bound corner for that group.
+#' bounds, the sampler returns the lower-bound corner for that group. Infeasible
+#' constraints (i.e., \code{sum(lower) > total} or \code{sum(upper) < total}) produce
+#' an error.
 #'
-#' @seealso \code{SVEMnet}, \code{predict.svem_model}
+#' @seealso \code{\link{SVEMnet}}, \code{\link{predict.svem_model}}
 #'
 #' @examples
 #' \donttest{
@@ -65,32 +76,50 @@
 #' X1 <- runif(n); X2 <- runif(n)
 #' A <- runif(n); B <- runif(n); C <- pmax(0, 1 - A - B)
 #' F <- factor(sample(c("lo","hi"), n, TRUE))
+#'
+#' ## Gaussian responses
 #' y1 <- 1 + 2*X1 - X2 + 3*A + 1.5*B + 0.5*C + (F=="hi") + rnorm(n, 0, 0.3)
 #' y2 <- 0.5 + 0.8*X1 + 0.4*X2 + rnorm(n, 0, 0.2)
-#' d  <- data.frame(y1, y2, X1, X2, A, B, C, F)
 #'
-#' fit1 <- SVEMnet(y1 ~ X1 + X2 + A + B + C + F, d, nBoot = 40)
-#' fit2 <- SVEMnet(y2 ~ X1 + X2 + A + B + C + F, d, nBoot = 40)
+#' ## Binomial response (probability via logistic link)
+#' eta  <- -0.5 + 1.2*X1 - 0.7*X2 + 0.8*(F=="hi") + 0.6*A
+#' p    <- 1 / (1 + exp(-eta))
+#' yb   <- rbinom(n, size = 1, prob = p)
+#'
+#' d  <- data.frame(y1, y2, yb, X1, X2, A, B, C, F)
+#'
+#' fit1 <- SVEMnet(y1 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
+#' fit2 <- SVEMnet(y2 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
+#' fitb <- SVEMnet(yb ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "binomial")
 #'
 #' # Mixture constraint for A, B, C that sum to 1
-#' mix <- list(list(vars=c("A","B","C"),
-#'                  lower=c(0,0,0), upper=c(1,1,1), total=1))
+#' mix <- list(list(vars  = c("A","B","C"),
+#'                  lower = c(0,0,0),
+#'                  upper = c(1,1,1),
+#'                  total = 1))
 #'
-#' # Fast random sampler
+#' # Fast random sampler (shared predictor table; predictions bound as columns)
 #' tab_fast <- svem_random_table_multi(
-#'   objects        = list(fit1, fit2), n = 2000, mixture_groups = mix,
-#'   debias         = FALSE, numeric_sampler = "random"
+#'   objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
+#'   n               = 2000,
+#'   mixture_groups  = mix,
+#'   debias          = FALSE,
+#'   numeric_sampler = "random"
 #' )
 #' head(tab_fast$all)
 #'
+#' # Check that the binomial predictions are on [0,1]
+#' range(tab_fast$pred$yb)
+#'
 #' # Uniform sampler (fastest)
 #' tab_uni <- svem_random_table_multi(
-#'   objects        = list(fit1, fit2), n = 2000,
-#'   debias         = FALSE, numeric_sampler = "uniform"
+#'   objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
+#'   n               = 2000,
+#'   debias          = FALSE,
+#'   numeric_sampler = "uniform"
 #' )
 #' head(tab_uni$all)
 #' }
-#'
 #' @importFrom lhs maximinLHS randomLHS
 #' @importFrom stats rgamma
 #' @export
@@ -118,16 +147,17 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
 
   # Helper to compare numeric ranges with tolerance
   ranges_equal <- function(A, B, tol) {
-    if (is.null(dim(A)) && is.null(dim(B))) return(TRUE)
+    if (is.null(A) && is.null(B)) return(TRUE)
     if (is.null(A) || is.null(B)) return(FALSE)
-    if (!identical(rownames(A), rownames(B))) return(FALSE)
-    if (!identical(colnames(A), colnames(B))) return(FALSE)
     AA <- as.matrix(A); BB <- as.matrix(B)
+    if (!identical(rownames(AA), rownames(BB))) return(FALSE)
+    if (!identical(colnames(AA), colnames(BB))) return(FALSE)
     if (!all(dim(AA) == dim(BB))) return(FALSE)
     diff <- AA - BB
     diff[!is.finite(diff)] <- Inf
     all(abs(diff) <= tol)
   }
+
 
   # Check all schemas match reference (predictors, classes, levels, ranges)
   for (k in seq_along(objects)) {
@@ -162,7 +192,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   var_classes    <- ref_classes
   num_ranges     <- ref_ranges
   factor_levels  <- ref_fac_levels
-  numeric_like   <- c("numeric", "integer", "integer64")
+  numeric_like <- c("numeric", "double", "integer", "integer64")
+
 
   is_num <- names(var_classes)[var_classes %in% numeric_like]
   is_cat <- setdiff(predictor_vars, is_num)
@@ -301,7 +332,12 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   if (length(missing_pred)) {
     for (v in missing_pred) {
       if (v %in% names(var_classes) && var_classes[[v]] %in% numeric_like) {
-        T_data[[v]] <- runif(n)
+        if (!is.null(num_ranges) && ncol(num_ranges) && v %in% colnames(num_ranges)) {
+          lo <- num_ranges["min", v]; hi <- num_ranges["max", v]
+          T_data[[v]] <- rep((lo + hi)/2, n)
+        } else {
+          T_data[[v]] <- rep(0.5, n)
+        }
       } else {
         lev <- factor_levels[[v]]
         if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
@@ -310,6 +346,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       }
     }
   }
+
 
   # Order like predictor_vars
   T_data <- T_data[, predictor_vars, drop = FALSE]
@@ -321,7 +358,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
 
   for (i in seq_along(objects)) {
     obj   <- objects[[i]]
-    preds <- predict(obj, newdata = data_df, debias = debias)
+    preds <- predict(obj, newdata = data_df, debias = debias,agg="mean")
     if (is.list(preds) && !is.null(preds$fit)) preds <- preds$fit
     resp  <- tryCatch(as.character(obj$formula[[2L]]), error = function(e) paste0("resp", i))
     colname <- resp

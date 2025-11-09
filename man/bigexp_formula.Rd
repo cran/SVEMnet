@@ -7,16 +7,37 @@
 bigexp_formula(spec, response)
 }
 \arguments{
-\item{spec}{A "bigexp_spec".}
+\item{spec}{A "bigexp_spec" object created by bigexp_terms().}
 
-\item{response}{Character scalar: the new response (column name in your data).}
+\item{response}{Character scalar giving the name of the new response column
+in your data. If omitted, the original formula is returned unchanged.}
 }
 \value{
-A formula like \verb{response ~ <locked big expansion>}.
+A formula of the form \code{response ~ rhs}, where the right-hand side
+is taken from the locked expansion stored in \code{spec}.
 }
 \description{
-Useful when you want to fit multiple responses with the same expansion.
+bigexp_formula() lets you reuse an existing expansion spec for multiple
+responses. It keeps the right hand side locked but changes the response
+variable on the left hand side.
 }
 \examples{
-# f2 <- bigexp_formula(spec, "y2")
+set.seed(1)
+df2 <- data.frame(
+  y1 = rnorm(10),
+  y2 = rnorm(10),
+  X1 = rnorm(10),
+  X2 = rnorm(10)
+)
+
+spec2 <- bigexp_terms(
+  y1 ~ X1 + X2,
+  data             = df2,
+  factorial_order  = 2,
+  polynomial_order = 2
+)
+
+f2 <- bigexp_formula(spec2, "y2")
+f2
+
 }

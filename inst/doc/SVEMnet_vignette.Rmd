@@ -15,7 +15,7 @@ version `r utils::packageVersion("SVEMnet")`
 
 # Summary
 
-`SVEMnet` implements Self-Validated Ensemble Models (SVEM, Lemkus et al. 2021) and the SVEM whole model test (Karl 2024) using Elastic Net regression via the `glmnet` package Friedman et al. (2010). This vignette provides an overview of the package’s functionality and usage.
+`SVEMnet` implements Self-Validated Ensemble Models (SVEM, Lemkus et al. 2021) and the SVEM whole model test (Karl 2024) using relaxed Elastic Net regression via the `glmnet` package Friedman et al. (2010). This vignette provides an overview of the package’s functionality and usage.
 
 
 # Preface - Note from the author
@@ -60,9 +60,9 @@ coef_matrix <- matrix(NA, nrow = nBoot, ncol = p + 1)
       coef_matrix[i, ] <- as.vector(coef(fit, s = lambda_opt))
 }
 ```
-However, to get this to a stable implementation that includes error and warning handling and structure to pass to S3 methods for `predict()`, `coef()`, `plot()`, etc, it was only practical for me to utilize help from GPT o1-preview. I simply would not have taken the time to add that structure otherwise, and my implementation would have been inferior. I reviewed any of the code that was generated from this tool before integrating it, and corrected its occasional mistakes. If someone would like to create a purely human-written set of code for a similar purpose, let me know and I will be happy to add links to your package and a description to the `SVEMnet` documentation.
+However, to get this to a stable implementation that includes error and warning handling and structure to pass to S3 methods for `predict()`, `coef()`, `plot()`, etc, it was only practical for me to utilize help from GPT o1-preview (and later GPT-5 Thinking, etc.). I simply would not have taken the time to add that structure otherwise, and my implementation would have been inferior. I reviewed any of the code that was generated from this tool before integrating it, and corrected its occasional mistakes. If someone would like to create a purely human-written set of code for a similar purpose, let me know and I will be happy to add links to your package and a description to the `SVEMnet` documentation.
 
-Later revisions make use of later versions of GPT for code auditing, stress testing, and simulaiton. Many of the later entries in this vignette were written with GPT (code, analysis, summary). 
+Later revisions make use of later versions of GPT for code auditing, stress testing, and simulation. Many of the later entries in this vignette were written with assistance from GPT5-Thinking (code, analysis, summary). 
 
 # SVEMnet Example 1
 
@@ -90,31 +90,6 @@ predictions <- predict(svem_model, data)
 print(predictions)
 ```
 
-
-## Whole Model Significance Testing
-
-This is the serial version of the significance test. It is slower but the code is less complicated to read than the faster parallel version.
-
-```r
-test_result <- svem_significance_test(Sepal.Length ~ ., data = data)
-print(test_result)
-plot(test_result)
-SVEM Significance Test p-value:
-[1] 0
-```
-
-```{r, echo=FALSE, out.width='100%', fig.cap="Whole model test result"}
-knitr::include_graphics("figures/whole_model_test.png")
-```
-Note that there is a parallelized version that runs much faster
-
-```r
-test_result <- svem_significance_test_parallel(Sepal.Length ~ ., data = data)
-print(test_result)
-plot(test_result)
-SVEM Significance Test p-value:
-[1] 0
-```
 
 # SVEMnet Example 2
 ```r
@@ -253,133 +228,6 @@ opt_out <- svem_optimize_random(
 opt_out$best_x
 opt_out$best_pred
 head(opt_out$candidates)
-```
-
-## 5. End-to-end lipid formulation example
-
-In this section we use the bundled `lipid_screen` dataset and demonstrate the complete flow over three responses (`Potency`, `Size`, `PDI`) with a **mixture** constraint on composition.
-
-**Key columns**
-
-- Composition fractions in **proportion** units: `PEG`, `Helper`, `Ionizable`, `Cholesterol`
-- Categorical: `Ionizable_Lipid_Type`
-- Numeric process: `N_P_ratio`, `flow_rate`
-- Responses: `Potency`, `Size`, `PDI`
-
-**Mixture constraints**
-
-- The four composition variables must sum to 1
-- Bounds: `PEG ∈ [0.01, 0.05]`, and `Helper`, `Ionizable`, `Cholesterol ∈ [0.10, 0.60]`
-
-### 5.1 Build and lock a shared expansion
-
-We create a deterministic expansion with `bigexp_terms()` (up to 3-way interactions here) and reuse it for each response via `bigexp_formula()`.
-
-```{r, eval=FALSE}
-data(lipid_screen)
-str(lipid_screen)
-
-spec <- bigexp_terms(
-  Potency ~ PEG + Helper + Ionizable + Cholesterol +
-    Ionizable_Lipid_Type + N_P_ratio + flow_rate,
-  data               = lipid_screen,
-  factorial_order    = 3,
-  include_pure_cubic = TRUE,
-  include_pc_3way    = FALSE
-)
-
-form_pot <- bigexp_formula(spec, "Potency")
-form_siz <- bigexp_formula(spec, "Size")
-form_pdi <- bigexp_formula(spec, "PDI")
-```
-
-### 5.2 Fit the three SVEM models
-
-Keep `debias = FALSE` in examples per our package convention.
-
-```{r, eval=FALSE}
-set.seed(1)
-fit_pot <- SVEMnet(form_pot, lipid_screen, nBoot = 40)
-fit_siz <- SVEMnet(form_siz, lipid_screen, nBoot = 40)
-fit_pdi <- SVEMnet(form_pdi, lipid_screen, nBoot = 40)
-
-objs <- list(Potency = fit_pot, Size = fit_siz, PDI = fit_pdi)
-```
-
-### 5.3 Whole-model significance tests
-
-#### 5.3.1 Serial per response
-
-```{r, eval=FALSE}
-test_pot <- svem_significance_test(form_pot, lipid_screen, nPoint=2000, nSVEM=10, nPerm=150,
-                                   nBoot=80, glmnet_alpha=1, relaxed=FALSE, verbose=TRUE)
-test_siz <- svem_significance_test(form_siz, lipid_screen, nPoint=2000, nSVEM=10, nPerm=150,
-                                   nBoot=80, glmnet_alpha=1, relaxed=FALSE, verbose=TRUE)
-test_pdi <- svem_significance_test(form_pdi, lipid_screen, nPoint=2000, nSVEM=10, nPerm=150,
-                                   nBoot=80, glmnet_alpha=1, relaxed=FALSE, verbose=TRUE)
-
-c(Potency = test_pot$p_value, Size = test_siz$p_value, PDI = test_pdi$p_value)
-```
-
-#### 5.3.2 Parallel per response (run separately, then plot together)
-
-> `svem_significance_test_parallel()` operates on **one** response at a time. Use it separately for each response and then combine the visuals with `plot.svem_significance_test()` by passing multiple results.
-
-```{r, eval=FALSE}
-# Parallel runs (example; adjust nCore to your machine)
-par_pot <- svem_significance_test_parallel(form_pot, lipid_screen,
-                                           nPoint=3000, nSVEM=10, nPerm=150,
-                                           nCore = max(1L, parallel::detectCores()-1L),
-                                           seed = 123, verbose=TRUE)
-par_siz <- svem_significance_test_parallel(form_siz, lipid_screen,
-                                           nPoint=3000, nSVEM=10, nPerm=150,
-                                           nCore = max(1L, parallel::detectCores()-1L),
-                                           seed = 123, verbose=TRUE)
-par_pdi <- svem_significance_test_parallel(form_pdi, lipid_screen,
-                                           nPoint=3000, nSVEM=10, nPerm=150,
-                                           nCore = max(1L, parallel::detectCores()-1L),
-                                           seed = 123, verbose=TRUE)
-
-# Plot all three together
-plot(par_pot, par_siz, par_pdi, labels = c("Potency","Size","PDI"))
-```
-
-### 5.4 Random-search optimization with mixture constraints
-
-We construct the mixture constraint and optimize a weighted multi-response goal, returning the best design and 5 diverse high-score **existing** rows (PAM medoids).
-
-```{r, eval=FALSE}
-goals <- list(
-  Potency = list(goal = "max", weight = 0.7),
-  Size    = list(goal = "min", weight = 0.2),
-  PDI     = list(goal = "min", weight = 0.1)
-)
-
-mixL <- list(list(
-  vars  = c("Cholesterol","PEG","Ionizable","Helper"),
-  lower = c(0.10, 0.01, 0.10, 0.10),
-  upper = c(0.60, 0.05, 0.60, 0.60),
-  total = 1
-))
-
-opt_out <- svem_optimize_random(
-  objects        = objs,
-  goals          = goals,
-  n              = 10000,
-  mixture_groups = mixL,
-  agg            = "mean",
-  debias         = FALSE,
-  ci             = TRUE,
-  level          = 0.95,
-  k_candidates   = 5,
-  top_frac       = 0.01,
-  verbose        = TRUE
-)
-
-opt_out$best_x
-opt_out$best_pred
-opt_out$best_ci
-opt_out$candidates
 ```
 
 

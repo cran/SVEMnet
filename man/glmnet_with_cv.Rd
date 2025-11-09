@@ -2,12 +2,12 @@
 % Please edit documentation in R/glmnet_with_cv.R
 \name{glmnet_with_cv}
 \alias{glmnet_with_cv}
-\title{Fit a glmnet Model with Cross-Validation}
+\title{Fit a glmnet Model with Repeated Cross-Validation}
 \usage{
 glmnet_with_cv(
   formula,
   data,
-  glmnet_alpha = c(0, 0.25, 0.5, 0.75, 1),
+  glmnet_alpha = c(0.5, 1),
   standardize = TRUE,
   nfolds = 10,
   repeats = 5,
@@ -16,73 +16,173 @@ glmnet_with_cv(
   exclude = NULL,
   relaxed = FALSE,
   relax_gamma = NULL,
+  family = c("gaussian", "binomial"),
   ...
 )
 }
 \arguments{
 \item{formula}{Model formula.}
 
-\item{data}{Data frame.}
+\item{data}{Data frame containing the variables in the model.}
 
-\item{glmnet_alpha}{Numeric vector of alphas, default c(0,0.25,0.5,0.75, 1).}
+\item{glmnet_alpha}{Numeric vector of Elastic Net mixing parameters
+(alphas) in \code{[0,1]}; default \code{c(0.5, 1)}. When
+\code{relaxed = TRUE}, any \code{alpha = 0} (ridge) is dropped with a
+warning.}
 
-\item{standardize}{Logical passed to glmnet (default TRUE).}
+\item{standardize}{Logical passed to \code{glmnet} / \code{cv.glmnet}
+(default \code{TRUE}).}
 
-\item{nfolds}{CV folds (default 10), internally constrained so >= ~3 obs/fold.}
+\item{nfolds}{Requested number of CV folds (default \code{10}). Internally
+constrained so that there are at least about 3 observations per fold and
+at least 5 folds when possible.}
 
-\item{repeats}{Number of independent CV repeats (default 5).}
+\item{repeats}{Number of independent CV repeats (default \code{5}). Each
+repeat reuses the same folds across all alphas for paired comparisons.}
 
-\item{choose_rule}{"1se" or "min" (default). In simulations "1se" lead to increased RMSE on holdout data when simulating small mixture designs.}
+\item{choose_rule}{Character; how to choose lambda within each alpha:
+\itemize{
+\item \code{"min"}: lambda minimizing the cross-validated criterion.
+\item \code{"1se"}: largest lambda within 1 combined SE of the minimum,
+where the SE includes both within- and between-repeat variability.
+}
+Default is \code{"min"}. In small-mixture simulations, the 1-SE rule
+tended to increase RMSE on held-out data, so \code{"min"} is used as the
+default here.}
 
-\item{seed}{Optional integer seed for reproducible fold IDs.}
+\item{seed}{Optional integer seed for reproducible fold IDs (and the
+ridge fallback, if used).}
 
-\item{exclude}{Optional vector OR function for glmnet's exclude=.
-If a function, cv.glmnet applies it inside each training fold (glmnet >= 4.1-2).}
+\item{exclude}{Optional vector or function for \code{glmnet}'s
+\code{exclude=} argument. If a function, \code{cv.glmnet()} applies it
+inside each training fold (requires \code{glmnet} \code{>= 4.1-2}).}
 
-\item{relaxed}{Logical; if TRUE, call glmnet/cv.glmnet with relax=TRUE (default FALSE).}
+\item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet} /
+\code{cv.glmnet} with \code{relax = TRUE} and optionally a
+\code{gamma} path (default \code{FALSE}). If \code{cv.glmnet(relax=TRUE)}
+fails for a particular repeat/alpha, the function retries that fit
+without relaxation; the number of such fallbacks is recorded in
+\code{meta$relax_cv_fallbacks}.}
 
-\item{relax_gamma}{Optional numeric vector passed as gamma= to glmnet/cv.glmnet
-when relaxed=TRUE. If NULL, glmnet uses its internal default gamma path.}
+\item{relax_gamma}{Optional numeric vector passed as \code{gamma=} to
+\code{glmnet} / \code{cv.glmnet} when \code{relaxed = TRUE}. If
+\code{NULL}, glmnet's internal default gamma grid is used.}
 
-\item{...}{Args forwarded to both cv.glmnet() and glmnet(), e.g.
-family, weights, parallel, type.measure, intercept, maxit, lower.limits,
-upper.limits, penalty.factor, offset, standardize.response, keep, etc.}
+\item{family}{Model family: either \code{"gaussian"} or \code{"binomial"},
+or the corresponding \code{stats::gaussian()} / \code{stats::binomial()}
+family objects with canonical links. For Gaussian, \code{y} must be
+numeric. For binomial, \code{y} must be 0/1 numeric, logical, or a factor
+with exactly 2 levels (the second level is treated as 1). Non-canonical
+links are not supported.}
+
+\item{...}{Additional arguments forwarded to both \code{cv.glmnet()} and
+\code{glmnet()}, for example: \code{weights}, \code{parallel},
+\code{type.measure}, \code{intercept}, \code{maxit},
+\code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
+\code{offset}, \code{standardize.response}, \code{keep}, etc. If
+\code{family} is supplied here, it is ignored in favor of the explicit
+\code{family} argument.}
 }
 \value{
-A list with elements:
+A list of class \code{c("svem_cv","svem_model")} with elements:
 \itemize{
-\item parms Named numeric vector of coefficients (including "(Intercept)").
-\item glmnet_alpha Numeric vector of alphas searched.
-\item best_alpha Numeric; winning alpha.
-\item best_lambda Numeric; winning lambda.
-\item y_pred In-sample predictions from the returned coefficients.
-\item debias_fit Optional lm(y ~ y_pred) for Gaussian family.
-\item y_pred_debiased If debias_fit exists, its fitted values.
-\item cv_summary Per-alpha data frames with lambda, mean_cvm, sd_cvm, se_combined, n_repeats, idx_min, idx_1se.
-\item formula Original formula.
-\item terms Cleaned training terms (environment set to baseenv()).
-\item training_X Training design matrix without intercept.
-\item actual_y Training response vector.
-\item xlevels Factor levels seen during training (for safe predict).
-\item contrasts Contrasts used during training (for safe predict).
-\item schema list(feature_names, terms_str, xlevels, contrasts, terms_hash) for deterministic predict.
-\item note Character vector of notes (e.g., dropped rows, relaxed-coef source).
-\item meta List: nfolds, repeats, rule, family, relaxed, relax_cv_fallbacks, cv_object (if keep=TRUE for the final fit).
+\item \code{parms} Named numeric vector of coefficients (including
+\code{"(Intercept)"}).
+\item \code{glmnet_alpha} Numeric vector of alphas searched.
+\item \code{best_alpha} Numeric; winning alpha.
+\item \code{best_lambda} Numeric; winning lambda.
+\item \code{y_pred} In-sample predictions from the returned coefficients
+(fitted values for Gaussian; probabilities for binomial).
+\item \code{debias_fit} For Gaussian, an optional \code{lm(y ~ y_pred)}
+calibration model; \code{NULL} otherwise.
+\item \code{y_pred_debiased} If \code{debias_fit} exists, its fitted
+values; otherwise \code{NULL}.
+\item \code{cv_summary} Named list (one per alpha) of data frames with
+columns: \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
+\code{se_combined}, \code{n_repeats}, \code{idx_min},
+\code{idx_1se}.
+\item \code{formula} Original modeling formula.
+\item \code{terms} Training \code{terms} object with environment set to
+\code{baseenv()}.
+\item \code{training_X} Training design matrix (without intercept column).
+\item \code{actual_y} Training response vector used for glmnet:
+numeric \code{y} for Gaussian, or 0/1 numeric \code{y} for
+binomial.
+\item \code{xlevels} Factor and character levels seen during training
+(for safe prediction).
+\item \code{contrasts} Contrasts used for factor predictors during
+training.
+\item \code{schema} List
+\code{list(feature_names, terms_str, xlevels, contrasts, terms_hash)}
+for deterministic predict.
+\item \code{note} Character vector of notes (e.g., dropped rows,
+intercept-only path, ridge fallback, relaxed-coefficient source).
+\item \code{meta} List with fields such as \code{nfolds}, \code{repeats},
+\code{rule}, \code{family}, \code{relaxed},
+\code{relax_cv_fallbacks}, and \code{cv_object} (the final
+\code{cv.glmnet} object when \code{relaxed = TRUE} and
+\code{keep = TRUE}, otherwise \code{NULL}).
 }
 }
 \description{
-Repeated K-fold CV over a per-alpha lambda path, with a proper
-1-SE rule across repeats. Preserves fields expected by predict_cv().
-Optionally uses glmnet's built-in relaxed elastic net for both the warm-start
-path and each CV fit. When relaxed=TRUE, the final coefficients are taken
-from a cv.glmnet() object at the chosen lambda so that the returned model
-reflects the relaxed solution (including its gamma).
+Repeated K-fold cross-validation over a per-alpha lambda path, with a
+combined 1-SE rule across repeats. Preserves fields expected by
+\code{predict.svem_model} / internal prediction helpers. Optionally uses
+glmnet's built-in relaxed elastic net for both the warm-start path and each
+CV fit. When \code{relaxed = TRUE}, the final coefficients are taken from a
+\code{cv.glmnet()} object at the chosen lambda so that the returned model
+reflects the relaxed solution (including its chosen \eqn{\gamma}).
 }
 \details{
-To avoid duplicate-argument errors, arguments like x, y, alpha, lambda,
-foldid, and exclude are passed explicitly and removed from the dots
-before calling glmnet::cv.glmnet().
+This function is a convenience wrapper around \code{glmnet} /
+\code{cv.glmnet()} that returns an object in the same structural format as
+\code{SVEMnet()} (class \code{"svem_model"}). It is intended for:
+\itemize{
+\item direct comparison of standard cross-validated glmnet fits to SVEMnet
+models, using the same prediction/schema tools, or
+\item users who want a repeated-\code{cv.glmnet()} workflow without any
+SVEM weighting or bootstrap ensembling.
 }
+It is not called internally by the SVEM bootstrap routines.
+
+For each \code{alpha} in \code{glmnet_alpha}, the function:
+\enumerate{
+\item Generates a set of CV fold IDs (shared across alphas and repeats).
+\item Runs \code{repeats} independent \code{cv.glmnet()} fits, aligning
+lambda paths and aggregating the CV curves.
+\item Computes a combined SE at each lambda that accounts for both
+within-repeat and between-repeat variability.
+\item Applies \code{choose_rule} (\code{"min"} or \code{"1se"}) to pick
+the lambda for that alpha.
+}
+The best alpha is then chosen by comparing these per-alpha scores.
+
+If there are no predictors after \code{model.matrix()} (intercept-only
+model), the function returns an intercept-only fit without calling
+\code{glmnet}, along with a minimal schema for safe prediction.
+
+If all \code{cv.glmnet()} attempts fail for every alpha (a rare edge case),
+the function falls back to a manual ridge (\code{alpha = 0}) CV search over
+a fixed lambda grid and returns the best ridge solution.
+
+For the Gaussian family, an optional calibration \code{lm(y ~ y_pred)} is
+fit on the training data (when there is sufficient variation), and both
+\code{y_pred} and \code{y_pred_debiased} are stored. For the binomial
+family, \code{y_pred} is always on the probability (response) scale and
+debiasing is not applied.
+
+The returned object inherits classes \code{"svem_cv"} and \code{"svem_model"}
+and is designed to be compatible with SVEMnet's prediction and schema
+utilities. It is a standalone, standard glmnet CV workflow that does
+\emph{not} use SVEM-style bootstrap weighting or ensembling.
+}
+\section{Acknowledgments}{
+
+OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+used to assist with coding and roxygen documentation; all
+content was reviewed and finalized by the author.
+}
+
 \examples{
 set.seed(123)
 n <- 100; p <- 10
@@ -92,17 +192,72 @@ y <- as.numeric(X \%*\% beta + rnorm(n))
 df_ex <- data.frame(y = y, X)
 colnames(df_ex) <- c("y", paste0("x", 1:p))
 
-# Default: 1SE rule, repeats=1, non-relaxed
-fit_1se <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = c(0.5, 1),
-                          nfolds = 5, repeats = 1, seed = 42)
-str(fit_1se$parms)
+# Gaussian example, v1-like behavior: choose_rule = "min"
+fit_min <- glmnet_with_cv(
+  y ~ ., df_ex,
+  glmnet_alpha = 1,
+  nfolds = 5,
+  repeats = 1,
+  choose_rule = "min",
+  seed = 42,
+  family = "gaussian"
+)
 
-# v1-like behavior: choose_rule="min"
-fit_min <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1,
-                          nfolds = 5, repeats = 1, choose_rule = "min", seed = 42)
+# Gaussian example, relaxed path with gamma search
+fit_relax <- glmnet_with_cv(
+  y ~ ., df_ex,
+  glmnet_alpha = 1,
+  nfolds = 5,
+  repeats = 1,
+  relaxed = TRUE,
+  seed = 42,
+  family = "gaussian"
+)
 
-# Relaxed path with gamma search
-fit_relax <- glmnet_with_cv(y ~ ., df_ex, glmnet_alpha = 1,
-                            nfolds = 5, repeats = 1, relaxed = TRUE, seed = 42)
+# Binomial example (numeric 0/1 response)
+set.seed(456)
+n2 <- 150; p2 <- 8
+X2 <- matrix(rnorm(n2 * p2), n2, p2)
+beta2 <- c(1.0, -1.5, rep(0, p2 - 2))
+linpred <- as.numeric(X2 \%*\% beta2)
+prob <- plogis(linpred)
+y_bin <- rbinom(n2, size = 1, prob = prob)
+df_bin <- data.frame(y = y_bin, X2)
+colnames(df_bin) <- c("y", paste0("x", 1:p2))
 
+fit_bin <- glmnet_with_cv(
+  y ~ ., df_bin,
+  glmnet_alpha = c(0.5, 1),
+  nfolds = 5,
+  repeats = 2,
+  seed = 99,
+  family = "binomial"
+)
+
+}
+\references{
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+
+Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+
+Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+
+Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
+
+Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
+
+Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+
+Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
+
+Friedman, J. H., Hastie, T., and Tibshirani, R. (2010).
+Regularization Paths for Generalized Linear Models via Coordinate Descent.
+Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
 }

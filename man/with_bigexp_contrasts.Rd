@@ -2,18 +2,39 @@
 % Please edit documentation in R/bigexp.R
 \name{with_bigexp_contrasts}
 \alias{with_bigexp_contrasts}
-\title{Evaluate an expression with the spec's recorded contrast options}
+\title{Evaluate code with the spec's recorded contrast options}
 \usage{
 with_bigexp_contrasts(spec, code)
 }
 \arguments{
-\item{spec}{A "bigexp_spec".}
+\item{spec}{A "bigexp_spec" object with stored contrasts_options in settings.}
 
-\item{code}{Code to evaluate with temporarily restored \code{options(contrasts=...)}.}
+\item{code}{Code to evaluate with temporarily restored options.}
 }
 \description{
-Evaluate an expression with the spec's recorded contrast options
+with_bigexp_contrasts() temporarily restores the contrasts options that
+were active when the spec was built, runs a block of code, and then
+restores the original options. This is useful when a modeling function
+uses the global options("contrasts") to decide how to encode factors.
 }
 \examples{
-# with_bigexp_contrasts(spec, { fit <- SVEMnet(f, data = d, ...) })
+set.seed(1)
+df4 <- data.frame(
+  y  = rnorm(10),
+  X1 = rnorm(10),
+  G  = factor(sample(c("A", "B"), 10, replace = TRUE))
+)
+
+spec4 <- bigexp_terms(
+  y ~ X1 + G,
+  data             = df4,
+  factorial_order  = 2,
+  polynomial_order = 2
+)
+
+with_bigexp_contrasts(spec4, {
+  mm4 <- model.matrix(spec4$formula, df4)
+  head(mm4)
+})
+
 }

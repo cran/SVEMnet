@@ -1,79 +1,121 @@
 #' SVEM Significance Test with Mixture Support (Parallel Version)
 #'
-#' Whole-model significance test using SVEM with support for mixture factor groups,
-#' parallelizing the SVEM fits for originals and permutations.
+#' Whole-model significance test for continuous (Gaussian) SVEM fits, with
+#' support for mixture factor groups and parallel SVEM refits.
 #'
-#' Identical in logic to \code{svem_significance_test()} but runs the expensive
-#' SVEM refits in parallel using \code{foreach} + \code{doParallel}. Random draws
-#' (including permutations) use \code{RNGkind("L'Ecuyer-CMRG")} for parallel-suitable streams.
+#' The test follows Karl (2024): it generates a space-filling grid in the
+#' factor space, fits multiple SVEM models on the original data and on
+#' permuted responses, standardizes predictions on the grid, reduces them via
+#' an SVD-based low-rank representation, and summarizes each fit by a
+#' Mahalanobis-type distance in the reduced space. A flexible SHASHo
+#' distribution is then fit to the permutation distances and used to obtain
+#' a whole-model p-value for the observed surface.
 #'
-#' This parallel version can optionally reuse a deterministic, locked expansion built
-#' with \code{bigexp_terms()}. Provide \code{spec} (and optionally \code{response}) to
-#' ensure that categorical levels, contrasts, and the polynomial/interaction structure are
-#' identical across repeated calls and across multiple responses of the same factor space.
+#' All SVEM refits (for the original and permuted responses) are run in
+#' parallel using \code{foreach} + \code{doParallel}. Random draws
+#' (including permutations and evaluation-grid sampling) are made reproducible
+#' across workers using \code{doRNG} together with
+#' \code{RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")} when a
+#' \code{seed} is supplied.
 #'
-#' @param formula A formula specifying the model to be tested. If \code{spec} is provided,
-#'   the right-hand side is ignored and replaced by the locked expansion in \code{spec}.
+#' The function can optionally reuse a deterministic, locked expansion built
+#' with \code{bigexp_terms()}. Provide \code{spec} (and optionally
+#' \code{response}) to ensure that categorical levels, contrasts, and the
+#' polynomial/interaction structure are identical across repeated calls and
+#' across multiple responses sharing the same factor space.
+#'
+#' Although the implementation calls \code{SVEMnet()} internally and will
+#' technically run for any supported \code{family}, the significance test is
+#' \emph{designed} for continuous (Gaussian) responses and should be interpreted
+#' in that setting.
+#'
+#' @param formula A formula specifying the model to be tested. If \code{spec} is
+#'   provided, the right-hand side is ignored and replaced by the locked
+#'   expansion in \code{spec}.
 #' @param data A data frame containing the variables in the model.
 #' @param mixture_groups Optional list describing one or more mixture factor
 #'   groups. Each element of the list should be a list with components
 #'   \code{vars} (character vector of column names), \code{lower} (numeric vector of
 #'   lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
 #'   of upper bounds of the same length), and \code{total} (scalar specifying the
-#'   sum of the mixture variables). All mixture variables must be included in \code{vars},
-#'   and no variable can appear in more than one mixture group. Defaults to \code{NULL}.
-#' @param nPoint Number of random points in the factor space (default: 2000).
-#' @param nSVEM Number of SVEM fits on the original data (default: 10).
-#' @param nPerm Number of SVEM fits on permuted responses for the reference
-#'   distribution (default: 150).
-#' @param percent Percentage of variance to capture in the SVD (default: 90).
-#' @param nBoot Number of bootstrap iterations within each SVEM fit (default: 100).
-#' @param glmnet_alpha The alpha parameter(s) for glmnet (default: \code{c(1)}).
-#' @param weight_scheme Weighting scheme for SVEM (default: "SVEM").
+#'   sum of the mixture variables). All mixture variables must be included in
+#'   \code{vars}, and no variable can appear in more than one mixture group.
+#'   Defaults to \code{NULL}.
+#' @param nPoint Number of random points in the factor space (default: \code{2000}).
+#' @param nSVEM Number of SVEM fits on the original (unpermuted) data used to
+#'   summarize the observed surface (default: \code{10}).
+#' @param nPerm Number of SVEM fits on permuted responses used to build the null
+#'   reference distribution (default: \code{150}).
+#' @param percent Percentage of variance to capture in the SVD (default: \code{90}).
+#' @param nBoot Number of bootstrap iterations within each SVEM fit (default: \code{100}).
+#' @param glmnet_alpha The alpha parameter(s) for \code{glmnet} (default: \code{c(1)}).
+#' @param weight_scheme Weighting scheme for SVEM (default: \code{"SVEM"}).
+#'   Passed to \code{SVEMnet()}.
 #' @param objective Objective used inside \code{SVEMnet()} to pick the bootstrap
-#'   path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, \code{"wSSE"}
-#'   (default: \code{"auto"}).  (Note: \code{"wGIC"} is no longer supported.)
+#'   path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or
+#'   \code{"wSSE"} (default: \code{"auto"}). Note: \code{"wGIC"} is no longer
+#'   supported.
 #' @param auto_ratio_cutoff Single cutoff for the automatic rule when
-#'   \code{objective = "auto"} (default 1.3). With \code{r = n_X/p_X}, if
-#'   \code{r >= auto_ratio_cutoff} use wAIC; else wBIC. Passed to \code{SVEMnet()}.
+#'   \code{objective = "auto"} (default \code{1.3}). With \code{r = n_X / p_X}, if
+#'   \code{r >= auto_ratio_cutoff} wAIC is used; otherwise wBIC. Passed through
+#'   to \code{SVEMnet()}.
 #' @param relaxed Logical; default \code{FALSE}. When \code{TRUE}, inner
 #'   \code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
 #'   lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
 #'   glmnet path is used. This value is passed through to \code{SVEMnet()}.
 #'   Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
 #'   (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.
-#' @param verbose Logical; if \code{TRUE}, displays progress messages (default: \code{TRUE}).
-#' @param nCore Number of CPU cores for parallel processing (default: all available cores).
-#' @param seed Optional integer seed for reproducible parallel RNG (default: \code{NULL}).
-#' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If provided,
-#'   the test reuses its locked expansion. The working formula becomes
+#' @param verbose Logical; if \code{TRUE}, display progress messages
+#'   (default: \code{TRUE}).
+#' @param nCore Number of CPU cores for parallel processing. Default is
+#'   \code{parallel::detectCores() - 1}, with a floor of 1.
+#' @param seed Optional integer seed for reproducible parallel RNG (default:
+#'   \code{NULL}). When supplied, the master RNG kind is set to
+#'   \code{"L'Ecuyer-CMRG"} with \code{sample.kind = "Rounding"}, and
+#'   \code{doRNG::registerDoRNG()} is used so that the \code{\%dorng\%} loops are
+#'   reproducible regardless of scheduling.
+#' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If
+#'   provided, the test reuses its locked expansion. The working formula becomes
 #'   \code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
 #'   \code{response} if supplied, otherwise from the left-hand side of \code{formula}.
-#'   Categorical sampling uses \code{spec$levels} and numeric sampling prefers \code{spec$num_range}
-#'   when available.
-#' @param response Optional character name for the response variable to use when \code{spec}
-#'   is supplied. If omitted, the response is taken from the left-hand side of \code{formula}.
-#' @param use_spec_contrasts Logical; default \code{TRUE}. When \code{spec} is supplied and
-#'   \code{use_spec_contrasts=TRUE}, the function replays \code{spec$settings$contrasts_options}
-#'   on the parallel workers for deterministic coding.
-#' @param ... Additional arguments passed to \code{SVEMnet()} and then to \code{glmnet()}
-#'   (for example: \code{penalty.factor}, \code{offset}, \code{lower.limits},
-#'   \code{upper.limits}, \code{standardize.response}, etc.). The \code{relaxed}
-#'   setting is controlled by the \code{relaxed} argument of this function and
-#'   any \code{relaxed} value passed via \code{...} is ignored with a warning.
+#'   Categorical sampling uses \code{spec$levels} and numeric sampling prefers
+#'   \code{spec$num_range} when available.
+#' @param response Optional character name for the response variable to use when
+#'   \code{spec} is supplied. If omitted, the response is taken from the left-hand
+#'   side of \code{formula}.
+#' @param use_spec_contrasts Logical; default \code{TRUE}. When \code{spec} is
+#'   supplied and \code{use_spec_contrasts = TRUE}, the function replays
+#'   \code{spec$settings$contrasts_options} on the parallel workers for
+#'   deterministic coding.
+#' @param ... Additional arguments passed to \code{SVEMnet()} and then to
+#'   \code{glmnet()} (for example: \code{penalty.factor}, \code{offset},
+#'   \code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
+#'   The \code{relaxed} setting is controlled by the \code{relaxed} argument of
+#'   this function and any \code{relaxed} value passed via \code{...} is ignored
+#'   with a warning.
 #'
-#' @return A list of class \code{svem_significance_test} containing the test results.
+#' @return A list of class \code{svem_significance_test} with components:
+#'   \itemize{
+#'     \item \code{p_value}: the median whole-model p-value over original SVEM fits.
+#'     \item \code{p_values}: vector of p-values for each original SVEM fit.
+#'     \item \code{d_Y}: distances for the original SVEM fits.
+#'     \item \code{d_pi_Y}: distances for the permutation fits.
+#'     \item \code{distribution_fit}: the fitted SHASHo distribution object.
+#'     \item \code{data_d}: data frame of distances and source labels, suitable
+#'           for plotting.
+#'   }
 #'
-#' @seealso \code{svem_significance_test}, \code{bigexp_terms}, \code{bigexp_formula}
-#'
+#' @seealso \code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
+#' @template ref-svem
 #' @importFrom lhs maximinLHS
 #' @importFrom gamlss gamlss gamlss.control
 #' @importFrom gamlss.dist SHASHo pSHASHo
 #' @importFrom stats model.frame model.response model.matrix delete.response terms
 #' @importFrom stats median complete.cases rgamma coef predict
-#' @importFrom foreach foreach %dopar%
+#' @importFrom foreach foreach
 #' @importFrom doParallel registerDoParallel
-#' @importFrom parallel makeCluster stopCluster clusterSetRNGStream detectCores clusterCall
+#' @importFrom doRNG %dorng% registerDoRNG
+#' @importFrom parallel makeCluster stopCluster detectCores clusterCall
 #' @examples
 #' \donttest{
 #'   set.seed(1)
@@ -140,7 +182,7 @@ svem_significance_test_parallel <- function(
     auto_ratio_cutoff = 1.3,
     relaxed = FALSE,
     verbose = TRUE,
-    nCore = parallel::detectCores(),
+    nCore = parallel::detectCores()-1,
     seed = NULL,
     spec = NULL,
     response = NULL,
@@ -175,18 +217,64 @@ svem_significance_test_parallel <- function(
     getOption("contrasts")
   }
 
-  # --- parallel RNG & cluster setup ---
-  RNGkind("L'Ecuyer-CMRG")
-  if (!is.null(seed)) set.seed(seed)
+  # --- master RNG for serial prep (design, mixtures, factors) ---
+  if (!is.null(seed)) {
+    oldKinds <- RNGkind()
+    on.exit({
+      RNGkind(kind = oldKinds[1L], normal.kind = oldKinds[2L], sample.kind = oldKinds[3L])
+    }, add = TRUE)
 
+    # For R >= 3.6, sample.kind="Rounding" avoids deprecation warnings
+    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+    set.seed(seed)
+  }
+
+  # --- enforce single-threaded BLAS/OpenMP BEFORE spawning workers -------------
+  Sys.setenv(
+    OMP_NUM_THREADS        = "1",
+    MKL_NUM_THREADS        = "1",
+    OPENBLAS_NUM_THREADS   = "1",
+    VECLIB_MAXIMUM_THREADS = "1",
+    NUMEXPR_NUM_THREADS    = "1"
+  )
+
+  # --- cluster setup -----------------------------------------------------------
   nCore <- max(1L, as.integer(`%||%`(nCore, parallel::detectCores())))
   cl <- parallel::makeCluster(nCore)
   doParallel::registerDoParallel(cl)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
-  if (!is.null(seed)) parallel::clusterSetRNGStream(cl, iseed = seed)
+  if (!is.null(seed)) {
+    parallel::clusterCall(cl, function() {
+      ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+      if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+      NULL
+    })
+  }
 
-  # Set contrasts options on workers without referencing a missing symbol
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+
+  # Enforce single-threaded BLAS/OpenMP on workers too (belt & suspenders)
+  parallel::clusterCall(cl, function() {
+    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+      RhpcBLASctl::blas_set_num_threads(1)
+      RhpcBLASctl::omp_set_num_threads(1)
+    } else {
+      Sys.setenv(
+        OMP_NUM_THREADS        = "1",
+        MKL_NUM_THREADS        = "1",
+        OPENBLAS_NUM_THREADS   = "1",
+        VECLIB_MAXIMUM_THREADS = "1",
+        NUMEXPR_NUM_THREADS    = "1"
+      )
+    }
+    NULL
+  })
+
+  # Set contrasts options on workers
   parallel::clusterCall(cl, function(opts) { options(contrasts = opts); NULL }, contrasts_opts)
+
+  # Register doRNG to make foreach iterations reproducible, independent of scheduling
+  if (!is.null(seed)) doRNG::registerDoRNG(seed)
 
   # Sanitize ... so explicit 'relaxed' here cannot be overridden
   dots <- list(...)
@@ -201,8 +289,8 @@ svem_significance_test_parallel <- function(
 
   # For sampling, decide which raw columns are categorical vs continuous
   if (!is.null(spec)) {
-    predictor_vars  <- spec$vars
-    is_cat          <- spec$is_cat
+    predictor_vars   <- spec$vars
+    is_cat           <- spec$is_cat
     categorical_vars <- names(is_cat)[is_cat]
     continuous_vars  <- names(is_cat)[!is_cat]
   } else {
@@ -357,13 +445,14 @@ svem_significance_test_parallel <- function(
 
   y_mean <- mean(y)
 
-  # --- Originals: parallel SVEM fits ---
+  # --- Originals: parallel SVEM fits (reproducible with %dorng%) ---------------
   if (isTRUE(verbose)) message("Fitting SVEM models to original data (parallel)...")
   M_Y <- foreach::foreach(
     i = 1:nSVEM,
     .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats")
-  ) %dopar% {
+    .packages = c("SVEMnet", "glmnet", "stats"),
+    .options.snow = list(preschedule = FALSE)
+  ) %dorng% {
     svem_model <- tryCatch({
       do.call(SVEMnet::SVEMnet, c(list(
         formula = f_use, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
@@ -384,14 +473,15 @@ svem_significance_test_parallel <- function(
     (f_hat_Y_T - y_mean) / s_hat_Y_T
   }
 
-  # --- Permutations: parallel SVEM fits ---
+  # --- Permutations: parallel SVEM fits (reproducible with %dorng%) ------------
   if (isTRUE(verbose)) message("Starting permutation testing (parallel)...")
   start_time_perm <- Sys.time()
   M_pi_Y <- foreach::foreach(
     jloop = 1:nPerm,
     .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats")
-  ) %dopar% {
+    .packages = c("SVEMnet", "glmnet", "stats"),
+    .options.snow = list(preschedule = FALSE)
+  ) %dorng% {
     y_perm <- sample(y, replace = FALSE)
     data_perm <- data
     data_perm[[resp_name]] <- y_perm
@@ -448,32 +538,42 @@ svem_significance_test_parallel <- function(
   M_Y_centered <- sweep(M_Y, 2, col_means_M_pi_Y, "-")
   tilde_M_Y    <- sweep(M_Y_centered, 2, col_sds_M_pi_Y, "/")
 
-  # SVD and distances (hardened, same logic)
+  # SVD and distances (paper-consistent scaling)
   svd_res <- svd(tilde_M_pi_Y)
   s <- svd_res$d
   V <- svd_res$v
 
-  evalues_temp <- s^2
-  # explained-variance percent (same as before; the ncol() factor cancels)
-  cumsum_evalues <- cumsum(evalues_temp) / sum(evalues_temp) * 100
+  n_perm <- nrow(tilde_M_pi_Y)
+  p_cols <- ncol(tilde_M_pi_Y)
 
+  # 1) correlation-PCA eigenvalues: (s^2)/(n_perm - 1)
+  evalues_all <- (s^2) / max(n_perm - 1, 1L)
+
+  # 2) Rescale to make eigenvalues sum to p (matches paper)
+  ev_sum <- sum(evalues_all)
+  if (!is.finite(ev_sum) || ev_sum <= 0) ev_sum <- 1e-12
+  evalues_all <- evalues_all / ev_sum * p_cols
+
+  # Explained-variance percent under this convention
+  cumsum_evalues <- cumsum(evalues_all) / p_cols * 100
+  percent <- max(min(percent, 99.999), 0.1)
   k_idx <- which(cumsum_evalues >= percent)[1L]
-  if (!length(k_idx) || is.na(k_idx)) k_idx <- length(evalues_temp)
-  # guard against asking for more PCs than exist
+  if (!length(k_idx) || is.na(k_idx)) k_idx <- length(evalues_all)
   k_idx <- min(k_idx, ncol(V))
+  k_idx <- max(k_idx, 1L)
 
-  evalues  <- evalues_temp[seq_len(k_idx)]
+  evalues  <- evalues_all[seq_len(k_idx)]
   evectors <- V[, seq_len(k_idx), drop = FALSE]
 
-  # force matrices to avoid accidental data.frames
+  # Force matrices to avoid accidental data.frames
   tilde_M_pi_Y <- as.matrix(tilde_M_pi_Y)
   tilde_M_Y    <- as.matrix(tilde_M_Y)
 
-  # Project, then divide component-wise by eigenvalues (avoid diag() shape traps)
+  # Project
   Z_pi <- tilde_M_pi_Y %*% evectors   # nPerm x k
   Z_Y  <- tilde_M_Y    %*% evectors   # nSVEM x k
 
-  # numerical guard: zero/NA eigenvalues
+  # Numerical guard: zero/NA eigenvalues
   evalues[!is.finite(evalues) | evalues <= 0] <- 1e-12
 
   T2_perm <- rowSums((Z_pi^2) / rep(evalues, each = nrow(Z_pi)))
@@ -481,7 +581,6 @@ svem_significance_test_parallel <- function(
 
   T2_Y <- rowSums((Z_Y^2) / rep(evalues, each = nrow(Z_Y)))
   d_Y  <- sqrt(T2_Y)
-
 
   if (length(d_pi_Y) == 0) stop("No valid permutation distances to fit a distribution.")
 

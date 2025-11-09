@@ -2,27 +2,32 @@
 % Please edit documentation in R/plot.svemtest.R
 \name{plot.svem_significance_test}
 \alias{plot.svem_significance_test}
-\alias{plot_svem_significance_tests}
-\title{Plot SVEM Significance Test Results for Multiple Responses}
+\title{Plot SVEM significance test results for one or more responses}
 \usage{
 \method{plot}{svem_significance_test}(x, ..., labels = NULL)
 }
 \arguments{
 \item{x}{An object of class \code{svem_significance_test}.}
 
-\item{...}{Optional additional \code{svem_significance_test} objects to include.}
+\item{...}{Optional additional \code{svem_significance_test} objects to include
+in the same plot.}
 
-\item{labels}{Optional character vector of labels for the responses.
-If not provided, the function uses the response names and ensures uniqueness.}
+\item{labels}{Optional character vector of labels for the responses. If not
+provided, the function uses inferred response names (from \code{data_d$Response}
+or \code{x$response}) and ensures uniqueness.}
 }
 \value{
-A \code{ggplot} object showing the distributions of distances.
+A \code{ggplot2} object showing the distributions of distances for
+original vs. permuted data, grouped by response.
 }
 \description{
 Plots the Mahalanobis-like distances for original and permuted data from
-one or more SVEM significance test results.
+one or more SVEM significance test results returned by
+\code{svem_significance_test_parallel()}.
 }
 \details{
 If additional \code{svem_significance_test} objects are provided via \code{...},
-they will be combined into a single plot alongside \code{x}.
+their distance tables (\code{$data_d}) are stacked and plotted together
+using a shared x-axis grouping of \code{"Response / Source"} and a fill
+aesthetic indicating \code{"Original"} vs \code{"Permutation"}.
 }

@@ -2,19 +2,20 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 2.3.1
-Date: 2025-10-13
+Version: 2.5.4
+Date: 2025-11-09
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
            email = "akarl@asu.edu",
            role = c("cre", "aut"),
            comment = c(ORCID = "0000-0002-5933-8706"))
-Description: Implements Self-Validated Ensemble Models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) using elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). SVEM averages predictions from multiple models fitted to fractionally weighted bootstraps of the data, tuned with anti-correlated validation weights. Also implements the randomized permutation whole-model test for SVEM (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>).
-Depends: R (>= 3.5.0)
-Imports: glmnet (>= 4.1-4), stats, cluster, ggplot2, lhs, foreach,
-        doParallel, parallel, gamlss, gamlss.dist
-Suggests: covr, knitr, rmarkdown, testthat (>= 3.0.0), withr, vdiffr
+Description: Implements Self-Validated Ensemble Models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) using elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). SVEM averages predictions from multiple models fitted to fractionally weighted bootstraps of the data, tuned with anti-correlated validation weights. Supports Gaussian and binomial responses. Also implements the randomized permutation whole-model test for SVEM with Gaussian responses (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Some parts of the package code were drafted with assistance from generative AI tools.
+Depends: R (>= 4.0.0)
+Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, rlang, lhs,
+        foreach, doParallel, doRNG, parallel, gamlss, gamlss.dist
+Suggests: covr, knitr, rmarkdown, testthat (>= 3.0.0), withr, vdiffr,
+        RhpcBLASctl
 VignetteBuilder: knitr
 License: GPL-2 | GPL-3
 Encoding: UTF-8
@@ -22,9 +23,9 @@ RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 LazyData: true
 NeedsCompilation: no
-Packaged: 2025-10-13 23:29:20 UTC; andre
+Packaged: 2025-11-09 15:27:09 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2025-10-13 23:50:02 UTC
+Date/Publication: 2025-11-09 15:40:02 UTC
