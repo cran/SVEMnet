@@ -7,36 +7,39 @@
 bigexp_train(formula, data, ...)
 }
 \arguments{
-\item{formula}{Main-effects formula such as y ~ X1 + X2 + G or y ~ .
+\item{formula}{Main-effects formula such as \code{y ~ X1 + X2 + G} or \code{y ~ .}.
 Only main effects should appear on the right hand side.}
 
 \item{data}{Training data frame used to lock types and levels.}
 
-\item{...}{Additional arguments forwarded to bigexp_terms(), such as
-factorial_order, discrete_threshold, polynomial_order, include_pc_2way,
-include_pc_3way, and intercept.}
+\item{...}{Additional arguments forwarded to \code{bigexp_terms()}, such as
+\code{factorial_order}, \code{discrete_threshold}, \code{polynomial_order},
+\code{include_pc_2way}, \code{include_pc_3way}, and \code{intercept}.}
 }
 \value{
-An object of class "bigexp_train" which is a list with components:
+An object of class \code{"bigexp_train"} which is a list with components:
 \itemize{
-\item spec: the "bigexp_spec" object returned by bigexp_terms()
-\item formula: the expanded formula spec$formula
-\item data: the prepared training data ready for modeling
+\item \code{spec}: the \code{"bigexp_spec"} object returned by
+\code{bigexp_terms()}.
+\item \code{formula}: the expanded formula \code{spec$formula}.
+\item \code{data}: the prepared training data (predictors coerced to match
+\code{spec}), suitable for passing directly to modeling functions
+such as \code{lm()}, \code{glm()}, or \code{SVEMnet()}.
 }
 }
 \description{
-bigexp_train() is a convenience wrapper around bigexp_terms() and
-bigexp_prepare(). It:
+bigexp_train() is a convenience wrapper around \code{\link{bigexp_terms}} and
+\code{\link{bigexp_prepare}}. It:
 \itemize{
-\item Builds a deterministic expansion spec from the training data
-\item Immediately prepares that same data to match the locked types and levels
+\item builds a deterministic expansion spec from the training data; and
+\item immediately prepares that same data to match the locked types and levels.
 }
 }
 \details{
 This is handy when you want a single object that contains both the spec
-and the expanded training data ready to pass into a modeling function.
-For more control, you can call bigexp_terms() and bigexp_prepare()
-explicitly instead.
+and the training data in a form that is ready to pass into a modeling
+function. For more control, you can call \code{bigexp_terms()} and
+\code{bigexp_prepare()} explicitly instead.
 }
 \examples{
 set.seed(1)
@@ -53,7 +56,12 @@ tr <- bigexp_train(
   polynomial_order = 3
 )
 
+## Prepared training data and expanded formula:
 str(tr$data)
 tr$formula
+
+## Example: fit a model using the expanded formula
+fit_lm <- lm(tr$formula, data = tr$data)
+summary(fit_lm)
 
 }

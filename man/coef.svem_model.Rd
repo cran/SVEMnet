@@ -7,23 +7,43 @@
 \method{coef}{svem_model}(object, debiased = FALSE, ...)
 }
 \arguments{
-\item{object}{An object of class \code{svem_model}.}
+\item{object}{An object of class \code{svem_model}, typically returned by
+\code{\link{SVEMnet}}.}
 
-\item{debiased}{Logical; if \code{TRUE} and available (Gaussian fits),
-return \code{parms_debiased} instead of \code{parms}. Default \code{FALSE}.}
+\item{debiased}{Logical; if \code{TRUE} and debiased coefficients are
+available (Gaussian fits with \code{parms_debiased}), return those instead
+of \code{parms}. Default is \code{FALSE}.}
 
-\item{...}{Unused (for S3 compatibility).}
+\item{...}{Unused; present for S3 method compatibility.}
 }
 \value{
-A named numeric vector of coefficients (including intercept).
+A named numeric vector of coefficients (including the intercept).
 }
 \description{
-Returns averaged coefficients from an \code{svem_model}.
+Extracts averaged coefficients from an \code{svem_model} fitted by
+\code{\link{SVEMnet}}.
 }
 \details{
-For Gaussian models, you can optionally return the debiased coefficients
-(if available) via \code{debiased = TRUE}. For Binomial models, \code{debiased}
-is ignored and the averaged coefficients are returned.
+For Gaussian fits, you can optionally request debiased coefficients (if they
+were computed and stored) via \code{debiased = TRUE}. In that case, the
+function returns \code{object$parms_debiased}. If debiased coefficients are
+not available, or if \code{debiased = FALSE}, the function returns
+\code{object$parms}, which are the ensemble-averaged coefficients across
+bootstrap members.
+
+For Binomial models, \code{debiased} is ignored and the averaged
+coefficients in \code{object$parms} are returned.
+
+This is a lightweight accessor around the stored components of an
+\code{svem_model}:
+\itemize{
+\item \code{parms}: ensemble-averaged coefficients over bootstrap members,
+on the model's link scale;
+\item \code{parms_debiased}: optional debiased coefficients (Gaussian only),
+if requested at fit time.
+}
+Passing \code{debiased = TRUE} has no effect if \code{parms_debiased} is
+\code{NULL}.
 }
 \examples{
 \donttest{
@@ -38,7 +58,7 @@ is ignored and the averaged coefficients are returned.
   # Small nBoot to keep runtime light in examples
   fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g, nBoot = 30, relaxed = TRUE)
 
-  # Averaged coefficients
+  # Ensemble-averaged coefficients
   cc <- coef(fit_g)
   head(cc)
 
@@ -56,14 +76,15 @@ is ignored and the averaged coefficients are returned.
   y_b <- rbinom(n, 1, p)
   dat_b <- data.frame(y_b, x1, x2)
 
-  fit_b <- SVEMnet(y_b ~ x1 + x2, data = dat_b, family = "binomial",
-                   nBoot = 30, relaxed = TRUE)
+  fit_b <- SVEMnet(y_b ~ x1 + x2, data = dat_b,
+                   family = "binomial", nBoot = 30, relaxed = TRUE)
 
-  # Averaged coefficients (binomial)
+  # Averaged coefficients (binomial; debiased is ignored)
   coef(fit_b)
 }
 
 }
 \seealso{
-\code{\link{svem_nonzero}} for bootstrap nonzero percentages and a quick plot.
+\code{\link{svem_nonzero}} for bootstrap nonzero percentages and a
+quick stability plot.
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/svem_significance_test_parallel.R
 \name{svem_significance_test_parallel}
 \alias{svem_significance_test_parallel}
-\title{SVEM Significance Test with Mixture Support (Parallel Version)}
+\title{SVEM whole-model significance test with mixture support (parallel)}
 \usage{
 svem_significance_test_parallel(
   formula,
@@ -15,11 +15,10 @@ svem_significance_test_parallel(
   nBoot = 100,
   glmnet_alpha = c(1),
   weight_scheme = c("SVEM"),
-  objective = c("auto", "wAIC", "wBIC", "wSSE"),
-  auto_ratio_cutoff = 1.3,
+  objective = c("wAIC", "wBIC", "wSSE", "auto"),
   relaxed = FALSE,
   verbose = TRUE,
-  nCore = parallel::detectCores() - 1,
+  nCore = parallel::detectCores() - 2,
   seed = NULL,
   spec = NULL,
   response = NULL,
@@ -28,82 +27,81 @@ svem_significance_test_parallel(
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be tested. If \code{spec} is
-provided, the right-hand side is ignored and replaced by the locked
-expansion in \code{spec}.}
+\item{formula}{A model formula. If \code{spec} is provided, the right-hand
+side is ignored and replaced by the locked expansion in \code{spec}.}
 
 \item{data}{A data frame containing the variables in the model.}
 
-\item{mixture_groups}{Optional list describing one or more mixture factor
-groups. Each element of the list should be a list with components
-\code{vars} (character vector of column names), \code{lower} (numeric vector of
-lower bounds of the same length as \code{vars}), \code{upper} (numeric vector
-of upper bounds of the same length), and \code{total} (scalar specifying the
-sum of the mixture variables). All mixture variables must be included in
-\code{vars}, and no variable can appear in more than one mixture group.
-Defaults to \code{NULL}.}
+\item{mixture_groups}{Optional list describing one or more mixture-factor
+groups. Each element should be a list with components:
+\itemize{
+\item \code{vars}: character vector of column names;
+\item \code{lower}: numeric vector of lower bounds (same length as \code{vars});
+\item \code{upper}: numeric vector of upper bounds (same length as \code{vars});
+\item \code{total}: scalar specifying the sum of the mixture variables.
+}
+All mixture variables must appear in exactly one group. Defaults to \code{NULL}.}
 
-\item{nPoint}{Number of random points in the factor space (default: \code{2000}).}
+\item{nPoint}{Number of random evaluation points in the factor space
+(default \code{2000}).}
 
 \item{nSVEM}{Number of SVEM fits on the original (unpermuted) data used to
-summarize the observed surface (default: \code{10}).}
+summarize the observed surface (default \code{10}).}
 
 \item{nPerm}{Number of SVEM fits on permuted responses used to build the null
-reference distribution (default: \code{150}).}
+reference distribution (default \code{150}).}
 
-\item{percent}{Percentage of variance to capture in the SVD (default: \code{90}).}
+\item{percent}{Percentage of variance to capture in the SVD of the permutation
+surfaces (default \code{90}).}
 
-\item{nBoot}{Number of bootstrap iterations within each SVEM fit (default: \code{100}).}
+\item{nBoot}{Number of bootstrap iterations within each inner SVEM fit
+(default \code{100}).}
 
-\item{glmnet_alpha}{The alpha parameter(s) for \code{glmnet} (default: \code{c(1)}).}
+\item{glmnet_alpha}{Numeric vector of \code{glmnet} alpha values
+(default \code{c(1)}).}
 
-\item{weight_scheme}{Weighting scheme for SVEM (default: \code{"SVEM"}).
+\item{weight_scheme}{Weighting scheme for SVEM (default \code{"SVEM"}).
 Passed to \code{SVEMnet()}.}
 
 \item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
-path solution. One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or
-\code{"wSSE"} (default: \code{"auto"}). Note: \code{"wGIC"} is no longer
-supported.}
-
-\item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
-\code{objective = "auto"} (default \code{1.3}). With \code{r = n_X / p_X}, if
-\code{r >= auto_ratio_cutoff} wAIC is used; otherwise wBIC. Passed through
-to \code{SVEMnet()}.}
+path solution. One of \code{"wAIC"}, \code{"wBIC"}, or
+\code{"wSSE"} (default \code{"wAIC"}).}
 
 \item{relaxed}{Logical; default \code{FALSE}. When \code{TRUE}, inner
-\code{SVEMnet()} fits use glmnet's relaxed elastic net path and select both
-lambda and relaxed gamma on each bootstrap. When \code{FALSE}, the standard
-glmnet path is used. This value is passed through to \code{SVEMnet()}.
-Note: if \code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
+\code{SVEMnet()} fits use \code{glmnet}'s relaxed elastic-net path and
+select both \code{lambda} and relaxed \code{gamma} on each bootstrap.
+When \code{FALSE}, the standard \code{glmnet} path is used. If
+\code{relaxed = TRUE} and \code{glmnet_alpha} includes \code{0}, ridge
 (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.}
 
 \item{verbose}{Logical; if \code{TRUE}, display progress messages
-(default: \code{TRUE}).}
+(default \code{TRUE}).}
 
 \item{nCore}{Number of CPU cores for parallel processing. Default is
-\code{parallel::detectCores() - 1}, with a floor of 1.}
+\code{parallel::detectCores() - 2}, with a floor of \code{1}.}
 
-\item{seed}{Optional integer seed for reproducible parallel RNG (default:
+\item{seed}{Optional integer seed for reproducible parallel RNG (default
 \code{NULL}). When supplied, the master RNG kind is set to
 \code{"L'Ecuyer-CMRG"} with \code{sample.kind = "Rounding"}, and
 \code{doRNG::registerDoRNG()} is used so that the \code{\%dorng\%} loops are
 reproducible regardless of scheduling.}
 
-\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}. If
-provided, the test reuses its locked expansion. The working formula becomes
-\code{bigexp_formula(spec, response_name)}, where \code{response_name} is taken from
-\code{response} if supplied, otherwise from the left-hand side of \code{formula}.
-Categorical sampling uses \code{spec$levels} and numeric sampling prefers
-\code{spec$num_range} when available.}
+\item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
+If provided, the test reuses its locked expansion. The working formula
+becomes \code{bigexp_formula(spec, response_name)}, where
+\code{response_name} is taken from \code{response} if supplied, otherwise
+from the left-hand side of \code{formula}. Categorical sampling uses
+\code{spec$levels}, and numeric sampling prefers \code{spec$num_range}
+when available.}
 
 \item{response}{Optional character name for the response variable to use when
-\code{spec} is supplied. If omitted, the response is taken from the left-hand
-side of \code{formula}.}
+\code{spec} is supplied. If omitted, the response is taken from the
+left-hand side of \code{formula}.}
 
 \item{use_spec_contrasts}{Logical; default \code{TRUE}. When \code{spec} is
 supplied and \code{use_spec_contrasts = TRUE}, the function replays
 \code{spec$settings$contrasts_options} on the parallel workers for
-deterministic coding.}
+deterministic factor coding.}
 
 \item{...}{Additional arguments passed to \code{SVEMnet()} and then to
 \code{glmnet()} (for example: \code{penalty.factor}, \code{offset},
@@ -113,39 +111,43 @@ this function and any \code{relaxed} value passed via \code{...} is ignored
 with a warning.}
 }
 \value{
-A list of class \code{svem_significance_test} with components:
+An object of class \code{"svem_significance_test"}, a list with
+components:
 \itemize{
-\item \code{p_value}: the median whole-model p-value over original SVEM fits.
-\item \code{p_values}: vector of p-values for each original SVEM fit.
-\item \code{d_Y}: distances for the original SVEM fits.
-\item \code{d_pi_Y}: distances for the permutation fits.
-\item \code{distribution_fit}: the fitted SHASHo distribution object.
-\item \code{data_d}: data frame of distances and source labels, suitable
-for plotting.
+\item \code{p_value}: median whole-model \eqn{p}-value across the
+\code{nSVEM} original SVEM fits.
+\item \code{p_values}: numeric vector of length \code{nSVEM} with the
+per-fit \eqn{p}-values.
+\item \code{d_Y}: numeric vector of distances for the original SVEM fits.
+\item \code{d_pi_Y}: numeric vector of distances for the permutation fits.
+\item \code{distribution_fit}: fitted SHASHo distribution object.
+\item \code{data_d}: data frame of distances and source labels
+(original vs permutation), suitable for plotting.
 }
 }
 \description{
-Whole-model significance test for continuous (Gaussian) SVEM fits, with
-support for mixture factor groups and parallel SVEM refits.
+Perform a permutation-based whole-model significance test for a continuous
+(Gaussian) SVEM fit, with optional mixture-factor groups and parallel SVEM
+refits.
 }
 \details{
-The test follows Karl (2024): it generates a space-filling grid in the
-factor space, fits multiple SVEM models on the original data and on
-permuted responses, standardizes predictions on the grid, reduces them via
-an SVD-based low-rank representation, and summarizes each fit by a
+The procedure follows Karl (2024): it generates a space-filling evaluation
+grid in the factor space, fits multiple SVEM models on the original data and
+on permuted responses, standardizes grid predictions, reduces them via an
+SVD-based low-rank representation, and summarizes each fit by a
 Mahalanobis-type distance in the reduced space. A flexible SHASHo
-distribution is then fit to the permutation distances and used to obtain
-a whole-model p-value for the observed surface.
+distribution is then fit to the permutation distances and used to obtain a
+whole-model \eqn{p}-value for the observed surface.
 
 All SVEM refits (for the original and permuted responses) are run in
-parallel using \code{foreach} + \code{doParallel}. Random draws
-(including permutations and evaluation-grid sampling) are made reproducible
-across workers using \code{doRNG} together with
+parallel using \code{foreach} + \code{doParallel}. Random draws (including
+permutations and evaluation-grid sampling) are made reproducible across
+workers using \code{doRNG} together with
 \code{RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")} when a
 \code{seed} is supplied.
 
 The function can optionally reuse a deterministic, locked expansion built
-with \code{bigexp_terms()}. Provide \code{spec} (and optionally
+with \code{bigexp_terms()}. Supply \code{spec} (and optionally
 \code{response}) to ensure that categorical levels, contrasts, and the
 polynomial/interaction structure are identical across repeated calls and
 across multiple responses sharing the same factor space.
@@ -157,7 +159,7 @@ in that setting.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+OpenAI's GPT models (o1-preview through GPT-5 Pro) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -201,21 +203,49 @@ content was reviewed and finalized by the author.
     total = total
   ))
 
-  # Parallel significance test (default relaxed = FALSE)
-  res <- svem_significance_test_parallel(
+  ## Example 1: direct formula interface (no locked expansion spec)
+  res1 <- svem_significance_test_parallel(
     y ~ A + B + C + X + F,
     data           = dat,
     mixture_groups = mix_spec,
-    glmnet_alpha   = c(1),
+    glmnet_alpha   = 1,
     weight_scheme  = "SVEM",
     objective      = "auto",
-    auto_ratio_cutoff = 1.3,
     relaxed        = FALSE,   # default, shown for clarity
     nCore          = 2,
     seed           = 123,
     verbose        = FALSE
   )
-  print(res$p_value)
+  res1$p_value
+
+  ## Example 2: using a deterministic bigexp expansion spec
+  ## Build a wide expansion once and reuse it via `spec`
+  spec <- bigexp_terms(
+    y ~ A + B + C + X + F,
+    data             = dat,
+    factorial_order  = 2,  # up to 2-way interactions
+    polynomial_order = 2   # up to quadratic terms in continuous vars
+  )
+
+  ## Run the same significance test, but with the locked expansion:
+  ## - `formula` is still required, but its RHS is ignored when `spec` is given
+  ## - `response` tells the helper which LHS to use with `spec`
+  res2 <- svem_significance_test_parallel(
+    y ~ A + B + C + X + F,
+    data               = dat,
+    mixture_groups     = mix_spec,
+    glmnet_alpha       = 1,
+    weight_scheme      = "SVEM",
+    objective          = "auto",
+    relaxed            = FALSE,
+    nCore              = 2,
+    seed               = 123,
+    spec               = spec,
+    response           = "y",
+    use_spec_contrasts = TRUE,
+    verbose            = FALSE
+  )
+  res2$p_value
 }
 }
 \references{
@@ -243,7 +273,16 @@ Journal of Statistical Software, 33(1), 1-22.
 
 Meinshausen, N. (2007).
 Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+
+Kish, L. (1965). \emph{Survey Sampling}. Wiley.
+
+Lumley, T. (2004). Analysis of complex survey samples.
+\emph{Journal of Statistical Software}, 9(1), 1–19.
+
+Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
+\emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }
 \seealso{
-\code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
+\code{\link{SVEMnet}}, \code{\link{bigexp_terms}},
+\code{\link{bigexp_formula}}
 }

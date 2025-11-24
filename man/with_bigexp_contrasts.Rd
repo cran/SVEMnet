@@ -15,7 +15,9 @@ with_bigexp_contrasts(spec, code)
 with_bigexp_contrasts() temporarily restores the contrasts options that
 were active when the spec was built, runs a block of code, and then
 restores the original options. This is useful when a modeling function
-uses the global options("contrasts") to decide how to encode factors.
+uses the global \code{options("contrasts")} to decide how to encode factors
+(for example, \code{lm()}, \code{glm()}, or other modeling functions that
+call \code{model.matrix()} internally).
 }
 \examples{
 set.seed(1)

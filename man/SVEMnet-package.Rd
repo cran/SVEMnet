@@ -14,46 +14,148 @@ uncertainty-aware candidate generation for iterative formulation and
 process development.
 }
 \details{
-A typical workflow is to fit models with \code{SVEMnet()}, optionally run a
-whole-model test (for example, for response reweighting), and then call
-\code{svem_optimize_random()} to propose optimal and exploration candidates
+A typical workflow is:
+\enumerate{
+\item Build a wide, deterministic factor expansion (optionally via
+\code{\link{bigexp_terms}}) and reuse it across responses with
+\code{\link{bigexp_formula}}.
+\item Fit one or more SVEM models with \code{\link{SVEMnet}}.
+\item Optionally run whole-model testing via
+\code{\link{svem_significance_test_parallel}} (and
+\code{\link{svem_wmt_multi}}) to assess factor
+relationships or reweight response goals.
+\item Call \code{\link{svem_score_random}} to draw random points in the
+factor space, compute multi-response Derringer–Suich scores,
+optional WMT-reweighted scores, and an uncertainty measure; then use
+\code{\link{svem_select_from_score_table}} to pick a single "best"
+row and diverse medoid candidates, and
+\code{\link{svem_export_candidates_csv}} to export candidate tables
 for the next experimental round.
+\item Run new experiments at the suggested candidates, append the data,
+refit the models, and repeat as needed (closed-loop optimization).
 }
-\section{Functions}{
+}
+\section{Core modeling and summaries}{
 
 \describe{
-\item{\code{\link{SVEMnet}}}{Fit an SVEMnet model using Elastic Net regression.}
-\item{\code{\link{predict.svem_model}}}{Predict method for SVEM models (optionally debiased, with intervals when available).}
-\item{\code{\link{coef.svem_model}}}{Averaged (optionally debiased) coefficients from an SVEM model.}
-\item{\code{\link{svem_nonzero}}}{Bootstrap nonzero percentages for each coefficient, with an optional quick plot.}
-\item{\code{\link{plot.svem_model}}}{Quick actual-versus-predicted plot for a fitted model.}
+\item{\code{\link{SVEMnet}}}{Fit an SVEMnet model using Elastic Net regression
+(including relaxed elastic net) on fractionally weighted bootstraps.}
+\item{\code{\link{predict.svem_model}}}{Predict method for SVEM models
+(ensemble-mean aggregation by default, optional debiasing, and
+percentile prediction intervals when available).}
+\item{\code{\link{coef.svem_model}}}{Averaged (optionally debiased)
+coefficients from an SVEM model.}
+\item{\code{\link{svem_nonzero}}}{Bootstrap nonzero percentages for each
+coefficient, with an optional quick plot.}
+\item{\code{\link{plot.svem_model}}}{Quick actual-versus-predicted plot for a
+fitted model (with optional group colorings).}
+}
+}
 
-\item{\code{\link{bigexp_terms}}}{Build a deterministic expanded RHS (polynomials, interactions) with locked levels/ranges.}
-\item{\code{\link{bigexp_formula}}}{Reuse a locked expansion for another response to ensure identical factor space.}
+\section{Deterministic wide expansions (bigexp helpers)}{
 
-\item{\code{\link{svem_random_table_multi}}}{Generate one shared random predictor table (with optional mixture constraints) and get predictions from multiple SVEM models at those points.}
-\item{\code{\link{svem_optimize_random}}}{Random-search optimizer for multiple responses with goals, weights, optional CIs, and diverse PAM-medoids candidates.}
+The \code{bigexp_*} helpers build and reuse a locked polynomial/interaction
+expansion across multiple responses and datasets:
+\describe{
+\item{\code{\link{bigexp_terms}}}{Build a deterministic expanded RHS
+(polynomials, interactions, optional partial-cubic terms) with
+locked factor levels and numeric ranges.}
+\item{\code{\link{bigexp_prepare}}}{Coerce new data to match a stored
+\code{bigexp_spec}, including factor levels and numeric types.}
+\item{\code{\link{bigexp_formula}}}{Reuse a locked expansion for another
+response to ensure an identical factor space across models.}
+\item{\code{\link{with_bigexp_contrasts}}}{Temporarily restore the
+contrast options used when a \code{bigexp_spec} was built.}
+\item{\code{\link{bigexp_train}}}{Convenience wrapper that builds a
+\code{bigexp_spec} and prepares training data in one call.}
+}
+}
 
-\item{\code{\link{svem_significance_test_parallel}}}{Parallel whole-model significance test (foreach + doParallel) with optional mixture-group sampling.}
-\item{\code{\link[=plot.svem_significance_test]{plot.svem_significance_test}}}{Plot helper for visualizing multiple significance-test outputs.}
+\section{Random tables, optimization, and candidate generation}{
 
-\item{\code{\link{glmnet_with_cv}}}{Convenience wrapper around repeated \code{cv.glmnet()} selection.}
+\describe{
+\item{\code{\link{svem_random_table_multi}}}{Generate one shared random
+predictor table (with optional mixture constraints) from cached
+factor-space information and obtain predictions from multiple SVEM
+models at those points. Supports both Gaussian and binomial models;
+binomial predictions are returned on the probability scale. This is
+the lower-level sampler used by \code{\link{svem_score_random}}.}
+\item{\code{\link{svem_score_random}}}{Random-search scoring for multiple
+responses with Derringer–Suich desirabilities, user weights,
+optional whole-model-test (WMT) reweighting, percentile CI-based
+uncertainty, and (optionally) scoring of existing experimental data.
+Returns a scored random-search table and, when \code{data} is
+supplied, an augmented copy of the original data with
+\code{<resp>_pred}, desirabilities, scores, and an
+\code{uncertainty_measure}.}
+\item{\code{\link{svem_select_from_score_table}}}{Given a scored table
+(typically \code{svem_score_random()$score_table}), select one
+"best" row under a chosen objective and a small, diverse set of
+medoid candidates via PAM clustering on predictors.}
+\item{\code{\link{svem_export_candidates_csv}}}{Concatenate one or more
+selection objects from \code{\link{svem_select_from_score_table}}
+and export candidate tables (with metadata, predictions, and
+optional design-only trimming) to CSV or return them in-memory for
+inspection.}
+}
+}
 
-\item{\code{\link{lipid_screen}}}{Example dataset for multi-response modeling and mixture-constrained optimization demos.}
+\section{Whole-model testing and plotting}{
+
+\describe{
+\item{\code{\link{svem_significance_test_parallel}}}{Parallel whole-model
+significance test (using \code{foreach} + \code{doParallel}) with
+support for mixture-constrained sampling and reuse of a locked
+\code{bigexp_spec}. Designed for continuous (Gaussian) responses.}
+\item{\code{\link{svem_wmt_multi}}}{Helper to run
+\code{svem_significance_test_parallel} across multiple responses and
+construct whole-model p-values and reweighting multipliers for use
+in \code{\link{svem_score_random}}.}
+\item{\code{\link[=plot.svem_significance_test]{plot.svem_significance_test}}}{Plot helper
+for visualizing multiple significance-test outputs (observed vs
+permutation distances, fitted null, and p-values).}
+}
+}
+
+\section{Auxiliary utilities and data}{
+
+\describe{
+\item{\code{\link{glmnet_with_cv}}}{Convenience wrapper around repeated
+\code{cv.glmnet()} selection for robust lambda (and optional alpha)
+choice.}
+\item{\code{\link{lipid_screen}}}{Example dataset for multi-response
+modeling, whole-model testing, and mixture-constrained optimization
+demonstrations.}
 }
 }
 
 \section{Families}{
 
-Supports Gaussian and binomial responses (logit link). For \code{family = "binomial"},
-the response must be 0/1 numeric or a two-level factor (first level treated as 0).
-Use \code{predict(..., type = "response")} for event probabilities or
-\code{type = "class"} for 0/1 labels (threshold = 0.5 by default).
+SVEMnet currently supports:
+\itemize{
+\item Gaussian responses (\code{family = "gaussian"}) with identity link
+and optional debiasing / percentile prediction intervals.
+\item Binomial responses (\code{family = "binomial"}) with logit link.
+The response must be 0/1 numeric or a two-level factor (first level
+treated as 0). Use \code{predict(..., type = "response")} for event
+probabilities or \code{type = "class"} for 0/1 labels
+(threshold = 0.5 by default).
+}
+Some higher-level utilities place additional constraints:
+\itemize{
+\item \code{\link{svem_significance_test_parallel}} is designed and
+interpreted for continuous (Gaussian) responses.
+\item \code{\link{svem_score_random}} supports mixed Gaussian + binomial
+response sets, treating binomial predictions and CIs on the
+probability scale, but WMT-based goal reweighting (via
+\code{\link{svem_wmt_multi}} and the \code{wmt} argument) is only
+allowed when all responses are Gaussian.
+}
 }
 
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+OpenAI's GPT models (o1-preview through GPT-5 Pro) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -83,6 +185,14 @@ Journal of Statistical Software, 33(1), 1-22.
 
 Meinshausen, N. (2007).
 Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+
+Kish, L. (1965). \emph{Survey Sampling}. Wiley.
+
+Lumley, T. (2004). Analysis of complex survey samples.
+\emph{Journal of Statistical Software}, 9(1), 1–19.
+
+Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
+\emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }
 \author{
 \strong{Maintainer}: Andrew T. Karl \email{akarl@asu.edu} (\href{https://orcid.org/0000-0002-5933-8706}{ORCID})

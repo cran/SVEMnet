@@ -2,29 +2,51 @@
 #'
 #' Samples the original predictor factor space cached in fitted \code{svem_model}
 #' objects and computes predictions from each model at the same random points.
-#' Intended for multiple responses built over the same factor space and a
-#' deterministic factor expansion (so that a shared sampling schema is available).
+#' This is intended for multiple responses built over the same factor space and
+#' a deterministic factor expansion (for example via a shared
+#' \code{\link{bigexp_terms}}),  so that a shared sampling schema is available.
 #'
-#' Predictions are computed via \code{predict.svem_model(..., agg = "mean")}, i.e.
-#' by averaging per-bootstrap member predictions on the requested scale. No
-#' refitting is performed.
+#' No refitting is performed. Predictions are obtained by
+#' averaging per-bootstrap member predictions on the requested scale.
+#'
+#' @section Typical workflow:
+#' \enumerate{
+#'   \item Build a deterministic expansion (e.g. with \code{\link{bigexp_terms}})
+#'         and fit several \code{SVEMnet()} models for different responses on
+#'         the same factor space, using the same expansion / sampling settings.
+#'   \item Ensure that the fitted models were created with a version of
+#'         \code{SVEMnet()} that populates \code{$sampling_schema}.
+#'   \item Collect the fitted models in a list and pass them to
+#'         \code{svem_random_table_multi()}.
+#'   \item Use \code{$data} (predictors), \code{$pred} (response columns), or
+#'         \code{$all} (\code{cbind(data, pred)}) for downstream plotting,
+#'         summarization, or cross-response comparison.
+#' }
 #'
 #' @param objects A list of fitted \code{svem_model} objects returned by
-#'   \code{SVEMnet()}. Each object must contain \code{$sampling_schema} produced
-#'   by the updated \code{SVEMnet()} implementation. A single model is also
-#'   accepted and treated as a length-one list.
-#' @param n Number of random points to generate. Default is \code{1000}.
+#'   \code{SVEMnet()}. Each object must contain a valid \code{$sampling_schema}
+#'   produced by the updated \code{SVEMnet()} implementation. A single model is
+#'   also accepted and treated as a length-one list.
+#' @param n Number of random points to generate (rows in the output tables).
+#'   Default is \code{1000}.
 #' @param mixture_groups Optional list of mixture constraint groups. Each group
 #'   is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
-#'   (see \emph{Notes on mixtures}).
+#'   (see \emph{Notes on mixtures}). Mixture variables must be numeric-like and
+#'   must also appear in the models' \code{predictor_vars}.
 #' @param debias Logical; if \code{TRUE}, apply each model's calibration during
-#'   prediction when available (for Gaussian fits). Default is \code{FALSE}.
-#' @param range_tol Numeric tolerance for comparing numeric ranges across models.
+#'   prediction when available (for Gaussian fits). This is passed to
+#'   \code{predict.svem_model()}. Default is \code{FALSE}.
+#' @param range_tol Numeric tolerance for comparing numeric ranges across models
+#'   (used when checking that all \code{$sampling_schema$num_ranges} agree).
 #'   Default is \code{1e-8}.
 #' @param numeric_sampler Sampler for non-mixture numeric predictors:
-#'   \code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
-#'   If \code{"random"} is selected and the \pkg{lhs} package is available,
-#'   \code{lhs::randomLHS()} is used; otherwise plain \code{runif()}.
+#'   \code{"random"} (default), or \code{"uniform"}.
+#'   \itemize{
+#'     \item \code{"random"}: random Latin hypercube when the \pkg{lhs} package
+#'           is available; otherwise independent uniforms via \code{runif()}.
+#'     \item \code{"uniform"}: independent uniform draws within numeric ranges
+#'           (fastest; no \pkg{lhs} dependency).
+#'   }
 #'
 #' @return A list with three data frames:
 #' \itemize{
@@ -32,29 +54,38 @@
 #'   \item \code{pred}: one column per response, aligned to \code{data} rows.
 #'   \item \code{all}: \code{cbind(data, pred)} for convenience.
 #' }
-#' Each prediction column is named by the model's response (left-hand side). If a
-#' response name would collide with a predictor name, \code{".pred"} is appended.
+#' Each prediction column is named by the model's response (left-hand side)
+#' with a "_pred" suffix (for example, "y1_pred"). If that name would collide
+#' with a predictor name or with another prediction column, the function stops
+#' with an error and asks the user to rename the response or predictor.
 #'
 #' @details
-#' All models must share an identical predictor schema:
+#' All models must share an identical predictor schema. Specifically, their
+#' \code{$sampling_schema} entries must agree on:
 #' \itemize{
-#'   \item The same \code{predictor_vars} in the same order
-#'   \item The same \code{var_classes} for each predictor
-#'   \item Identical factor \code{levels} and level order
-#'   \item Numeric \code{ranges} that match within \code{range_tol}
+#'   \item The same \code{predictor_vars} in the same order.
+#'   \item The same \code{var_classes} for each predictor.
+#'   \item Identical factor \code{levels} and level order for all categorical
+#'         predictors.
+#'   \item Numeric \code{num_ranges} that match within \code{range_tol} for all
+#'         continuous predictors.
 #' }
 #' The function stops with an informative error message if any of these checks fail.
 #'
-#'Models may be Gaussian or binomial; binomial predictions are returned on the probability scale by default.
+#' Models may be Gaussian or binomial. For binomial fits, predictions are
+#' returned on the probability scale (i.e., on the response scale) by default,
+#' consistent with the default behaviour of \code{predict.svem_model()}.
 #'
 #' @section Sampling strategy:
-#' Non-mixture numeric variables are sampled using a selectable method:
+#' Non-mixture numeric variables are sampled using the chosen \code{numeric_sampler}
+#' within the numeric ranges recorded in \code{$sampling_schema$num_ranges}:
 #' \itemize{
 #'   \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available,
 #'         else independent uniforms on each range.
-#'   \item \code{"maximin"}: maximin Latin hypercube (more space-filling; slower).
-#'   \item \code{"uniform"}: independent uniform draws within numeric ranges (fastest).
+#'   \item \code{"uniform"}: independent uniform draws within numeric ranges
+#'         (fastest; no \pkg{lhs} dependency).
 #' }
+#'
 #' Mixture variables (if any) are sampled jointly within each specified group using
 #' a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
 #' Categorical variables are sampled from cached factor levels. The same random
@@ -67,7 +98,12 @@
 #' constraints (i.e., \code{sum(lower) > total} or \code{sum(upper) < total}) produce
 #' an error.
 #'
-#' @seealso \code{\link{SVEMnet}}, \code{\link{predict.svem_model}}
+#' Mixture variables are removed from the pool of "non-mixture" numeric variables
+#' before numeric sampling, so they are controlled entirely by the mixture
+#' constraints and not also sampled independently.
+#'
+#' @seealso \code{\link{SVEMnet}}, \code{\link{predict.svem_model}},
+#'   \code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
 #'
 #' @examples
 #' \donttest{
@@ -109,7 +145,7 @@
 #' head(tab_fast$all)
 #'
 #' # Check that the binomial predictions are on [0,1]
-#' range(tab_fast$pred$yb)
+#' range(tab_fast$pred$yb_pred)
 #'
 #' # Uniform sampler (fastest)
 #' tab_uni <- svem_random_table_multi(
@@ -120,12 +156,12 @@
 #' )
 #' head(tab_uni$all)
 #' }
-#' @importFrom lhs maximinLHS randomLHS
+#' @importFrom lhs randomLHS
 #' @importFrom stats rgamma
 #' @export
 svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
                                     debias = FALSE, range_tol = 1e-8,
-                                    numeric_sampler = c("random","maximin","uniform")) {
+                                    numeric_sampler = c("random","uniform")) {
   numeric_sampler <- match.arg(numeric_sampler)
 
   # ---- validate inputs ----
@@ -157,7 +193,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     diff[!is.finite(diff)] <- Inf
     all(abs(diff) <= tol)
   }
-
 
   # Check all schemas match reference (predictors, classes, levels, ranges)
   for (k in seq_along(objects)) {
@@ -192,11 +227,25 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   var_classes    <- ref_classes
   num_ranges     <- ref_ranges
   factor_levels  <- ref_fac_levels
-  numeric_like <- c("numeric", "double", "integer", "integer64")
-
+  numeric_like   <- c("numeric", "double", "integer", "integer64")
 
   is_num <- names(var_classes)[var_classes %in% numeric_like]
   is_cat <- setdiff(predictor_vars, is_num)
+
+  # ---- REQUIRE num_ranges for all numeric predictors ----
+  if (length(is_num)) {
+    if (is.null(num_ranges) || !is.matrix(num_ranges) || !ncol(num_ranges)) {
+      stop("sampling_schema$num_ranges must be a 2 x K matrix with ranges for all numeric predictors.")
+    }
+    if (!all(c("min", "max") %in% rownames(num_ranges))) {
+      stop("sampling_schema$num_ranges must have rownames 'min' and 'max'.")
+    }
+    missing_rng <- setdiff(is_num, colnames(num_ranges))
+    if (length(missing_rng)) {
+      stop("Missing numeric ranges in sampling_schema$num_ranges for predictors: ",
+           paste(missing_rng, collapse = ", "))
+    }
+  }
 
   # ---- mixture validation ----
   mixture_vars <- character(0)
@@ -257,10 +306,22 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   T_num <- NULL
   if (length(nonmix_num)) {
     rng <- vapply(nonmix_num, function(v) {
-      if (!is.null(num_ranges) && ncol(num_ranges) && v %in% colnames(num_ranges)) {
-        r <- num_ranges[, v]
-        if (!all(is.finite(r)) || r[1] >= r[2]) c(0, 1) else r
-      } else c(0, 1)
+      if (!(v %in% colnames(num_ranges))) {
+        stop("Missing numeric range for predictor '", v,
+             "' in sampling_schema$num_ranges (this should not happen after earlier checks).")
+      }
+      r <- num_ranges[, v]
+
+      if (!all(is.finite(r))) {
+        stop("Numeric range for predictor '", v, "' must be finite.")
+      }
+      if (r[1] > r[2]) {
+        stop("Numeric range for predictor '", v,
+             "' must have min <= max. Check sampling_schema$num_ranges.")
+      }
+
+      as.numeric(r)
+
     }, numeric(2))
     rownames(rng) <- c("min","max")
     lo <- rng["min", ]; hi <- rng["max", ]; width <- hi - lo
@@ -268,10 +329,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
 
     use_lhs <- function() isTRUE(requireNamespace("lhs", quietly = TRUE))
     U <- switch(numeric_sampler,
-                "maximin" = {
-                  if (!use_lhs()) stop("numeric_sampler = 'maximin' requires the 'lhs' package.")
-                  lhs::maximinLHS(n, q)
-                },
                 "random" = {
                   if (use_lhs()) lhs::randomLHS(n, q) else matrix(runif(n * q), nrow = n, ncol = q)
                 },
@@ -336,7 +393,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
           lo <- num_ranges["min", v]; hi <- num_ranges["max", v]
           T_data[[v]] <- rep((lo + hi)/2, n)
         } else {
-          T_data[[v]] <- rep(0.5, n)
+          stop("Missing numeric range for predictor '", v,
+               "' in sampling_schema$num_ranges when filling missing predictors.")
         }
       } else {
         lev <- factor_levels[[v]]
@@ -346,7 +404,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       }
     }
   }
-
 
   # Order like predictor_vars
   T_data <- T_data[, predictor_vars, drop = FALSE]
@@ -358,12 +415,37 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
 
   for (i in seq_along(objects)) {
     obj   <- objects[[i]]
-    preds <- predict(obj, newdata = data_df, debias = debias,agg="mean")
+    preds <- predict(obj, newdata = data_df, debias = debias)
     if (is.list(preds) && !is.null(preds$fit)) preds <- preds$fit
-    resp  <- tryCatch(as.character(obj$formula[[2L]]), error = function(e) paste0("resp", i))
-    colname <- resp
-    if (colname %in% colnames(data_df)) colname <- paste0(colname, ".pred")
-    pred_df[[colname]] <- as.numeric(preds)
+
+    # Response name (LHS of formula), with fallback
+    resp <- tryCatch(
+      as.character(obj$formula[[2L]]),
+      error = function(e) paste0("resp", i)
+    )
+
+    # Always use "<response>_pred" as the prediction column name
+    base_colname <- paste0(resp, "_pred")
+
+    # If this would collide with a predictor, stop and ask user to rename
+    if (base_colname %in% colnames(data_df)) {
+      stop(
+        "Prediction column name '", base_colname,
+        "' would collide with an existing predictor name. ",
+        "Please rename the response or the predictor to avoid using the '_pred' suffix."
+      )
+    }
+
+    # If this would collide with an existing prediction column, stop
+    if (base_colname %in% colnames(pred_df)) {
+      stop(
+        "Prediction column name '", base_colname,
+        "' is duplicated across models. ",
+        "Please ensure each response name is unique."
+      )
+    }
+
+    pred_df[[base_colname]] <- as.numeric(preds)
   }
 
   rownames(data_df) <- NULL

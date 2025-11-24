@@ -1,4 +1,8 @@
 # NEWS for SVEMnet
+
+[3.1.2]
+- Replaced svem_optimize_random() with svem_score_random and svem_select_score_from_table. Changes to "auto" objective rule.
+
 [2.5.4]
 - Added support for family="binomial". Improvements to svem_random_table_multi() and svem_optimize_random().
 

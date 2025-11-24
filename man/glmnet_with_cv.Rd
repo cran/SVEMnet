@@ -30,7 +30,7 @@ glmnet_with_cv(
 \code{relaxed = TRUE}, any \code{alpha = 0} (ridge) is dropped with a
 warning.}
 
-\item{standardize}{Logical passed to \code{glmnet} / \code{cv.glmnet}
+\item{standardize}{Logical passed to \code{glmnet()} and \code{cv.glmnet()}
 (default \code{TRUE}).}
 
 \item{nfolds}{Requested number of CV folds (default \code{10}). Internally
@@ -55,21 +55,21 @@ ridge fallback, if used).}
 
 \item{exclude}{Optional vector or function for \code{glmnet}'s
 \code{exclude=} argument. If a function, \code{cv.glmnet()} applies it
-inside each training fold (requires \code{glmnet} \code{>= 4.1-2}).}
+inside each training fold (requires \code{glmnet} >= 4.1-2).}
 
-\item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet} /
-\code{cv.glmnet} with \code{relax = TRUE} and optionally a
-\code{gamma} path (default \code{FALSE}). If \code{cv.glmnet(relax=TRUE)}
-fails for a particular repeat/alpha, the function retries that fit
-without relaxation; the number of such fallbacks is recorded in
-\code{meta$relax_cv_fallbacks}.}
+\item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet()} and
+\code{cv.glmnet()} with \code{relax = TRUE} and optionally a
+\code{gamma} path (default \code{FALSE}). If
+\code{cv.glmnet(relax = TRUE)} fails for a particular repeat/alpha, the
+function retries that fit without relaxation; the number of such
+fallbacks is recorded in \code{meta$relax_cv_fallbacks}.}
 
 \item{relax_gamma}{Optional numeric vector passed as \code{gamma=} to
-\code{glmnet} / \code{cv.glmnet} when \code{relaxed = TRUE}. If
+\code{glmnet()} and \code{cv.glmnet()} when \code{relaxed = TRUE}. If
 \code{NULL}, glmnet's internal default gamma grid is used.}
 
 \item{family}{Model family: either \code{"gaussian"} or \code{"binomial"},
-or the corresponding \code{stats::gaussian()} / \code{stats::binomial()}
+or the corresponding \code{stats::gaussian()} or \code{stats::binomial()}
 family objects with canonical links. For Gaussian, \code{y} must be
 numeric. For binomial, \code{y} must be 0/1 numeric, logical, or a factor
 with exactly 2 levels (the second level is treated as 1). Non-canonical
@@ -79,7 +79,7 @@ links are not supported.}
 \code{glmnet()}, for example: \code{weights}, \code{parallel},
 \code{type.measure}, \code{intercept}, \code{maxit},
 \code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-\code{offset}, \code{standardize.response}, \code{keep}, etc. If
+\code{offset}, \code{standardize.response}, \code{keep}, and so on. If
 \code{family} is supplied here, it is ignored in favor of the explicit
 \code{family} argument.}
 }
@@ -97,8 +97,8 @@ A list of class \code{c("svem_cv","svem_model")} with elements:
 calibration model; \code{NULL} otherwise.
 \item \code{y_pred_debiased} If \code{debias_fit} exists, its fitted
 values; otherwise \code{NULL}.
-\item \code{cv_summary} Named list (one per alpha) of data frames with
-columns: \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
+\item \code{cv_summary} Named list (one element per alpha) of data frames
+with columns \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
 \code{se_combined}, \code{n_repeats}, \code{idx_min},
 \code{idx_1se}.
 \item \code{formula} Original modeling formula.
@@ -114,71 +114,105 @@ binomial.
 training.
 \item \code{schema} List
 \code{list(feature_names, terms_str, xlevels, contrasts, terms_hash)}
-for deterministic predict.
-\item \code{note} Character vector of notes (e.g., dropped rows,
+for deterministic prediction.
+\item \code{note} Character vector of notes (for example, dropped rows,
 intercept-only path, ridge fallback, relaxed-coefficient source).
 \item \code{meta} List with fields such as \code{nfolds}, \code{repeats},
 \code{rule}, \code{family}, \code{relaxed},
 \code{relax_cv_fallbacks}, and \code{cv_object} (the final
-\code{cv.glmnet} object when \code{relaxed = TRUE} and
+\code{cv.glmnet()} object when \code{relaxed = TRUE} and
 \code{keep = TRUE}, otherwise \code{NULL}).
+\item \code{diagnostics} List of simple diagnostics for the selected
+model, currently including:
+\itemize{
+\item \code{k_final}: number of coefficients estimated as
+nonzero \emph{including} the intercept.
+\item \code{k_final_no_intercept}: number of nonzero
+slope coefficients (excludes the intercept).
+}
+\item \code{family} Character scalar giving the resolved family
+(\code{"gaussian"} or \code{"binomial"}), mirroring
+\code{meta$family}.
 }
 }
 \description{
 Repeated K-fold cross-validation over a per-alpha lambda path, with a
 combined 1-SE rule across repeats. Preserves fields expected by
-\code{predict.svem_model} / internal prediction helpers. Optionally uses
-glmnet's built-in relaxed elastic net for both the warm-start path and each
-CV fit. When \code{relaxed = TRUE}, the final coefficients are taken from a
-\code{cv.glmnet()} object at the chosen lambda so that the returned model
-reflects the relaxed solution (including its chosen \eqn{\gamma}).
+\code{predict.svem_model()} and internal prediction helpers. Optionally uses
+\code{glmnet}'s built-in relaxed elastic net for both the warm-start path and
+each CV fit. When \code{relaxed = TRUE}, the final coefficients are taken
+from a \code{cv.glmnet()} object at the chosen lambda so that the returned
+model reflects the relaxed solution (including its chosen gamma).
 }
 \details{
-This function is a convenience wrapper around \code{glmnet} /
+This function is a convenience wrapper around \code{glmnet()} and
 \code{cv.glmnet()} that returns an object in the same structural format as
 \code{SVEMnet()} (class \code{"svem_model"}). It is intended for:
 \itemize{
 \item direct comparison of standard cross-validated glmnet fits to SVEMnet
-models, using the same prediction/schema tools, or
+models using the same prediction and schema tools, or
 \item users who want a repeated-\code{cv.glmnet()} workflow without any
 SVEM weighting or bootstrap ensembling.
 }
 It is not called internally by the SVEM bootstrap routines.
 
-For each \code{alpha} in \code{glmnet_alpha}, the function:
+The basic workflow is:
 \enumerate{
-\item Generates a set of CV fold IDs (shared across alphas and repeats).
-\item Runs \code{repeats} independent \code{cv.glmnet()} fits, aligning
-lambda paths and aggregating the CV curves.
-\item Computes a combined SE at each lambda that accounts for both
+\item For each \code{alpha} in \code{glmnet_alpha}, generate a set of CV
+fold IDs (shared across alphas and repeats).
+\item For that alpha, run \code{repeats} independent \code{cv.glmnet()}
+fits, align the lambda paths, and aggregate the CV curves.
+\item At each lambda, compute a combined SE that accounts for both
 within-repeat and between-repeat variability.
-\item Applies \code{choose_rule} (\code{"min"} or \code{"1se"}) to pick
-the lambda for that alpha.
+\item Apply \code{choose_rule} (\code{"min"} or \code{"1se"}) to select
+lambda for that alpha, then choose the best alpha by comparing these
+per-alpha scores.
 }
-The best alpha is then chosen by comparing these per-alpha scores.
 
-If there are no predictors after \code{model.matrix()} (intercept-only
-model), the function returns an intercept-only fit without calling
-\code{glmnet}, along with a minimal schema for safe prediction.
+Special cases and fallbacks:
+\itemize{
+\item If there are no predictors after \code{model.matrix()} (an
+intercept-only model), the function returns an intercept-only fit
+without calling \code{glmnet()}, along with a minimal schema for
+safe prediction.
+\item If all \code{cv.glmnet()} attempts fail for every alpha (a rare
+edge case), the function falls back to a manual ridge
+(\code{alpha = 0}) CV search over a fixed lambda grid and returns
+the best ridge solution. For Gaussian models this search uses a
+mean-squared-error criterion; for binomial models it uses a
+negative log-likelihood (deviance-equivalent) criterion.
+}
 
-If all \code{cv.glmnet()} attempts fail for every alpha (a rare edge case),
-the function falls back to a manual ridge (\code{alpha = 0}) CV search over
-a fixed lambda grid and returns the best ridge solution.
+Family-specific behavior:
+\itemize{
+\item For the Gaussian family, an optional calibration \code{lm(y ~ y_pred)}
+is fit on the training data (when there is sufficient variation), and
+both \code{y_pred} and \code{y_pred_debiased} are stored.
+\item For the binomial family, \code{y_pred} is always on the probability
+(response) scale and debiasing is not applied. Both the primary
+cross-validation and any ridge fallback use deviance-style criteria
+(binomial negative log-likelihood) rather than squared error.
+}
 
-For the Gaussian family, an optional calibration \code{lm(y ~ y_pred)} is
-fit on the training data (when there is sufficient variation), and both
-\code{y_pred} and \code{y_pred_debiased} are stored. For the binomial
-family, \code{y_pred} is always on the probability (response) scale and
-debiasing is not applied.
+Design-matrix schema and contrasts:
+\itemize{
+\item The training \code{terms} are stored with environment set to
+\code{baseenv()}.
+\item Factor and character levels are recorded in \code{xlevels} for
+safe prediction.
+\item Per-factor contrasts are stored in \code{contrasts}, normalized
+so that any contrasts recorded as character names are converted
+back to contrast functions at prediction time.
+}
 
 The returned object inherits classes \code{"svem_cv"} and \code{"svem_model"}
-and is designed to be compatible with SVEMnet's prediction and schema
-utilities. It is a standalone, standard glmnet CV workflow that does
-\emph{not} use SVEM-style bootstrap weighting or ensembling.
+and is designed to be compatible with SVEMnet prediction and schema
+utilities. It is a standalone, standard glmnet CV workflow that does not use
+SVEM-style bootstrap weighting or ensembling.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+OpenAI's GPT models (o1-preview through GPT-5 Pro) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -260,4 +294,12 @@ Journal of Statistical Software, 33(1), 1-22.
 
 Meinshausen, N. (2007).
 Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+
+Kish, L. (1965). \emph{Survey Sampling}. Wiley.
+
+Lumley, T. (2004). Analysis of complex survey samples.
+\emph{Journal of Statistical Software}, 9(1), 1–19.
+
+Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
+\emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }

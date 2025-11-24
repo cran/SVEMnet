@@ -10,31 +10,39 @@ svem_random_table_multi(
   mixture_groups = NULL,
   debias = FALSE,
   range_tol = 1e-08,
-  numeric_sampler = c("random", "maximin", "uniform")
+  numeric_sampler = c("random", "uniform")
 )
 }
 \arguments{
 \item{objects}{A list of fitted \code{svem_model} objects returned by
-\code{SVEMnet()}. Each object must contain \code{$sampling_schema} produced
-by the updated \code{SVEMnet()} implementation. A single model is also
-accepted and treated as a length-one list.}
+\code{SVEMnet()}. Each object must contain a valid \code{$sampling_schema}
+produced by the updated \code{SVEMnet()} implementation. A single model is
+also accepted and treated as a length-one list.}
 
-\item{n}{Number of random points to generate. Default is \code{1000}.}
+\item{n}{Number of random points to generate (rows in the output tables).
+Default is \code{1000}.}
 
 \item{mixture_groups}{Optional list of mixture constraint groups. Each group
 is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
-(see \emph{Notes on mixtures}).}
+(see \emph{Notes on mixtures}). Mixture variables must be numeric-like and
+must also appear in the models' \code{predictor_vars}.}
 
 \item{debias}{Logical; if \code{TRUE}, apply each model's calibration during
-prediction when available (for Gaussian fits). Default is \code{FALSE}.}
+prediction when available (for Gaussian fits). This is passed to
+\code{predict.svem_model()}. Default is \code{FALSE}.}
 
-\item{range_tol}{Numeric tolerance for comparing numeric ranges across models.
+\item{range_tol}{Numeric tolerance for comparing numeric ranges across models
+(used when checking that all \code{$sampling_schema$num_ranges} agree).
 Default is \code{1e-8}.}
 
 \item{numeric_sampler}{Sampler for non-mixture numeric predictors:
-\code{"random"} (default), \code{"maximin"}, or \code{"uniform"}.
-If \code{"random"} is selected and the \pkg{lhs} package is available,
-\code{lhs::randomLHS()} is used; otherwise plain \code{runif()}.}
+\code{"random"} (default), or \code{"uniform"}.
+\itemize{
+\item \code{"random"}: random Latin hypercube when the \pkg{lhs} package
+is available; otherwise independent uniforms via \code{runif()}.
+\item \code{"uniform"}: independent uniform draws within numeric ranges
+(fastest; no \pkg{lhs} dependency).
+}}
 }
 \value{
 A list with three data frames:
@@ -43,40 +51,65 @@ A list with three data frames:
 \item \code{pred}: one column per response, aligned to \code{data} rows.
 \item \code{all}: \code{cbind(data, pred)} for convenience.
 }
-Each prediction column is named by the model's response (left-hand side). If a
-response name would collide with a predictor name, \code{".pred"} is appended.
+Each prediction column is named by the model's response (left-hand side)
+with a "_pred" suffix (for example, "y1_pred"). If that name would collide
+with a predictor name or with another prediction column, the function stops
+with an error and asks the user to rename the response or predictor.
 }
 \description{
 Samples the original predictor factor space cached in fitted \code{svem_model}
 objects and computes predictions from each model at the same random points.
-Intended for multiple responses built over the same factor space and a
-deterministic factor expansion (so that a shared sampling schema is available).
+This is intended for multiple responses built over the same factor space and
+a deterministic factor expansion (for example via a shared
+\code{\link{bigexp_terms}}),  so that a shared sampling schema is available.
 }
 \details{
-Predictions are computed via \code{predict.svem_model(..., agg = "mean")}, i.e.
-by averaging per-bootstrap member predictions on the requested scale. No
-refitting is performed.
+No refitting is performed. Predictions are obtained by
+averaging per-bootstrap member predictions on the requested scale.
 
-All models must share an identical predictor schema:
+All models must share an identical predictor schema. Specifically, their
+\code{$sampling_schema} entries must agree on:
 \itemize{
-\item The same \code{predictor_vars} in the same order
-\item The same \code{var_classes} for each predictor
-\item Identical factor \code{levels} and level order
-\item Numeric \code{ranges} that match within \code{range_tol}
+\item The same \code{predictor_vars} in the same order.
+\item The same \code{var_classes} for each predictor.
+\item Identical factor \code{levels} and level order for all categorical
+predictors.
+\item Numeric \code{num_ranges} that match within \code{range_tol} for all
+continuous predictors.
 }
 The function stops with an informative error message if any of these checks fail.
 
-Models may be Gaussian or binomial; binomial predictions are returned on the probability scale by default.
+Models may be Gaussian or binomial. For binomial fits, predictions are
+returned on the probability scale (i.e., on the response scale) by default,
+consistent with the default behaviour of \code{predict.svem_model()}.
 }
+\section{Typical workflow}{
+
+\enumerate{
+\item Build a deterministic expansion (e.g. with \code{\link{bigexp_terms}})
+and fit several \code{SVEMnet()} models for different responses on
+the same factor space, using the same expansion / sampling settings.
+\item Ensure that the fitted models were created with a version of
+\code{SVEMnet()} that populates \code{$sampling_schema}.
+\item Collect the fitted models in a list and pass them to
+\code{svem_random_table_multi()}.
+\item Use \code{$data} (predictors), \code{$pred} (response columns), or
+\code{$all} (\code{cbind(data, pred)}) for downstream plotting,
+summarization, or cross-response comparison.
+}
+}
+
 \section{Sampling strategy}{
 
-Non-mixture numeric variables are sampled using a selectable method:
+Non-mixture numeric variables are sampled using the chosen \code{numeric_sampler}
+within the numeric ranges recorded in \code{$sampling_schema$num_ranges}:
 \itemize{
 \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available,
 else independent uniforms on each range.
-\item \code{"maximin"}: maximin Latin hypercube (more space-filling; slower).
-\item \code{"uniform"}: independent uniform draws within numeric ranges (fastest).
+\item \code{"uniform"}: independent uniform draws within numeric ranges
+(fastest; no \pkg{lhs} dependency).
 }
+
 Mixture variables (if any) are sampled jointly within each specified group using
 a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
 Categorical variables are sampled from cached factor levels. The same random
@@ -90,6 +123,10 @@ on the original scale of those variables. If \code{total} equals the sum of lowe
 bounds, the sampler returns the lower-bound corner for that group. Infeasible
 constraints (i.e., \code{sum(lower) > total} or \code{sum(upper) < total}) produce
 an error.
+
+Mixture variables are removed from the pool of "non-mixture" numeric variables
+before numeric sampling, so they are controlled entirely by the mixture
+constraints and not also sampled independently.
 }
 
 \examples{
@@ -132,7 +169,7 @@ tab_fast <- svem_random_table_multi(
 head(tab_fast$all)
 
 # Check that the binomial predictions are on [0,1]
-range(tab_fast$pred$yb)
+range(tab_fast$pred$yb_pred)
 
 # Uniform sampler (fastest)
 tab_uni <- svem_random_table_multi(
@@ -145,5 +182,6 @@ head(tab_uni$all)
 }
 }
 \seealso{
-\code{\link{SVEMnet}}, \code{\link{predict.svem_model}}
+\code{\link{SVEMnet}}, \code{\link{predict.svem_model}},
+\code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
 }

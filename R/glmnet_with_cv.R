@@ -2,18 +2,18 @@
 #'
 #' Repeated K-fold cross-validation over a per-alpha lambda path, with a
 #' combined 1-SE rule across repeats. Preserves fields expected by
-#' \code{predict.svem_model} / internal prediction helpers. Optionally uses
-#' glmnet's built-in relaxed elastic net for both the warm-start path and each
-#' CV fit. When \code{relaxed = TRUE}, the final coefficients are taken from a
-#' \code{cv.glmnet()} object at the chosen lambda so that the returned model
-#' reflects the relaxed solution (including its chosen \eqn{\gamma}).
+#' \code{predict.svem_model()} and internal prediction helpers. Optionally uses
+#' \code{glmnet}'s built-in relaxed elastic net for both the warm-start path and
+#' each CV fit. When \code{relaxed = TRUE}, the final coefficients are taken
+#' from a \code{cv.glmnet()} object at the chosen lambda so that the returned
+#' model reflects the relaxed solution (including its chosen gamma).
 #'
-#' This function is a convenience wrapper around \code{glmnet} /
+#' This function is a convenience wrapper around \code{glmnet()} and
 #' \code{cv.glmnet()} that returns an object in the same structural format as
 #' \code{SVEMnet()} (class \code{"svem_model"}). It is intended for:
 #' \itemize{
 #'   \item direct comparison of standard cross-validated glmnet fits to SVEMnet
-#'         models, using the same prediction/schema tools, or
+#'         models using the same prediction and schema tools, or
 #'   \item users who want a repeated-\code{cv.glmnet()} workflow without any
 #'         SVEM weighting or bootstrap ensembling.
 #' }
@@ -25,7 +25,7 @@
 #'   (alphas) in \code{[0,1]}; default \code{c(0.5, 1)}. When
 #'   \code{relaxed = TRUE}, any \code{alpha = 0} (ridge) is dropped with a
 #'   warning.
-#' @param standardize Logical passed to \code{glmnet} / \code{cv.glmnet}
+#' @param standardize Logical passed to \code{glmnet()} and \code{cv.glmnet()}
 #'   (default \code{TRUE}).
 #' @param nfolds Requested number of CV folds (default \code{10}). Internally
 #'   constrained so that there are at least about 3 observations per fold and
@@ -45,18 +45,18 @@
 #'   ridge fallback, if used).
 #' @param exclude Optional vector or function for \code{glmnet}'s
 #'   \code{exclude=} argument. If a function, \code{cv.glmnet()} applies it
-#'   inside each training fold (requires \code{glmnet} \code{>= 4.1-2}).
-#' @param relaxed Logical; if \code{TRUE}, call \code{glmnet} /
-#'   \code{cv.glmnet} with \code{relax = TRUE} and optionally a
-#'   \code{gamma} path (default \code{FALSE}). If \code{cv.glmnet(relax=TRUE)}
-#'   fails for a particular repeat/alpha, the function retries that fit
-#'   without relaxation; the number of such fallbacks is recorded in
-#'   \code{meta$relax_cv_fallbacks}.
+#'   inside each training fold (requires \code{glmnet} >= 4.1-2).
+#' @param relaxed Logical; if \code{TRUE}, call \code{glmnet()} and
+#'   \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
+#'   \code{gamma} path (default \code{FALSE}). If
+#'   \code{cv.glmnet(relax = TRUE)} fails for a particular repeat/alpha, the
+#'   function retries that fit without relaxation; the number of such
+#'   fallbacks is recorded in \code{meta$relax_cv_fallbacks}.
 #' @param relax_gamma Optional numeric vector passed as \code{gamma=} to
-#'   \code{glmnet} / \code{cv.glmnet} when \code{relaxed = TRUE}. If
+#'   \code{glmnet()} and \code{cv.glmnet()} when \code{relaxed = TRUE}. If
 #'   \code{NULL}, glmnet's internal default gamma grid is used.
 #' @param family Model family: either \code{"gaussian"} or \code{"binomial"},
-#'   or the corresponding \code{stats::gaussian()} / \code{stats::binomial()}
+#'   or the corresponding \code{stats::gaussian()} or \code{stats::binomial()}
 #'   family objects with canonical links. For Gaussian, \code{y} must be
 #'   numeric. For binomial, \code{y} must be 0/1 numeric, logical, or a factor
 #'   with exactly 2 levels (the second level is treated as 1). Non-canonical
@@ -65,41 +65,64 @@
 #'   \code{glmnet()}, for example: \code{weights}, \code{parallel},
 #'   \code{type.measure}, \code{intercept}, \code{maxit},
 #'   \code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-#'   \code{offset}, \code{standardize.response}, \code{keep}, etc. If
+#'   \code{offset}, \code{standardize.response}, \code{keep}, and so on. If
 #'   \code{family} is supplied here, it is ignored in favor of the explicit
 #'   \code{family} argument.
 #'
 #' @details
-#' For each \code{alpha} in \code{glmnet_alpha}, the function:
+#' The basic workflow is:
 #' \enumerate{
-#'   \item Generates a set of CV fold IDs (shared across alphas and repeats).
-#'   \item Runs \code{repeats} independent \code{cv.glmnet()} fits, aligning
-#'         lambda paths and aggregating the CV curves.
-#'   \item Computes a combined SE at each lambda that accounts for both
+#'   \item For each \code{alpha} in \code{glmnet_alpha}, generate a set of CV
+#'         fold IDs (shared across alphas and repeats).
+#'   \item For that alpha, run \code{repeats} independent \code{cv.glmnet()}
+#'         fits, align the lambda paths, and aggregate the CV curves.
+#'   \item At each lambda, compute a combined SE that accounts for both
 #'         within-repeat and between-repeat variability.
-#'   \item Applies \code{choose_rule} (\code{"min"} or \code{"1se"}) to pick
-#'         the lambda for that alpha.
+#'   \item Apply \code{choose_rule} (\code{"min"} or \code{"1se"}) to select
+#'         lambda for that alpha, then choose the best alpha by comparing these
+#'         per-alpha scores.
 #' }
-#' The best alpha is then chosen by comparing these per-alpha scores.
 #'
-#' If there are no predictors after \code{model.matrix()} (intercept-only
-#' model), the function returns an intercept-only fit without calling
-#' \code{glmnet}, along with a minimal schema for safe prediction.
+#' Special cases and fallbacks:
+#' \itemize{
+#'   \item If there are no predictors after \code{model.matrix()} (an
+#'         intercept-only model), the function returns an intercept-only fit
+#'         without calling \code{glmnet()}, along with a minimal schema for
+#'         safe prediction.
+#'   \item If all \code{cv.glmnet()} attempts fail for every alpha (a rare
+#'         edge case), the function falls back to a manual ridge
+#'         (\code{alpha = 0}) CV search over a fixed lambda grid and returns
+#'         the best ridge solution. For Gaussian models this search uses a
+#'         mean-squared-error criterion; for binomial models it uses a
+#'         negative log-likelihood (deviance-equivalent) criterion.
+#' }
 #'
-#' If all \code{cv.glmnet()} attempts fail for every alpha (a rare edge case),
-#' the function falls back to a manual ridge (\code{alpha = 0}) CV search over
-#' a fixed lambda grid and returns the best ridge solution.
+#' Family-specific behavior:
+#' \itemize{
+#'   \item For the Gaussian family, an optional calibration \code{lm(y ~ y_pred)}
+#'         is fit on the training data (when there is sufficient variation), and
+#'         both \code{y_pred} and \code{y_pred_debiased} are stored.
+#'   \item For the binomial family, \code{y_pred} is always on the probability
+#'         (response) scale and debiasing is not applied. Both the primary
+#'         cross-validation and any ridge fallback use deviance-style criteria
+#'         (binomial negative log-likelihood) rather than squared error.
+#' }
 #'
-#' For the Gaussian family, an optional calibration \code{lm(y ~ y_pred)} is
-#' fit on the training data (when there is sufficient variation), and both
-#' \code{y_pred} and \code{y_pred_debiased} are stored. For the binomial
-#' family, \code{y_pred} is always on the probability (response) scale and
-#' debiasing is not applied.
+#' Design-matrix schema and contrasts:
+#' \itemize{
+#'   \item The training \code{terms} are stored with environment set to
+#'         \code{baseenv()}.
+#'   \item Factor and character levels are recorded in \code{xlevels} for
+#'         safe prediction.
+#'   \item Per-factor contrasts are stored in \code{contrasts}, normalized
+#'         so that any contrasts recorded as character names are converted
+#'         back to contrast functions at prediction time.
+#' }
 #'
 #' The returned object inherits classes \code{"svem_cv"} and \code{"svem_model"}
-#' and is designed to be compatible with SVEMnet's prediction and schema
-#' utilities. It is a standalone, standard glmnet CV workflow that does
-#' \emph{not} use SVEM-style bootstrap weighting or ensembling.
+#' and is designed to be compatible with SVEMnet prediction and schema
+#' utilities. It is a standalone, standard glmnet CV workflow that does not use
+#' SVEM-style bootstrap weighting or ensembling.
 #'
 #' @return A list of class \code{c("svem_cv","svem_model")} with elements:
 #' \itemize{
@@ -114,8 +137,8 @@
 #'         calibration model; \code{NULL} otherwise.
 #'   \item \code{y_pred_debiased} If \code{debias_fit} exists, its fitted
 #'         values; otherwise \code{NULL}.
-#'   \item \code{cv_summary} Named list (one per alpha) of data frames with
-#'         columns: \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
+#'   \item \code{cv_summary} Named list (one element per alpha) of data frames
+#'         with columns \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
 #'         \code{se_combined}, \code{n_repeats}, \code{idx_min},
 #'         \code{idx_1se}.
 #'   \item \code{formula} Original modeling formula.
@@ -131,14 +154,25 @@
 #'         training.
 #'   \item \code{schema} List
 #'         \code{list(feature_names, terms_str, xlevels, contrasts, terms_hash)}
-#'         for deterministic predict.
-#'   \item \code{note} Character vector of notes (e.g., dropped rows,
+#'         for deterministic prediction.
+#'   \item \code{note} Character vector of notes (for example, dropped rows,
 #'         intercept-only path, ridge fallback, relaxed-coefficient source).
 #'   \item \code{meta} List with fields such as \code{nfolds}, \code{repeats},
 #'         \code{rule}, \code{family}, \code{relaxed},
 #'         \code{relax_cv_fallbacks}, and \code{cv_object} (the final
-#'         \code{cv.glmnet} object when \code{relaxed = TRUE} and
+#'         \code{cv.glmnet()} object when \code{relaxed = TRUE} and
 #'         \code{keep = TRUE}, otherwise \code{NULL}).
+#'   \item \code{diagnostics} List of simple diagnostics for the selected
+#'         model, currently including:
+#'         \itemize{
+#'           \item \code{k_final}: number of coefficients estimated as
+#'                 nonzero \emph{including} the intercept.
+#'           \item \code{k_final_no_intercept}: number of nonzero
+#'                 slope coefficients (excludes the intercept).
+#'         }
+#'   \item \code{family} Character scalar giving the resolved family
+#'         (\code{"gaussian"} or \code{"binomial"}), mirroring
+#'         \code{meta$family}.
 #' }
 #'
 #' @template ref-svem
@@ -202,15 +236,45 @@ glmnet_with_cv <- function(formula, data,
                            standardize = TRUE,
                            nfolds = 10,
                            repeats = 5,
-                           choose_rule = c("min","1se"),
+                           choose_rule = c("min", "1se"),
                            seed = NULL,
                            exclude = NULL,
                            relaxed = FALSE,
                            relax_gamma = NULL,
-                           family = c("gaussian","binomial"),
+                           family = c("gaussian", "binomial"),
                            ...) {
 
   choose_rule <- match.arg(choose_rule)
+
+  # --- Helper: support size (number of active coefficients) ---
+  .support_size_one <- function(beta_col,
+                                base_tol        = 1e-7,
+                                count_intercept = TRUE) {
+    if (!is.numeric(beta_col) || length(beta_col) < 1L) {
+      return(NA_integer_)
+    }
+
+    if (length(beta_col) == 1L) {
+      return(if (count_intercept) 1L else 0L)
+    }
+
+    slope <- beta_col[-1L]
+    slope <- slope[is.finite(slope)]
+
+    if (!length(slope)) {
+      return(if (count_intercept) 1L else 0L)
+    }
+
+    max_slope <- max(abs(slope))
+    tol_rel   <- base_tol * max(1, max_slope)
+    tol_abs   <- base_tol
+    tol_j     <- max(tol_rel, tol_abs)
+
+    k_slope <- sum(abs(slope) > tol_j)
+
+    (if (count_intercept) 1L else 0L) + k_slope
+  }
+
 
   # --- Build model frame & matrix ---
   mf <- stats::model.frame(formula, data, na.action = stats::na.omit)
@@ -298,16 +362,23 @@ glmnet_with_cv <- function(formula, data,
     y_glm <- .coerce_binomial_01(y)
   }
 
-  # --- Intercept-only path (early return) ---
-  if (p == 0L) {
+  is_gaussian <- identical(fam, "gaussian")
+
+  # --- Helper for intercept-only returns (used in both places) ---
+  .cv_return_intercept_only <- function(
+    fam, y_glm, X, mf, glmnet_alpha, choose_rule,
+    drop_msg, nfolds_val, repeats_val, relaxed, w, note_extra = NULL
+  ) {
+    n_local <- nrow(X)
+
     if (identical(fam, "gaussian")) {
       intercept <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
-      y_pred <- rep(intercept, n)
+      y_pred <- rep(intercept, n_local)
     } else {  # binomial: intercept on logit scale, y_pred as probabilities
       p_hat <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
       p_hat <- pmin(pmax(p_hat, 1e-6), 1 - 1e-6)
       intercept <- stats::qlogis(p_hat)
-      y_pred <- rep(p_hat, n)
+      y_pred <- rep(p_hat, n_local)
     }
 
     # Clean terms and schema for consistency with normal path
@@ -342,6 +413,18 @@ glmnet_with_cv <- function(formula, data,
       contrasts     = contrasts_used,
       terms_hash    = safe_hash(terms_str)
     )
+
+    note_vec <- c("intercept_only", drop_msg, note_extra)
+    note_vec <- note_vec[!is.na(note_vec)]
+
+    # Diagnostics: model size (intercept only)
+    k_final  <- 1L
+    k_final0 <- 0L
+    diagnostics <- list(
+      k_final              = k_final,
+      k_final_no_intercept = k_final0
+    )
+
     res <- list(
       parms = c("(Intercept)" = intercept),
       glmnet_alpha = glmnet_alpha,
@@ -358,13 +441,39 @@ glmnet_with_cv <- function(formula, data,
       xlevels = xlevels,
       contrasts = contrasts_used,
       schema = schema,
-      note = c("intercept_only", drop_msg),
-      meta = list(nfolds = NA_integer_, repeats = NA_integer_,
-                  rule = choose_rule, family = fam, relaxed = relaxed,
-                  relax_cv_fallbacks = 0L, cv_object = NULL)
+      note = note_vec,
+      meta = list(
+        nfolds = nfolds_val,
+        repeats = repeats_val,
+        rule = choose_rule,
+        family = fam,
+        relaxed = relaxed,
+        relax_cv_fallbacks = 0L,
+        cv_object = NULL
+      ),
+      diagnostics = diagnostics,
+      family = fam
     )
     class(res) <- c("svem_cv","svem_model")
-    return(res)
+    res
+  }
+
+  # --- Intercept-only path (early return) ---
+  if (p == 0L) {
+    return(.cv_return_intercept_only(
+      fam         = fam,
+      y_glm       = y_glm,
+      X           = X,
+      mf          = mf,
+      glmnet_alpha = glmnet_alpha,
+      choose_rule = choose_rule,
+      drop_msg    = drop_msg,
+      nfolds_val  = NA_integer_,
+      repeats_val = NA_integer_,
+      relaxed     = relaxed,
+      w           = w,
+      note_extra  = NULL
+    ))
   }
 
   # --- Safe folds & repeats ---
@@ -422,8 +531,6 @@ glmnet_with_cv <- function(formula, data,
     cv_base_args$offset <- NULL
     glmnet_fit_args$offset <- NULL
   }
-
-  is_gaussian <- identical(fam, "gaussian")
 
   # Helper to drop reserved names from arg lists before do.call
   drop_reserved <- function(lst, reserved) {
@@ -541,68 +648,20 @@ glmnet_with_cv <- function(formula, data,
 
   # --- Defensive intercept-only check before ridge fallback ---
   if (ncol(X) == 0L) {
-    if (identical(fam, "gaussian")) {
-      intercept <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
-      y_pred <- rep(intercept, nrow(X))
-    } else {
-      p_hat <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
-      p_hat <- pmin(pmax(p_hat, 1e-6), 1 - 1e-6)
-      intercept <- stats::qlogis(p_hat)
-      y_pred <- rep(p_hat, nrow(X))
-    }
-
-    terms_clean <- attr(mf, "terms"); environment(terms_clean) <- baseenv()
-
-    # Record factor AND character levels
-    xlevels <- list()
-    vars_in_terms <- base::all.vars(stats::delete.response(terms_clean))
-    for (v in vars_in_terms) {
-      if (v %in% colnames(mf)) {
-        if (is.factor(mf[[v]])) {
-          xlevels[[v]] <- levels(mf[[v]])
-        } else if (is.character(mf[[v]])) {
-          xlevels[[v]] <- sort(unique(as.character(mf[[v]])))
-        }
-      }
-    }
-    contrasts_used <- NULL
-    feature_names <- character(0)
-    terms_str <- tryCatch(paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
-                          error = function(e) NA_character_)
-    safe_hash <- function(s) {
-      if (!is.character(s) || !length(s) || is.na(s)) return(NA_character_)
-      bytes <- charToRaw(paste0(s, collapse = ""))
-      sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
-    }
-    schema <- list(
-      feature_names = feature_names,
-      terms_str     = terms_str,
-      xlevels       = xlevels,
-      contrasts     = contrasts_used,
-      terms_hash    = safe_hash(terms_str)
-    )
-    res <- list(
-      parms = c("(Intercept)" = intercept),
+    return(.cv_return_intercept_only(
+      fam         = fam,
+      y_glm       = y_glm,
+      X           = X,
+      mf          = mf,
       glmnet_alpha = glmnet_alpha,
-      best_alpha = NA_real_,
-      best_lambda = NA_real_,
-      y_pred = y_pred,
-      debias_fit = NULL,
-      y_pred_debiased = NULL,
-      cv_summary = list(),
-      formula = formula,
-      terms = terms_clean,
-      training_X = X,
-      actual_y = y_glm,
-      xlevels = xlevels,
-      contrasts = contrasts_used,
-      schema = schema,
-      note = c("intercept_only", drop_msg, "ridge_fallback_bypassed"),
-      meta = list(nfolds = nfolds_eff, repeats = repeats, rule = choose_rule,
-                  family = fam, relaxed = relaxed, relax_cv_fallbacks = 0L, cv_object = NULL)
-    )
-    class(res) <- c("svem_cv","svem_model")
-    return(res)
+      choose_rule = choose_rule,
+      drop_msg    = drop_msg,
+      nfolds_val  = nfolds_eff,
+      repeats_val = repeats,
+      relaxed     = relaxed,
+      w           = w,
+      note_extra  = "ridge_fallback_bypassed"
+    ))
   }
 
   # --- Ridge fallback if everything failed (very rare) ---
@@ -612,7 +671,7 @@ glmnet_with_cv <- function(formula, data,
     foldid <- sample(rep(seq_len(nfolds_eff), length.out = n))
     lam_seq <- 10 ^ seq(3, -5, length.out = 120)
 
-    mse_num <- mse_den <- rep(0, length(lam_seq))
+    crit_num <- crit_den <- rep(0, length(lam_seq))
 
     for (j in seq_along(lam_seq)) {
       lam <- lam_seq[j]
@@ -632,18 +691,34 @@ glmnet_with_cv <- function(formula, data,
         if (is.null(fit_j)) next
         preds_te <- drop(stats::predict(fit_j, newx = X[te_idx, , drop = FALSE],
                                         s = lam, type = "response"))
-        if (is.null(w)) {
-          mse_num[j] <- mse_num[j] + sum((preds_te - y_glm[te_idx])^2)
-          mse_den[j] <- mse_den[j] + length(te_idx)
+
+        if (is_gaussian) {
+          # Gaussian: MSE criterion
+          if (is.null(w)) {
+            crit_num[j] <- crit_num[j] + sum((preds_te - y_glm[te_idx])^2)
+            crit_den[j] <- crit_den[j] + length(te_idx)
+          } else {
+            w_te <- w[te_idx]
+            crit_num[j] <- crit_num[j] + sum(w_te * (preds_te - y_glm[te_idx])^2)
+            crit_den[j] <- crit_den[j] + sum(w_te)
+          }
         } else {
-          w_te <- w[te_idx]
-          mse_num[j] <- mse_num[j] + sum(w_te * (preds_te - y_glm[te_idx])^2)
-          mse_den[j] <- mse_den[j] + sum(w_te)
+          # Binomial: negative log-likelihood / deviance-like criterion
+          p_hat <- pmin(pmax(preds_te, 1e-8), 1 - 1e-8)
+          yy <- y_glm[te_idx]
+          if (is.null(w)) {
+            crit_num[j] <- crit_num[j] - sum(yy * log(p_hat) + (1 - yy) * log(1 - p_hat))
+            crit_den[j] <- crit_den[j] + length(te_idx)
+          } else {
+            w_te <- w[te_idx]
+            crit_num[j] <- crit_num[j] - sum(w_te * (yy * log(p_hat) + (1 - yy) * log(1 - p_hat)))
+            crit_den[j] <- crit_den[j] + sum(w_te)
+          }
         }
       }
     }
-    mse_by_lambda <- mse_num / mse_den
-    j_best <- which.min(mse_by_lambda)
+    crit_by_lambda <- crit_num / crit_den
+    j_best <- which.min(crit_by_lambda)
     best_lambda <- lam_seq[j_best]
 
     final_ridge <- do.call(glmnet::glmnet, c(
@@ -673,6 +748,11 @@ glmnet_with_cv <- function(formula, data,
       }
     }
     contrasts_used <- attr(X, "contrasts")
+    if (!is.null(contrasts_used)) {
+      contrasts_used <- lapply(contrasts_used, function(ci) {
+        if (is.character(ci)) get(ci, mode = "function") else ci
+      })
+    }
     terms_str <- tryCatch(paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
                           error = function(e) NA_character_)
     safe_hash <- function(s) {
@@ -686,6 +766,14 @@ glmnet_with_cv <- function(formula, data,
       xlevels       = xlevels,
       contrasts     = contrasts_used,
       terms_hash    = safe_hash(terms_str)
+    )
+
+    # Diagnostics: model size from ridge fallback
+    k_final  <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = TRUE)
+    k_final0 <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = FALSE)
+    diagnostics <- list(
+      k_final              = k_final,
+      k_final_no_intercept = k_final0
     )
 
     res <- list(
@@ -706,7 +794,9 @@ glmnet_with_cv <- function(formula, data,
       schema = schema,
       note = c("ridge_fallback", drop_msg),
       meta = list(nfolds = nfolds_eff, repeats = repeats, rule = choose_rule,
-                  family = fam, relaxed = relaxed, relax_cv_fallbacks = NA_integer_, cv_object = NULL)
+                  family = fam, relaxed = relaxed, relax_cv_fallbacks = NA_integer_, cv_object = NULL),
+      diagnostics = diagnostics,
+      family = fam
     )
     class(res) <- c("svem_cv","svem_model")
     return(res)
@@ -754,6 +844,10 @@ glmnet_with_cv <- function(formula, data,
     y_pred <- drop(stats::predict(final_fit, newx = X, s = best_lambda, type = "response"))
   }
 
+  # Diagnostics: model size for final selected model
+  k_final  <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = TRUE)
+  k_final0 <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = FALSE)
+
   debias_fit <- if (is_gaussian && length(y_glm) >= 10 && stats::var(y_pred) > 0) stats::lm(y_glm ~ y_pred) else NULL
   y_pred_debiased <- if (!is.null(debias_fit)) stats::predict(debias_fit) else NULL
 
@@ -788,6 +882,11 @@ glmnet_with_cv <- function(formula, data,
     }
   }
   contrasts_used <- attr(X, "contrasts")
+  if (!is.null(contrasts_used)) {
+    contrasts_used <- lapply(contrasts_used, function(ci) {
+      if (is.character(ci)) get(ci, mode = "function") else ci
+    })
+  }
   terms_str <- tryCatch(paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
                         error = function(e) NA_character_)
   safe_hash <- function(s) {
@@ -801,6 +900,11 @@ glmnet_with_cv <- function(formula, data,
     xlevels       = xlevels,
     contrasts     = contrasts_used,
     terms_hash    = safe_hash(terms_str)
+  )
+
+  diagnostics <- list(
+    k_final              = k_final,
+    k_final_no_intercept = k_final0
   )
 
   result <- list(
@@ -822,11 +926,12 @@ glmnet_with_cv <- function(formula, data,
     note = c(drop_msg, note_relax),
     meta = list(nfolds = nfolds_eff, repeats = repeats, rule = choose_rule,
                 family = fam, relaxed = relaxed, relax_cv_fallbacks = total_fallbacks,
-                cv_object = cv_obj_to_keep)
+                cv_object = cv_obj_to_keep),
+    diagnostics = diagnostics,
+    family = fam
   )
 
   class(result) <- c("svem_cv", "svem_model")
 
   return(result)
 }
-

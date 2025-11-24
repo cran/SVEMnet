@@ -12,134 +12,150 @@
   se.fit = FALSE,
   interval = FALSE,
   level = 0.95,
-  agg = c("parms", "mean"),
   ...
 )
 }
 \arguments{
 \item{object}{A fitted SVEM model (class \code{svem_model}; binomial models
-typically also inherit \code{svem_binomial}). Created by \code{SVEMnet()}.}
+typically also inherit class \code{svem_binomial}). Created by
+\code{SVEMnet()}.}
 
 \item{newdata}{A data frame of new predictor values.}
 
 \item{type}{(Binomial only) One of:
 \itemize{
-\item \code{"response"} (default): predicted probabilities in \eqn{[0,1]}.
+\item \code{"response"} (default): predicted probabilities in
+\eqn{[0,1]}.
 \item \code{"link"}: linear predictor (log-odds).
-\item \code{"class"}: 0/1 class labels (threshold \code{0.5}).
+\item \code{"class"}: 0/1 class labels (threshold 0.5). Uncertainty
+summaries are not available for this type.
 }
 Ignored for Gaussian models.}
 
-\item{debias}{(Gaussian only) Logical; default \code{FALSE}. If \code{TRUE}, apply
-the linear calibration fit (\code{y ~ y_pred}) learned at training when available.
-Ignored (and internally set to \code{FALSE}) for binomial.}
+\item{debias}{(Gaussian only) Logical; default \code{FALSE}. If \code{TRUE},
+apply the linear calibration fit \code{lm(y ~ y_pred)} learned at
+training when available. Ignored (and internally set to \code{FALSE})
+for binomial models.}
 
-\item{se.fit}{Logical; if \code{TRUE}, return bootstrap standard errors computed
-from member predictions (requires \code{coef_matrix}). Not available for
-\code{type = "class"}.}
+\item{se.fit}{Logical; if \code{TRUE}, return bootstrap standard errors
+computed from member predictions (requires \code{coef_matrix}). Not
+available for \code{type = "class"}. For Gaussian models, this forces use
+of bootstrap member predictions instead of aggregate coefficients.}
 
-\item{interval}{Logical; if \code{TRUE}, return percentile confidence limits
-from member predictions (requires \code{coef_matrix}). Not available for
-\code{type = "class"}.}
+\item{interval}{Logical; if \code{TRUE}, return percentile confidence
+limits from member predictions (requires \code{coef_matrix}). Not
+available for \code{type = "class"}. For Gaussian models, this forces use
+of bootstrap member predictions instead of aggregate coefficients.}
 
-\item{level}{Confidence level for percentile intervals. Default \code{0.95}.}
-
-\item{agg}{Aggregation method for ensemble predictions. One of
-\code{"parms"} (default) or \code{"mean"}; see \emph{Aggregation modes}.
-For binomial models, \code{predict()} always uses \code{"mean"} regardless
-of the input.}
+\item{level}{Confidence level for percentile intervals. Default
+\code{0.95}.}
 
 \item{...}{Currently unused.}
 }
 \value{
 If \code{se.fit = FALSE} and \code{interval = FALSE}:
 \itemize{
-\item \strong{Gaussian}: a numeric vector of predictions (response scale).
-\item \strong{Binomial}: a numeric vector for \code{type = "response"} (probabilities)
-or \code{type = "link"} (log-odds), or an integer vector \code{0/1} for
-\code{type = "class"}.
+\item \strong{Gaussian}: a numeric vector of predictions on the response
+(identity) scale.
+\item \strong{Binomial}: a numeric vector for \code{type = "response"}
+(probabilities) or \code{type = "link"} (log-odds), or an integer
+vector of 0/1 labels for \code{type = "class"}.
 }
 
-If \code{se.fit} and/or \code{interval} are \code{TRUE} (and \code{type != "class"}):
-a list with components:
+If \code{se.fit} and/or \code{interval} are \code{TRUE} (and
+\code{type != "class"}), a list with components:
 \itemize{
 \item \code{fit}: predictions on the requested scale.
-\item \code{se.fit}: bootstrap standard errors (when \code{se.fit = TRUE}).
+\item \code{se.fit}: bootstrap standard errors (when
+\code{se.fit = TRUE}).
 \item \code{lwr}, \code{upr}: percentile confidence limits (when
 \code{interval = TRUE}).
 }
 
-Rows containing unseen or missing factor levels produce \code{NA} predictions
-(and \code{NA} SEs/intervals) with a warning.
+Rows containing unseen or missing factor levels produce \code{NA}
+predictions (and \code{NA} SEs/intervals), with a warning.
 }
 \description{
 Generate predictions from a fitted SVEM model (Gaussian or binomial), with
 optional bootstrap uncertainty and family-appropriate output scales.
 }
 \details{
-This unified method dispatches on \code{object$family}:
+This method dispatches on \code{object$family}:
 \itemize{
-\item \strong{Gaussian}: returns predictions on the response (identity) scale.
-Optional linear calibration (``debias'') learned at training may be applied.
-\item \strong{Binomial}: supports glmnet-style \code{type = "link" | "response" | "class"}.
-No debiasing is applied; \code{"response"} returns probabilities in \eqn{[0,1]}.
+\item \strong{Gaussian}: returns predictions on the response (identity)
+scale. Optional linear calibration ("debias") learned at training
+may be applied.
+\item \strong{Binomial}: supports glmnet-style \code{type = "link"},
+\code{"response"}, or \code{"class"} predictions. No debiasing is
+applied; \code{type = "response"} returns probabilities in
+\eqn{[0,1]}.
 }
 
 Uncertainty summaries (\code{se.fit}, \code{interval}) and all binomial
-predictions (and Gaussian \code{agg = "mean"}) are based on per-bootstrap
-member predictions obtained from the coefficient matrix stored in
-\code{object$coef_matrix}. If \code{coef_matrix} is \code{NULL}, these options
-are not supported.
+predictions are based on per-bootstrap member predictions obtained from
+the coefficient matrix stored in \code{object$coef_matrix}. If
+\code{coef_matrix} is \code{NULL}, these options are not available (and
+binomial prediction will fail). For Gaussian models with
+\code{se.fit = FALSE} and \code{interval = FALSE}, predictions are computed
+directly from the aggregated coefficients.
 }
 \section{Design-matrix reconstruction}{
 
-The function rebuilds the design matrix for \code{newdata} to exactly match training:
+The function rebuilds the design matrix for \code{newdata} to match the
+training design:
 \itemize{
-\item Uses the training \code{terms} (with environment set to \code{baseenv()}).
-\item Harmonizes factor/character columns to training \code{xlevels}.
-\item Reuses stored per-factor \code{contrasts} when available; otherwise falls
-back to the current global \code{contrasts} options.
-\item Zero-fills any columns present at training but absent in \code{newdata},
-and reorders columns to match training.
+\item Uses the training \code{terms} (with environment set to
+\code{baseenv()}).
+\item Harmonizes factor and character predictors to the training
+\code{xlevels}.
+\item Reuses stored per-factor \code{contrasts} when available; otherwise
+falls back to saved global contrast options.
+\item Zero-fills any columns present at training but absent in
+\code{newdata}, and reorders columns to match the training order.
 }
-Rows containing unseen factor levels yield \code{NA} predictions (with a warning).
+Rows containing unseen factor levels yield \code{NA} predictions (with a
+warning).
 }
 
-\section{Aggregation modes}{
+\section{Aggregation and debiasing}{
 
+For Gaussian SVEM models:
 \describe{
-\item{\code{agg = "parms"}}{(Gaussian only) Use the aggregated coefficients
-saved at fit time (\code{object$parms}; for Gaussian with
-\code{debias = TRUE}, use \code{object$parms_debiased}).}
-\item{\code{agg = "mean"}}{Average per-bootstrap member predictions (on the
-requested scale) and, for Gaussian with \code{debias = TRUE}, apply the
-calibration to member predictions before aggregation. Requires
-\code{coef_matrix}.}
+\item{Point predictions}{When \code{se.fit = FALSE} and
+\code{interval = FALSE}, predictions are computed from the
+aggregated coefficients saved at fit time
+(\code{object$parms}; or \code{object$parms_debiased} when
+\code{debias = TRUE}). This is algebraically equivalent to
+averaging member predictions when the coefficients were formed as
+bootstrap means.}
+\item{Bootstrap-based summaries}{When \code{se.fit = TRUE} and/or
+\code{interval = TRUE}, predictions are computed from per-bootstrap
+member predictions using \code{object$coef_matrix}. For
+\code{debias = TRUE}, the linear calibration is applied to member
+predictions before summarizing.}
 }
 
-For \strong{binomial} SVEM models, \code{predict()} always behaves as if
-\code{agg = "mean"}: predictions are aggregated from member predictions on the
-requested scale (probability or link), and any user-specified \code{agg} is
-ignored with a warning. The stored coefficient averages (\code{parms},
+For binomial SVEM models, predictions are always aggregated from member
+predictions on the requested scale (probability or link) using
+\code{coef_matrix}; the stored coefficient averages (\code{parms},
 \code{parms_debiased}) are retained for diagnostics but are not used in
-prediction.
-}
+prediction. The \code{debias} argument is ignored and treated as
+\code{FALSE} for binomial models.
 
-\section{Debiasing}{
-
-For \strong{Gaussian} fits only, if \code{debias = TRUE} and a calibration model
-\code{lm(y ~ y_pred)} was learned at training, predictions (and, when applicable,
-member predictions) are transformed by that calibration. Binomial fits are never
-debiased, even if \code{debias = TRUE} is requested.
+For Gaussian fits, if \code{debias = TRUE} and a calibration model
+\code{lm(y ~ y_pred)} was learned at training, predictions (and, when
+applicable, member predictions) are transformed by that calibration. This
+debiasing is never applied for binomial fits.
 }
 
 \section{Uncertainty}{
 
-When \code{se.fit = TRUE}, the returned standard errors are the row-wise standard
-deviations of member predictions on the requested scale. When \code{interval = TRUE},
-percentile intervals are computed from member predictions on the requested scale,
-using the requested \code{level}. Both require \code{coef_matrix}. For
-\code{type = "class"} (binomial), uncertainty summaries are not available.
+When \code{se.fit = TRUE}, standard errors are computed as the row-wise
+standard deviations of member predictions on the requested scale. When
+\code{interval = TRUE}, percentile intervals are computed from member
+predictions on the requested scale, using the requested \code{level}. Both
+require a non-null \code{coef_matrix}. For \code{type = "class"} (binomial),
+uncertainty summaries are not available.
 }
 
 \examples{
@@ -147,21 +163,27 @@ using the requested \code{level}. Both require \code{coef_matrix}. For
 set.seed(1)
 n  <- 60
 X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
-y  <- 1 + 0.8*X1 - 0.6*X2 + 0.2*X3 + rnorm(n, 0, 0.4)
+y  <- 1 + 0.8 * X1 - 0.6 * X2 + 0.2 * X3 + rnorm(n, 0, 0.4)
 dat <- data.frame(y, X1, X2, X3)
 
 fit_g <- SVEMnet(
   y ~ (X1 + X2 + X3)^2, dat,
-  nBoot = 40, glmnet_alpha = c(1, 0.5), relaxed = TRUE, family = "gaussian"
+  nBoot = 40, glmnet_alpha = c(1, 0.5),
+  relaxed = TRUE, family = "gaussian"
 )
 
-## Aggregate-coefficient predictions (with/without debias)
-p_g  <- predict(fit_g, dat)                       # debias = FALSE (default)
-p_gd <- predict(fit_g, dat, debias = TRUE)        # apply calibration, if available
+## Aggregate-coefficient predictions (with and without debiasing)
+p_g  <- predict(fit_g, dat)                # debias = FALSE (default)
+p_gd <- predict(fit_g, dat, debias = TRUE) # apply calibration, if available
 
-## Mean-aggregation with uncertainty (requires coef_matrix)
-out_g <- predict(fit_g, dat, debias = TRUE, agg = "mean",
-                 se.fit = TRUE, interval = TRUE, level = 0.9)
+## Bootstrap-based uncertainty (requires coef_matrix)
+out_g <- predict(
+  fit_g, dat,
+  debias   = TRUE,
+  se.fit   = TRUE,
+  interval = TRUE,
+  level    = 0.90
+)
 str(out_g)
 
 \donttest{
@@ -169,24 +191,30 @@ str(out_g)
 set.seed(2)
 n  <- 120
 X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
-eta <- -0.3 + 1.1*X1 - 0.8*X2 + 0.5*X1*X3
+eta <- -0.3 + 1.1 * X1 - 0.8 * X2 + 0.5 * X1 * X3
 p   <- plogis(eta)
 yb  <- rbinom(n, 1, p)
 db  <- data.frame(yb = yb, X1 = X1, X2 = X2, X3 = X3)
 
 fit_b <- SVEMnet(
   yb ~ (X1 + X2 + X3)^2, db,
-  nBoot = 50, glmnet_alpha = c(1, 0.5), relaxed = FALSE, family = "binomial"
+  nBoot = 50, glmnet_alpha = c(1, 0.5),
+  relaxed = TRUE, family = "binomial"
 )
 
 ## Probabilities, link, and classes
 p_resp <- predict(fit_b, db, type = "response")
 p_link <- predict(fit_b, db, type = "link")
-y_hat  <- predict(fit_b, db, type = "class")      # 0/1 labels (no SE/interval)
+y_hat  <- predict(fit_b, db, type = "class")  # 0/1 labels (no SE or interval)
 
-## Mean-aggregation with uncertainty on probability scale
-out_b <- predict(fit_b, db, type = "response",
-                 se.fit = TRUE, interval = TRUE, level = 0.9)
+## Bootstrap-based uncertainty on the probability scale
+out_b <- predict(
+  fit_b, db,
+  type     = "response",
+  se.fit   = TRUE,
+  interval = TRUE,
+  level    = 0.90
+)
 str(out_b)
 }
 

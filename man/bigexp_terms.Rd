@@ -18,9 +18,9 @@ bigexp_terms(
 \arguments{
 \item{formula}{Main-effects formula of the form \code{y ~ X1 + X2 + G} or
 \code{y ~ .}. The right-hand side should contain main effects only; do not
-include \code{:} (interactions), \code{^} (factorial shortcuts), or
-\code{I()} powers here. The helper will generate interactions and polynomial
-terms automatically.}
+include \code{:} (interactions), \code{^} (factorial shortcuts),
+\code{I()} powers, or inline polynomial expansions. The helper will
+generate interactions and polynomial terms automatically.}
 
 \item{data}{Data frame used to decide types and lock factor levels.}
 
@@ -72,7 +72,8 @@ information.
 \item decides which predictors are treated as continuous or categorical,
 \item locks factor levels from the supplied data,
 \item records the contrast settings used when the model matrix is first built, and
-\item constructs a reusable right-hand side (RHS) string for a large expansion.
+\item constructs a reusable right-hand side (RHS) string for a large expansion
+that can be shared across multiple responses and datasets.
 }
 }
 \details{
@@ -96,12 +97,29 @@ observed ranges are stored.
 }
 
 Once built, a \code{"bigexp_spec"} can be reused to create consistent
-expansions for new datasets via \code{\link{bigexp_prepare}},
-\code{\link{bigexp_formula}}, and \code{\link{bigexp_model_matrix}}. The RHS
+expansions for new datasets via \code{\link{bigexp_prepare}}, and
+\code{\link{bigexp_formula}}. The RHS
 and contrast settings are locked, so the same spec applied to different data
 produces design matrices with the same columns in the same order (up to
 missing levels for specific batches).
 }
+\section{Typical workflow}{
+
+In a typical multi-response workflow you:
+\enumerate{
+\item Call \code{bigexp_terms()} once on your training data to build and
+lock the expansion (types, levels, contrasts, RHS).
+\item Fit models using \code{spec$formula} and the original data
+(for example, \code{SVEMnet(spec$formula, data, ...)} or
+\code{lm(spec$formula, data)}).
+\item For new batches, call \code{\link{bigexp_prepare}} with the same \code{spec} so that
+design matrices have exactly the same columns and coding.
+\item For additional responses on the same factor space, use
+\code{\link{bigexp_formula}} to swap the left-hand side while
+reusing the locked expansion.
+}
+}
+
 \examples{
 ## Example 1: small design with one factor
 set.seed(1)
@@ -122,10 +140,6 @@ spec <- bigexp_terms(
 
 print(spec)
 
-## Inspect the resulting design matrix
-MM <- bigexp_model_matrix(spec, df)
-dim(MM)
-head(colnames(MM))
 
 ## Example 2: pure main effects (no interactions, no polynomial terms)
 spec_main <- bigexp_terms(
@@ -135,11 +149,9 @@ spec_main <- bigexp_terms(
   polynomial_order = 1   # no I(X^2) or higher
 )
 
-MM_main <- bigexp_model_matrix(spec_main, df)
-head(colnames(MM_main))
 
 }
 \seealso{
 \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},
-\code{\link{bigexp_model_matrix}}, \code{\link{bigexp_train}}
+\code{\link{bigexp_train}}
 }

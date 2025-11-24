@@ -3,7 +3,7 @@
 \name{predict_cv}
 \alias{predict_cv}
 \alias{predict.svem_cv}
-\title{Predict for \code{svem_cv} objects (and convenience wrapper)}
+\title{Predict from glmnet_with_cv Fits (svem_cv Objects)}
 \usage{
 predict_cv(object, newdata, debias = FALSE, strict = FALSE, ...)
 
@@ -19,45 +19,46 @@ predict_cv(object, newdata, debias = FALSE, strict = FALSE, ...)
 apply it. Has an effect only for Gaussian models where
 \code{debias_fit} is present.}
 
-\item{strict}{Logical; if \code{TRUE}, require an exact column-name match
-with the training design (including intercept position) after alignment.
-Default \code{FALSE}.}
+\item{strict}{Logical; if \code{TRUE}, enforce a strict column-name match
+between the aligned design for \code{newdata} and the training design
+(including the intercept position). Default \code{FALSE}.}
 
 \item{...}{Additional arguments (currently unused).}
 }
 \value{
 A numeric vector of predictions on the response scale:
 numeric fitted values for Gaussian models; probabilities in \code{[0,1]}
-for binomial models.
+for binomial models. Rows with unseen factor/character levels return
+\code{NA}.
 }
 \description{
 Generate predictions from a fitted object returned by
-\code{glmnet_with_cv()}.
+\code{glmnet_with_cv()} (class \code{"svem_cv"}).
 }
 \details{
-The design matrix for \code{newdata} is rebuilt using the training
-\code{terms} (with environment set to \code{baseenv()}), along with the
-saved factor \code{xlevels} and \code{contrasts} (stored on the object and
-cached in \code{object$schema}). Columns are aligned robustly to the
-training order:
+The design matrix for \code{newdata} is rebuilt using the stored training
+\code{terms} (with environment set to \code{baseenv()}), together with the
+saved factor \code{xlevels} and \code{contrasts} (cached in
+\code{object$schema}). Columns are then aligned back to the training
+design in a robust way:
 \itemize{
 \item Any training columns that \code{model.matrix()} drops for
-\code{newdata} (e.g., a factor collapses to a single level) are
-added back as zero columns.
+\code{newdata} (for example, a factor collapsing to a single level)
+are added back as zero columns.
 \item Columns are reordered to exactly match the training order.
-\item Rows with unseen factor levels are warned about and return
-\code{NA} predictions.
+\item Rows containing unseen factor/character levels are warned about and
+their predictions are set to \code{NA}.
 }
 
-For Gaussian fits (\code{family = "gaussian"}), the returned predictions
-are on the original response (identity-link) scale. For binomial fits
-(\code{family = "binomial"}), the returned predictions are probabilities
-in \code{[0,1]} (logit-link inverted via \code{plogis}).
+For Gaussian fits (\code{family = "gaussian"}), the returned values are on
+the original response (identity-link) scale. For binomial fits
+(\code{family = "binomial"}), the returned values are probabilities in
+\code{[0,1]} (logit-link inverted via \code{plogis()}).
 
-If \code{debias = TRUE} and a calibration fit \code{lm(y ~ y_pred)}
-exists with a finite slope, predictions are linearly transformed as
-\code{a + b * pred}. Debiasing is only fitted and used for Gaussian
-models; for binomial models the \code{debias} argument has no effect.
+If \code{debias = TRUE} and a calibration model \code{lm(y ~ y_pred)} is
+present with a finite slope, predictions are adjusted via
+\code{a + b * pred}. Debiasing is only fitted and used for Gaussian models;
+for binomial models the \code{debias} argument has no effect.
 
 \code{predict_cv()} is a small convenience wrapper that simply calls the
 underlying S3 method \code{predict.svem_cv()}, keeping a single code path

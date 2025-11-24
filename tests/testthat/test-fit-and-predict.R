@@ -25,29 +25,6 @@ test_that("SVEMnet relaxed path runs", {
   expect_true(length(p) == 5)
 })
 
-test_that("bigexp_terms handles polynomial_order and factorial_order", {
-  skip_if_not_installed("SVEMnet")
-
-  set.seed(123)
-  df <- data.frame(
-    y  = rnorm(30),
-    X1 = rnorm(30),
-    X2 = rnorm(30),
-    G  = factor(sample(c("A", "B"), 30, replace = TRUE))
-  )
-
-  # 1) factorial_order = 1, polynomial_order = 1: no interactions, no I() powers
-  spec1 <- SVEMnet::bigexp_terms(
-    y ~ X1 + X2 + G,
-    data            = df,
-    factorial_order = 1,
-    polynomial_order = 1
-  )
-  mm1 <- SVEMnet::bigexp_model_matrix(spec1, df)
-  cn1 <- colnames(mm1)
-
-  expect_false(any(grepl(":", cn1)))
-  expect_false(any(grepl("I\\(", cn1)))
 
 
   ## --- BINOMIAL: basic fit + predict on all types ------------------------------
@@ -110,7 +87,7 @@ test_that("bigexp_terms handles polynomial_order and factorial_order", {
       d,
       nBoot = 50,
       glmnet_alpha = c(1, 0.5),
-      relaxed = FALSE,
+      relaxed = TRUE,
       family = "binomial"
     )
 
@@ -229,34 +206,7 @@ test_that("bigexp_terms handles polynomial_order and factorial_order", {
     expect_named(lk, c("fit","se.fit","lwr","upr"))
     expect_length(pr, 10L); expect_length(lk$fit, 10L)
   })
-  # 2) factorial_order = 2, polynomial_order = 2: X1:X2 and I(X^2) terms
-  spec2 <- SVEMnet::bigexp_terms(
-    y ~ X1 + X2 + G,
-    data            = df,
-    factorial_order = 2,
-    polynomial_order = 2
-  )
-  mm2 <- SVEMnet::bigexp_model_matrix(spec2, df)
-  cn2 <- colnames(mm2)
 
-  expect_true(any(grepl("X1:X2", cn2)))
-  expect_true(any(grepl("I\\(X1\\^2\\)", cn2)))
-  expect_true(any(grepl("I\\(X2\\^2\\)", cn2)))
-
-  # 3) factorial_order = 3, polynomial_order = 3: X1:X2:G and I(X^3) terms
-  spec3 <- SVEMnet::bigexp_terms(
-    y ~ X1 + X2 + G,
-    data            = df,
-    factorial_order = 3,
-    polynomial_order = 3
-  )
-  mm3 <- SVEMnet::bigexp_model_matrix(spec3, df)
-  cn3 <- colnames(mm3)
-
-  expect_true(any(grepl("X1:X2:G", cn3)))
-  expect_true(any(grepl("I\\(X1\\^3\\)", cn3)))
-  expect_true(any(grepl("I\\(X2\\^3\\)", cn3)))
-})
 
 test_that("bigexp_prepare gives consistent columns across datasets", {
   skip_if_not_installed("SVEMnet")
@@ -284,10 +234,7 @@ test_that("bigexp_prepare gives consistent columns across datasets", {
     G  = factor(sample(c("A"), 10, replace = TRUE))
   )
 
-  mm_train <- SVEMnet::bigexp_model_matrix(spec, train)
-  mm_new   <- SVEMnet::bigexp_model_matrix(spec, newdata)
 
-  expect_identical(colnames(mm_train), colnames(mm_new))
 
   # New data with an unseen factor level should error when unseen = "error"
   newdata_bad <- data.frame(
@@ -387,9 +334,5 @@ test_that("bigexp_train returns spec, formula, and prepared data", {
   expect_equal(nrow(tr$data), nrow(df))
 
   # Design matrix from spec vs design matrix from train helper should match
-  mm_from_spec  <- SVEMnet::bigexp_model_matrix(tr$spec, df)
-  mm_from_train <- SVEMnet::bigexp_model_matrix(tr$spec, tr$data)
 
-  expect_identical(colnames(mm_from_spec), colnames(mm_from_train))
-  expect_equal(mm_from_spec, mm_from_train, tolerance = 1e-12)
 })

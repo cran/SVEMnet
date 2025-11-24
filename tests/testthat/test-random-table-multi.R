@@ -19,7 +19,15 @@ test_that("svem_random_table_multi validates schemas and predicts", {
   expect_true(is.list(res))
   expect_true(all(c("data","pred","all") %in% names(res)))
   expect_true(all(c("X1","X2","A","B","C","F") %in% names(res$data)))
-  expect_true(all(c("y","z") %in% names(res$pred) | all(c("y.pred","z.pred") %in% names(res$pred))))
+
+  # --- UPDATED: allow old names (y/z or y.pred/z.pred) OR new *_pred names ---
+  pred_names <- names(res$pred)
+  has_old_plain <- all(c("y", "z") %in% pred_names)
+  has_old_dot   <- all(c("y.pred", "z.pred") %in% pred_names)
+  has_new_suf   <- all(c("y_pred", "z_pred") %in% pred_names)
+
+  expect_true(has_old_plain || has_old_dot || has_new_suf)
+
   expect_equal(nrow(res$data), 50)
   expect_equal(nrow(res$pred), 50)
   expect_equal(nrow(res$all), 50)

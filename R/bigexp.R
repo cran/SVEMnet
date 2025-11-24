@@ -128,7 +128,8 @@
 #'   \item decides which predictors are treated as continuous or categorical,
 #'   \item locks factor levels from the supplied data,
 #'   \item records the contrast settings used when the model matrix is first built, and
-#'   \item constructs a reusable right-hand side (RHS) string for a large expansion.
+#'   \item constructs a reusable right-hand side (RHS) string for a large expansion
+#'         that can be shared across multiple responses and datasets.
 #' }
 #'
 #' The expansion can include:
@@ -151,17 +152,32 @@
 #' }
 #'
 #' Once built, a \code{"bigexp_spec"} can be reused to create consistent
-#' expansions for new datasets via \code{\link{bigexp_prepare}},
-#' \code{\link{bigexp_formula}}, and \code{\link{bigexp_model_matrix}}. The RHS
+#' expansions for new datasets via \code{\link{bigexp_prepare}}, and
+#' \code{\link{bigexp_formula}}. The RHS
 #' and contrast settings are locked, so the same spec applied to different data
 #' produces design matrices with the same columns in the same order (up to
 #' missing levels for specific batches).
 #'
+#' @section Typical workflow:
+#' In a typical multi-response workflow you:
+#' \enumerate{
+#'   \item Call \code{bigexp_terms()} once on your training data to build and
+#'         lock the expansion (types, levels, contrasts, RHS).
+#'   \item Fit models using \code{spec$formula} and the original data
+#'         (for example, \code{SVEMnet(spec$formula, data, ...)} or
+#'         \code{lm(spec$formula, data)}).
+#'   \item For new batches, call \code{\link{bigexp_prepare}} with the same \code{spec} so that
+#'         design matrices have exactly the same columns and coding.
+#'   \item For additional responses on the same factor space, use
+#'         \code{\link{bigexp_formula}} to swap the left-hand side while
+#'         reusing the locked expansion.
+#' }
+#'
 #' @param formula Main-effects formula of the form \code{y ~ X1 + X2 + G} or
 #'   \code{y ~ .}. The right-hand side should contain main effects only; do not
-#'   include \code{:} (interactions), \code{^} (factorial shortcuts), or
-#'   \code{I()} powers here. The helper will generate interactions and polynomial
-#'   terms automatically.
+#'   include \code{:} (interactions), \code{^} (factorial shortcuts),
+#'   \code{I()} powers, or inline polynomial expansions. The helper will
+#'   generate interactions and polynomial terms automatically.
 #' @param data Data frame used to decide types and lock factor levels.
 #' @param factorial_order Integer >= 1. Maximum order of factorial interactions
 #'   among the main effects. For example, 1 gives main effects only, 2 gives
@@ -200,7 +216,7 @@
 #' }
 #'
 #' @seealso \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},
-#'   \code{\link{bigexp_model_matrix}}, \code{\link{bigexp_train}}
+#'   \code{\link{bigexp_train}}
 #'
 #' @examples
 #' ## Example 1: small design with one factor
@@ -222,10 +238,6 @@
 #'
 #' print(spec)
 #'
-#' ## Inspect the resulting design matrix
-#' MM <- bigexp_model_matrix(spec, df)
-#' dim(MM)
-#' head(colnames(MM))
 #'
 #' ## Example 2: pure main effects (no interactions, no polynomial terms)
 #' spec_main <- bigexp_terms(
@@ -235,19 +247,17 @@
 #'   polynomial_order = 1   # no I(X^2) or higher
 #' )
 #'
-#' MM_main <- bigexp_model_matrix(spec_main, df)
-#' head(colnames(MM_main))
 #'
 #' @export
 #' @importFrom stats model.frame na.pass as.formula model.matrix
 #' @importFrom utils combn
 bigexp_terms <- function(formula, data,
-                         factorial_order   = 3L,
+                         factorial_order    = 3L,
                          discrete_threshold = 2L,
-                         polynomial_order  = 3L,
-                         include_pc_2way   = TRUE,
-                         include_pc_3way   = FALSE,
-                         intercept         = TRUE) {
+                         polynomial_order   = 3L,
+                         include_pc_2way    = TRUE,
+                         include_pc_3way    = FALSE,
+                         intercept          = TRUE) {
   stopifnot(is.data.frame(data))
 
   if (!is.numeric(factorial_order) || length(factorial_order) != 1L ||
@@ -282,10 +292,20 @@ bigexp_terms <- function(formula, data,
     stop("Formula must be of the form y ~ X1 + X2 + ... (two-sided).")
   }
 
-  resp <- as.character(attr(tt, "variables"))[2L]
+  # Require a simple symbol on the LHS (no transformations)
+  lhs_call <- attr(tt, "variables")[[2L]]
+  if (!is.symbol(lhs_call)) {
+    stop(
+      "Left-hand side must be a single variable name (e.g., y ~ ...). ",
+      "Transformations like log(y) are not supported here."
+    )
+  }
+  resp <- as.character(lhs_call)
+
   vars <- attr(tt, "term.labels")
   if (length(vars) == 0L && grepl("~\\s*\\.", ftxt)) {
-    vars <- setdiff(names(data), resp)
+    # Use the terms object: all RHS vars that actually entered the terms
+    vars <- all.vars(stats::delete.response(tt))
   }
   if (!length(vars)) {
     stop("No predictors found on the right hand side of formula.")
@@ -318,9 +338,15 @@ bigexp_terms <- function(formula, data,
         is_cat[v] <- FALSE
         r <- range(x, finite = TRUE, na.rm = TRUE)
         if (!all(is.finite(r))) {
-          r <- c(NA_real_, NA_real_)
+          stop(
+            "Continuous predictor '", v,
+            "' has no finite values in the data used to build the expansion. ",
+            "Either drop this predictor or clean/impute the data before calling bigexp_terms()."
+          )
         }
-        num_range <- cbind(num_range, setNames(matrix(r, nrow = 2), v))
+        col_mat <- matrix(r, nrow = 2)
+        colnames(col_mat) <- v
+        num_range <- cbind(num_range, col_mat)
       }
     } else {
       is_cat[v] <- TRUE
@@ -329,6 +355,7 @@ bigexp_terms <- function(formula, data,
       dat0[[v]] <- fx
     }
   }
+
 
   cont_vars <- vars[!is_cat]
   rhs <- .bigexp_build_rhs(
@@ -378,12 +405,15 @@ bigexp_terms <- function(formula, data,
 #' previously built \code{\link{bigexp_terms}} spec. It:
 #' \itemize{
 #'   \item applies the locked factor levels for categorical predictors,
-#'   \item enforces that continuous variables remain numeric, and
+#'   \item enforces that continuous variables remain numeric (and errors
+#'         if they are not), and
 #'   \item optionally warns about or errors on unseen factor levels.
 #' }
 #'
-#' The goal is that \code{model.matrix(spec$formula, data)} (or
-#' \code{\link{bigexp_model_matrix}}) will produce the same set of columns in
+#' Columns that are not listed in \code{spec$vars} (for example, the response
+#' or extra metadata columns) are left unchanged.
+#'
+#' The goal is that \code{model.matrix(spec$formula, data)} will produce the same set of columns in
 #' the same order across all datasets prepared with the same spec, even if some
 #' levels are missing in a particular batch.
 #'
@@ -396,11 +426,14 @@ bigexp_terms <- function(formula, data,
 #'
 #' @return A list with two elements:
 #' \itemize{
-#'   \item \code{formula}: the expanded formula stored in the spec.
-#'   \item \code{data}: a copy of the input data coerced to match the spec.
+#'   \item \code{formula}: the expanded formula stored in the spec
+#'         (same as \code{spec$formula}).
+#'   \item \code{data}: a copy of the input data with predictor columns coerced
+#'         to match the spec (types and levels), suitable for
+#'         \code{model.frame()} / \code{model.matrix()}.
 #' }
 #'
-#' @seealso \code{\link{bigexp_terms}}, \code{\link{bigexp_model_matrix}}
+#' @seealso \code{\link{bigexp_terms}}
 #' @examples
 #' set.seed(1)
 #' train <- data.frame(
@@ -501,12 +534,16 @@ bigexp_prepare <- function(spec, data, unseen = c("warn_na", "error")) {
 #' responses. It keeps the right hand side locked but changes the response
 #' variable on the left hand side.
 #'
+#' This is useful when you want to fit separate models for several responses
+#' on the same factor space while guaranteeing that they all use exactly the
+#' same design columns and coding.
+#'
 #' @param spec A "bigexp_spec" object created by bigexp_terms().
 #' @param response Character scalar giving the name of the new response column
 #'   in your data. If omitted, the original formula is returned unchanged.
 #'
-#' @return A formula of the form `response ~ rhs`, where the right-hand side
-#'   is taken from the locked expansion stored in `spec`.
+#' @return A formula of the form \code{response ~ rhs}, where the right-hand side
+#'   is taken from the locked expansion stored in \code{spec}.
 #'
 #' @examples
 #' set.seed(1)
@@ -537,68 +574,15 @@ bigexp_formula <- function(spec, response) {
   stats::as.formula(paste(response, "~", spec$rhs))
 }
 
-#' Build a model matrix using the spec's stored contrasts
-#'
-#' bigexp_model_matrix() combines bigexp_prepare() and model.matrix() so that
-#' you can obtain a design matrix that matches the locked spec, including
-#' any stored contrast settings.
-#'
-#' @param spec A "bigexp_spec" object.
-#' @param data A data frame to prepare and encode.
-#'
-#' @return The design matrix returned by model.matrix(), with columns ordered
-#'   consistently with the spec and its locked factor levels.
-#'
-#' @examples
-#' set.seed(1)
-#' df3 <- data.frame(
-#'   y  = rnorm(10),
-#'   X1 = rnorm(10),
-#'   X2 = rnorm(10)
-#' )
-#'
-#' spec3 <- bigexp_terms(
-#'   y ~ X1 + X2,
-#'   data             = df3,
-#'   factorial_order  = 2,
-#'   polynomial_order = 2
-#' )
-#'
-#' MM3 <- bigexp_model_matrix(spec3, df3)
-#' dim(MM3)
-#' head(colnames(MM3))
-#'
-#' @export
-bigexp_model_matrix <- function(spec, data) {
-  inp <- bigexp_prepare(spec, data)
-
-  # Ensure contrasts are functions if stored as character names
-  cts <- spec$settings$contrasts
-  if (!is.null(cts) && length(cts)) {
-    cts <- lapply(cts, function(ci) {
-      if (is.character(ci) && length(ci) == 1L && nzchar(ci)) {
-        get(ci, mode = "function")
-      } else {
-        ci
-      }
-    })
-  } else {
-    cts <- NULL
-  }
-
-  stats::model.matrix(
-    spec$formula,
-    inp$data,
-    contrasts.arg = cts
-  )
-}
 
 #' Evaluate code with the spec's recorded contrast options
 #'
 #' with_bigexp_contrasts() temporarily restores the contrasts options that
 #' were active when the spec was built, runs a block of code, and then
 #' restores the original options. This is useful when a modeling function
-#' uses the global options("contrasts") to decide how to encode factors.
+#' uses the global \code{options("contrasts")} to decide how to encode factors
+#' (for example, \code{lm()}, \code{glm()}, or other modeling functions that
+#' call \code{model.matrix()} internally).
 #'
 #' @param spec A "bigexp_spec" object with stored contrasts_options in settings.
 #' @param code Code to evaluate with temporarily restored options.
@@ -638,27 +622,34 @@ with_bigexp_contrasts <- function(spec, code) {
 
 #' Build a spec and prepare training data in one call
 #'
-#' bigexp_train() is a convenience wrapper around bigexp_terms() and
-#' bigexp_prepare(). It:
-#' - Builds a deterministic expansion spec from the training data
-#' - Immediately prepares that same data to match the locked types and levels
+#' bigexp_train() is a convenience wrapper around \code{\link{bigexp_terms}} and
+#' \code{\link{bigexp_prepare}}. It:
+#' \itemize{
+#'   \item builds a deterministic expansion spec from the training data; and
+#'   \item immediately prepares that same data to match the locked types and levels.
+#' }
 #'
 #' This is handy when you want a single object that contains both the spec
-#' and the expanded training data ready to pass into a modeling function.
-#' For more control, you can call bigexp_terms() and bigexp_prepare()
-#' explicitly instead.
+#' and the training data in a form that is ready to pass into a modeling
+#' function. For more control, you can call \code{bigexp_terms()} and
+#' \code{bigexp_prepare()} explicitly instead.
 #'
-#' @param formula Main-effects formula such as y ~ X1 + X2 + G or y ~ .
+#' @param formula Main-effects formula such as \code{y ~ X1 + X2 + G} or \code{y ~ .}.
 #'   Only main effects should appear on the right hand side.
 #' @param data Training data frame used to lock types and levels.
-#' @param ... Additional arguments forwarded to bigexp_terms(), such as
-#'   factorial_order, discrete_threshold, polynomial_order, include_pc_2way,
-#'   include_pc_3way, and intercept.
+#' @param ... Additional arguments forwarded to \code{bigexp_terms()}, such as
+#'   \code{factorial_order}, \code{discrete_threshold}, \code{polynomial_order},
+#'   \code{include_pc_2way}, \code{include_pc_3way}, and \code{intercept}.
 #'
-#' @return An object of class "bigexp_train" which is a list with components:
-#'   - spec: the "bigexp_spec" object returned by bigexp_terms()
-#'   - formula: the expanded formula spec$formula
-#'   - data: the prepared training data ready for modeling
+#' @return An object of class \code{"bigexp_train"} which is a list with components:
+#' \itemize{
+#'   \item \code{spec}: the \code{"bigexp_spec"} object returned by
+#'         \code{bigexp_terms()}.
+#'   \item \code{formula}: the expanded formula \code{spec$formula}.
+#'   \item \code{data}: the prepared training data (predictors coerced to match
+#'         \code{spec}), suitable for passing directly to modeling functions
+#'         such as \code{lm()}, \code{glm()}, or \code{SVEMnet()}.
+#' }
 #'
 #' @examples
 #' set.seed(1)
@@ -675,8 +666,13 @@ with_bigexp_contrasts <- function(spec, code) {
 #'   polynomial_order = 3
 #' )
 #'
+#' ## Prepared training data and expanded formula:
 #' str(tr$data)
 #' tr$formula
+#'
+#' ## Example: fit a model using the expanded formula
+#' fit_lm <- lm(tr$formula, data = tr$data)
+#' summary(fit_lm)
 #'
 #' @export
 bigexp_train <- function(formula, data, ...) {

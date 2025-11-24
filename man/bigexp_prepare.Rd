@@ -19,8 +19,11 @@ encountered.}
 \value{
 A list with two elements:
 \itemize{
-\item \code{formula}: the expanded formula stored in the spec.
-\item \code{data}: a copy of the input data coerced to match the spec.
+\item \code{formula}: the expanded formula stored in the spec
+(same as \code{spec$formula}).
+\item \code{data}: a copy of the input data with predictor columns coerced
+to match the spec (types and levels), suitable for
+\code{model.frame()} / \code{model.matrix()}.
 }
 }
 \description{
@@ -28,13 +31,16 @@ A list with two elements:
 previously built \code{\link{bigexp_terms}} spec. It:
 \itemize{
 \item applies the locked factor levels for categorical predictors,
-\item enforces that continuous variables remain numeric, and
+\item enforces that continuous variables remain numeric (and errors
+if they are not), and
 \item optionally warns about or errors on unseen factor levels.
 }
 }
 \details{
-The goal is that \code{model.matrix(spec$formula, data)} (or
-\code{\link{bigexp_model_matrix}}) will produce the same set of columns in
+Columns that are not listed in \code{spec$vars} (for example, the response
+or extra metadata columns) are left unchanged.
+
+The goal is that \code{model.matrix(spec$formula, data)} will produce the same set of columns in
 the same order across all datasets prepared with the same spec, even if some
 levels are missing in a particular batch.
 }
@@ -66,5 +72,5 @@ str(prep$data)
 
 }
 \seealso{
-\code{\link{bigexp_terms}}, \code{\link{bigexp_model_matrix}}
+\code{\link{bigexp_terms}}
 }

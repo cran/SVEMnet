@@ -21,7 +21,6 @@
 #' aesthetic indicating \code{"Original"} vs \code{"Permutation"}.
 #'
 #' @import ggplot2
-#' @importFrom rlang .data
 #' @name plot.svem_significance_test
 #' @export
 #' @method plot svem_significance_test
@@ -78,7 +77,7 @@ plot.svem_significance_test <- function(x, ..., labels = NULL) {
   plot_data$Group <- interaction(plot_data$Response, plot_data$Source_Type, sep = " / ", drop = TRUE)
   plot_data$Group <- factor(plot_data$Group, levels = unique(plot_data$Group))
 
-  ggplot2::ggplot(plot_data, ggplot2::aes(x = .data$Group, y = .data$D, fill = .data$Source_Type)) +
+  ggplot2::ggplot(plot_data, ggplot2::aes(x = Group, y = D, fill = Source_Type)) +
     ggplot2::geom_boxplot(alpha = 0.7, outlier.shape = NA) +
     ggplot2::geom_jitter(position = ggplot2::position_jitter(width = 0.2), alpha = 0.5) +
     ggplot2::theme_minimal() +

@@ -2,7 +2,7 @@
 % Please edit documentation in R/SVEMnet.R
 \name{SVEMnet}
 \alias{SVEMnet}
-\title{Fit an SVEMnet Model (with optional relaxed elastic net)}
+\title{Fit an SVEMnet model (Self-Validated Ensemble Elastic Net)}
 \usage{
 SVEMnet(
   formula,
@@ -11,8 +11,7 @@ SVEMnet(
   glmnet_alpha = c(0.5, 1),
   weight_scheme = c("SVEM", "FRW_plain", "Identity"),
   objective = c("auto", "wAIC", "wBIC", "wSSE"),
-  auto_ratio_cutoff = 1.3,
-  relaxed = TRUE,
+  relaxed = "auto",
   response = NULL,
   unseen = c("warn_na", "error"),
   family = c("gaussian", "binomial"),
@@ -20,196 +19,303 @@ SVEMnet(
 )
 }
 \arguments{
-\item{formula}{A formula specifying the model to be fitted, OR a bigexp_spec
-created by \code{bigexp_terms()}.}
+\item{formula}{A formula specifying the model to be fitted, or a
+\code{bigexp_spec} created by \code{bigexp_terms()}.}
 
 \item{data}{A data frame containing the variables in the model.}
 
-\item{nBoot}{Number of bootstrap iterations (default 200).}
+\item{nBoot}{Integer. Number of bootstrap replicates (default \code{200}).
+Each replicate draws FRW weights and fits a glmnet path.}
 
-\item{glmnet_alpha}{Elastic Net mixing parameter(s). May be a vector with
-entries in the range between 0 and 1, inclusive, where alpha = 1 is Lasso
-and alpha = 0 is Ridge. Defaults to \code{c(0.5, 1)}.}
+\item{glmnet_alpha}{Numeric vector of elastic net mixing parameters
+\code{alpha} in \code{[0, 1]}. \code{alpha = 1} is lasso, \code{alpha = 0}
+is ridge. Defaults to \code{c(0.5, 1)}. When \code{relaxed = TRUE},
+\code{alpha = 0} is automatically dropped (ridge + relaxed is not used).}
 
-\item{weight_scheme}{Character; weighting scheme used to generate bootstrap
-training and validation weights (default \code{"SVEM"}).
-One of:
+\item{weight_scheme}{Character. Weighting scheme for train/validation
+copies. One of:
 \itemize{
-\item \code{"SVEM"}: Self-Validated Ensemble Model weights. For each
-bootstrap, independent \eqn{U_i \sim \mathrm{Uniform}(0,1)} are drawn
-and converted to anti-correlated FRW copies
-\eqn{w_i^{\mathrm{train}} = -\log U_i} and
-\eqn{w_i^{\mathrm{valid}} = -\log(1-U_i)}, each rescaled to have mean 1.
-This is the default and implements the SVEM scheme of Lemkus et al.
-\item \code{"FRW_plain"}: Fractional–random–weight (FRW) regression
-without self-validation. A single FRW weight vector
-\eqn{w_i = -\log U_i} (rescaled to mean 1) is used for both training
-and validation. This reproduces the fractional-random-weight bootstrap
-regression of Xu et al. (2020) and related work, with one weighted fit
-and no self-validation split.
+\item \code{"SVEM"} (default): Self-Validated Ensemble Model weights.
+For each replicate and row, a shared uniform draw \code{U_i ~ Unif(0, 1)}
+is converted to anti-correlated FRW weights
+\code{w_train_i = -log(U_i)} and \code{w_valid_i = -log(1 - U_i)},
+each rescaled to have mean 1.
+\item \code{"FRW_plain"}: Fractional random-weight regression without a
+separate validation copy. A single FRW vector
+\code{w_i = -log(U_i)} (rescaled to mean 1) is used for both training
+and validation. This reproduces the FRW bootstrap regression of
+Xu et al. (2020) and related work.
 \item \code{"Identity"}: Uses unit weights for both training and
-validation (no resampling). This is primarily useful with
-\code{nBoot = 1} when you want a single glmnet fit whose penalty
-is chosen via the selected information criterion (wAIC/wBIC/wSSE),
-while still using SVEMnet’s formula expansion and diagnostics.
+validation (no resampling). In combination with \code{nBoot = 1} this
+wraps a single \code{glmnet} fit and selects the penalty by the chosen
+information criterion, while still using SVEMnet's expansion and
+diagnostics.
 }}
 
-\item{objective}{Objective used to pick lambda on each bootstrap path
-(default \code{"auto"}). One of \code{"auto"}, \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}.}
+\item{objective}{Character. One of \code{"auto"}, \code{"wAIC"},
+\code{"wBIC"}, or \code{"wSSE"}.
+\itemize{
+\item For \code{family = "gaussian"}, \code{objective = "auto"} resolves to \code{"wAIC"}.
+\item For \code{family = "binomial"}, \code{objective = "auto"} resolves to \code{"wBIC"}.
+}
+See Details for the exact criteria in the Gaussian and binomial cases.}
 
-\item{auto_ratio_cutoff}{Single cutoff for the automatic rule when
-\code{objective = "auto"} (default 1.3). Let \code{r = n_X / p_X}, where \code{n_X} is the
-number of training rows and \code{p_X} is the number of predictors in the model
-matrix after dropping the intercept column. If \code{r >= auto_ratio_cutoff},
-SVEMnet uses wAIC; otherwise it uses wBIC.}
+\item{relaxed}{Logical or character. Default \code{"auto"}.
+If \code{TRUE}, use glmnet's relaxed elastic-net path and select both
+the penalty \code{lambda} and the relaxed refit parameter \code{gamma}
+on each bootstrap. If \code{FALSE}, fit the standard glmnet path without
+the relaxed step. If \code{"auto"} (default), SVEMnet uses
+\code{relaxed = TRUE} for \code{family = "gaussian"} and
+\code{relaxed = FALSE} for \code{family = "binomial"}.}
 
-\item{relaxed}{Logical, TRUE or FALSE (default TRUE). When TRUE (for
-\code{family = "gaussian"}), use glmnet's relaxed elastic net path and
-select both lambda and relaxed gamma on each bootstrap. When FALSE,
-fit the standard glmnet path. Note: if \code{relaxed = TRUE} and
-\code{glmnet_alpha} includes 0 (ridge), alpha = 0 is dropped. For
-\code{family = "binomial"}, relaxed fits are currently disabled for
-stability: SVEMnet behaves as if \code{relaxed = FALSE}, and a warning
-is issued if \code{relaxed = TRUE} is requested.}
+\item{response}{Optional character. When \code{formula} is a \code{bigexp_spec},
+this names the response column to use on the left-hand side. Defaults to
+the response stored in the spec.}
 
-\item{response}{Optional character. When \code{formula} is a \code{bigexp_spec}, this names
-the response column to use on the LHS; defaults to the response stored in the spec.}
+\item{unseen}{How to treat factor levels not seen in the original
+\code{bigexp_spec} when \code{formula} is a \code{bigexp_spec}. One of
+\code{"warn_na"} (default; convert unseen levels to \code{NA} with a
+warning) or \code{"error"} (stop with an error).}
 
-\item{unseen}{How to treat unseen factor levels when \code{formula} is a \code{bigexp_spec}:
-\code{"warn_na"} (default; convert to NA with a warning) or \code{"error"} (stop).}
+\item{family}{Character. One of \code{"gaussian"} (default) or
+\code{"binomial"}. For Gaussian models SVEMnet uses the identity link; for
+binomial it uses the canonical logit link. The binomial response must be
+numeric 0/1, logical, or a factor with exactly two levels (the second
+level is treated as 1).}
 
-\item{family}{Character scalar specifying the model family.
-One of \code{"gaussian"} (default) or \code{"binomial"}.
-SVEMnet currently assumes the canonical identity link for Gaussian
-and the canonical logit link for binomial. For \code{"binomial"},
-the response must be numeric 0/1, logical, or a factor with exactly
-two levels (the second level is treated as 1).}
-
-\item{...}{Additional args passed to \code{glmnet()} (e.g., \code{penalty.factor},
-\code{lower.limits}, \code{upper.limits}, \code{offset}, \code{standardize.response}, etc.).
-Any user-supplied \code{weights} are ignored so SVEM can supply its own bootstrap weights.
-Any user-supplied \code{standardize} is ignored; SVEMnet always uses \code{standardize = TRUE}.}
+\item{...}{Additional arguments passed to \code{glmnet()}, such as
+\code{penalty.factor}, \code{lower.limits}, \code{upper.limits},
+\code{offset}, or \code{standardize.response}. Any user-supplied
+\code{weights} are ignored (SVEMnet supplies its own bootstrap weights).
+Any user-supplied \code{standardize} is ignored; SVEMnet always calls
+\code{glmnet} with \code{standardize = TRUE}.}
 }
 \value{
-An object of class \code{svem_model} with elements:
+An object of class \code{"svem_model"} (and \code{"svem_binomial"}
+when \code{family = "binomial"}) with components:
 \itemize{
-\item \code{parms}: averaged coefficients (including intercept).
-\item \code{parms_debiased}: averaged coefficients adjusted by the calibration fit.
-\item \code{debias_fit}: \code{lm(y ~ y_pred)} calibration model used for debiasing (or \code{NULL}).
-\item \code{coef_matrix}: per-bootstrap coefficient matrix.
-\item \code{nBoot}, \code{glmnet_alpha}, \code{best_alphas}, \code{best_lambdas}, \code{weight_scheme}, \code{relaxed}.
-\item \code{best_relax_gammas}: per-bootstrap relaxed gamma chosen (NA if \code{relaxed = FALSE}).
-\item \code{objective_input}, \code{objective_used}, \code{objective} (same as \code{objective_used}),
-\code{auto_used}, \code{auto_decision}, \code{auto_rule}.
-\item \code{dropped_alpha0_for_relaxed}: whether alpha = 0 was removed because \code{relaxed = TRUE}.
-\item \code{schema}: list(\code{feature_names}, \code{terms_str}, \code{xlevels}, \code{contrasts}, \code{terms_hash}) for safe predict.
-\item \code{sampling_schema}: list(
-\code{predictor_vars}, \code{var_classes},
-\code{num_ranges} = rbind(min=..., max=...) for numeric raw predictors,
-\code{factor_levels} = list(...) for factor/character raw predictors).
-\item \code{diagnostics}: list with \code{k_summary} (median and IQR of selected size),
-\code{fallback_rate}, \code{n_eff_summary}, \code{alpha_freq}, \code{relax_gamma_freq}.
-\item \code{actual_y}, \code{training_X}, \code{y_pred}, \code{y_pred_debiased}, \code{nobs}, \code{nparm},
-\code{formula}, \code{terms}, \code{xlevels}, \code{contrasts}.
-\item \code{used_bigexp_spec}: logical flag indicating whether a \code{bigexp_spec} was used.
+\item \code{parms}: Vector of ensemble-averaged coefficients, including
+the intercept.
+\item \code{parms_debiased}: Vector of coefficients after optional
+debiasing (see Details; Gaussian only).
+\item \code{debias_fit}: If debiasing was performed, the calibration
+model \code{lm(y ~ y_pred)}; otherwise \code{NULL}.
+\item \code{coef_matrix}: Matrix of per-bootstrap coefficients
+(rows = bootstraps, columns = intercept and predictors).
+\item \code{nBoot}: Number of bootstrap replicates actually used.
+\item \code{glmnet_alpha}: Vector of alpha values considered.
+\item \code{best_alphas}: Per-bootstrap alpha selected by the criterion.
+\item \code{best_lambdas}: Per-bootstrap lambda selected by the criterion.
+\item \code{best_relax_gammas}: Per-bootstrap relaxed gamma selected when
+\code{relaxed = TRUE}; \code{NA} otherwise.
+\item \code{weight_scheme}: The weighting scheme that was used.
+\item \code{relaxed}: Logical flag indicating whether relaxed paths were
+used.
+\item \code{relaxed_input}: The user-supplied value for \code{relaxed}
+(one of \code{TRUE}, \code{FALSE}, or \code{"auto"}). The resolved flag
+actually used is reported in \code{relaxed}.
+\item \code{dropped_alpha0_for_relaxed}: Logical; \code{TRUE} if
+\code{alpha = 0} was dropped because \code{relaxed = TRUE}.
+\item \code{objective_input}: The objective requested by the user.
+\item \code{objective_used}: The objective actually used after applying
+the "auto" rule (for example \code{"wAIC"} or \code{"wBIC"}).
+\item \code{objective}: Same as \code{objective_used} (for convenience).
+\item \code{auto_used}: Logical; \code{TRUE} if \code{objective = "auto"}.
+\item \code{auto_decision}: The objective selected by the auto rule
+(wAIC or wBIC) when \code{auto_used = TRUE}.
+\item \code{diagnostics}: List with summary information, including:
+\itemize{
+\item \code{k_summary}: Median and IQR of selected model size
+(number of nonzero coefficients including intercept).
+\item \code{fallback_rate}: Proportion of bootstraps that fell back
+to an intercept-only fit.
+\item \code{n_eff_summary}: Summary of raw Kish effective validation
+sizes \eqn{n_eff = (\sum_i w_i^{valid})^2 / \sum_i (w_i^{valid})^2}
+across bootstraps (before truncation to form \eqn{n_eff_adm}).
+\item \code{alpha_freq}: Relative frequency of selected alpha values
+(if any).
+\item \code{relax_gamma_freq}: Relative frequency of selected relaxed
+gamma values (if \code{relaxed = TRUE} and any were selected).
+}
+\item \code{actual_y}: Numeric response vector used in fitting (0/1 for
+binomial).
+\item \code{training_X}: Numeric model matrix without the intercept
+column used for training.
+\item \code{y_pred}: Fitted values from the ensemble on the training
+data. For Gaussian this is on the response scale; for binomial it is
+on the probability scale.
+\item \code{y_pred_debiased}: Debiased fitted values on the training
+data (Gaussian only); \code{NULL} otherwise.
+\item \code{nobs}: Number of observations used in fitting.
+\item \code{nparm}: Number of parameters in the full expansion
+(intercept plus predictors).
+\item \code{formula}: The formula used for fitting (possibly derived
+from a \code{bigexp_spec}).
+\item \code{terms}: \code{terms} object used for building the design
+matrix, with environment set to \code{baseenv()} for safety.
+\item \code{xlevels}: Factor levels recorded at training time.
+\item \code{contrasts}: Contrasts used for building the design matrix.
+\item \code{schema}: Compact description for safe prediction, including
+\code{feature_names}, \code{terms_str}, \code{xlevels},
+\code{contrasts}, \code{contrasts_options}, and a simple hash.
+\item \code{sampling_schema}: Schema used to generate random candidate
+tables, including predictor names, variable classes, numeric ranges,
+and factor levels.
+\item \code{used_bigexp_spec}: Logical flag indicating whether a
+\code{bigexp_spec} was used.
+\item \code{family}: The fitted family ("gaussian" or "binomial").
 }
 }
 \description{
-Wrapper for glmnet (Friedman et al. 2010) to fit an ensemble of Elastic Net
-models using the Self-Validated Ensemble Model method (SVEM; Lemkus et al. 2021),
-with an option to use glmnet's built-in relaxed elastic net (Meinshausen 2007).
-Supports searching over multiple alpha values in the Elastic Net penalty.
+Fit a Self-Validated Ensemble Model (SVEM) with elastic net or relaxed
+elastic net base learners using \code{glmnet}. Fractional random-weight
+(FRW) train/validation weights are drawn on each bootstrap replicate,
+a validation-weighted information criterion (wAIC, wBIC, or wSSE) is
+minimized to select the penalty, and predictions are ensembled across
+replicates. Gaussian and binomial responses are supported.
 }
 \details{
 You can pass either:
 \itemize{
-\item a standard model formula, e.g. y ~ X1 + X2 + X3 + I(X1^2) + (X1 + X2 + X3)^2
-\item a bigexp_spec created by bigexp_terms(), in which case SVEMnet will prepare
-the data deterministically (locked types/levels) and, if requested, swap
-the response to fit multiple independent responses over the same expansion.
+\item a standard model formula, e.g.,
+\code{y ~ X1 + X2 + X3 + I(X1^2) + (X1 + X2 + X3)^2}, or
+\item a \code{bigexp_spec} created by \code{bigexp_terms()}, in which
+case SVEMnet will build the design matrix deterministically (locked
+types, levels, and contrasts) and, if requested, swap the response
+to fit multiple independent responses over the same expansion.
 }
 
-In many applications, \code{SVEMnet()} is used as part of a closed-loop
-optimization workflow:
-models are fit on current experimental data, whole-model tests (WMT) are
-optionally used to reweight response goals, and then
-\code{svem_optimize_random()} proposes both optimal and exploration
-candidates for the next experimental round.
-See the \code{lipid_screen} help page for a worked example.
+SVEMnet implements Self-Validated Ensemble Models using elastic net and
+relaxed elastic net base learners from glmnet. Each bootstrap replicate
+draws fractional random weights, builds a train and validation copy, fits
+a path over lambda (and optionally over alpha and relaxed gamma), and
+selects a path point by minimizing a validation-weighted criterion. Final
+predictions are obtained by averaging replicate predictions on the chosen
+scale.
 
-SVEM applies fractional bootstrap weights to training data and anti-correlated
-weights for validation when \code{weight_scheme = "SVEM"}. For each bootstrap, glmnet
-paths are fit for each alpha in \code{glmnet_alpha}, and the lambda (and, if \code{relaxed = TRUE},
-relaxed gamma) minimizing a weighted validation criterion is selected.
+By default, \code{relaxed = "auto"} resolves to \code{TRUE} for Gaussian
+fits and \code{FALSE} for binomial fits.
 
-\strong{Weighting schemes.}
-With \code{weight_scheme = "SVEM"} (the default), SVEMnet uses the
-fractional-random-weight (FRW) construction with an explicit
-self-validation split: for each bootstrap replicate and observation
-\eqn{i}, a shared \eqn{U_i \sim \mathrm{Uniform}(0,1)} is drawn and
-converted into anti-correlated train/validation copies
-\eqn{w_i^{\mathrm{train}} = -\log U_i} and
-\eqn{w_i^{\mathrm{valid}} = -\log(1-U_i)}, each rescaled so that their
-mean is 1. This keeps all rows in every fit while inducing a stable
-out-of-bag–style validation set for selecting \eqn{\lambda} (and, if used,
-the relaxed \eqn{\gamma}).
+The function is typically used in small-n design-of-experiments (DOE)
+workflows where classical train/validation splits and cross-validation
+can be unstable. A common pattern is: (1) build a deterministic expansion
+with \code{bigexp_terms()}, (2) fit SVEM models via \code{SVEMnet()},
+(3) perform whole-model significance testing, and (4) call
+\code{svem_score_random()} for constrained multi-response optimization.
 
-With \code{weight_scheme = "FRW_plain"}, SVEMnet instead uses a single FRW
-weight vector \eqn{w_i = -\log U_i} for \emph{both} training and validation
-(one weighted fit, no self-validation split). It is included mainly for
-historical comparison and method-teaching; for small-sample prediction we
-recommend the default \code{"SVEM"} scheme.
-
-Finally, \code{weight_scheme = "Identity"} sets both training and
-validation weights to 1. In combination with \code{nBoot = 1}, this
-effectively wraps a single \code{glmnet} fit and chooses \eqn{\lambda}
-(and, for Gaussian models, the relaxed \eqn{\gamma}) by the chosen
-information criterion (wAIC or wBIC), without any bootstrap variation.
-This can be useful when you want classical AIC/BIC selection on top of
-a deterministic expansion, but do not want or need ensembling.
-
-Predictors are always standardized internally via
-\code{glmnet::glmnet(..., standardize = TRUE)}.
-
-When \code{relaxed = TRUE} and \code{family = "gaussian"},
-\code{coef(fit, s = lambda, gamma = g)} is used to obtain the coefficient
-path at each relaxed gamma in the internal grid (by default
-\code{c(0.2, 0.6, 1)}). Metrics are computed from validation-weighted
-errors and model size is taken as the number of nonzero coefficients
-including the intercept (support size), keeping selection consistent
-between standard and relaxed paths. For \code{family = "binomial"},
-relaxed fits are currently disabled for numerical stability, so only
-the standard glmnet path is used even if \code{relaxed = TRUE}.
-
-Automatic objective rule (\code{"auto"}): This function uses a single ratio
-cutoff, \code{auto_ratio_cutoff}, applied to \code{r = n_X / p_X}, where
-\code{p_X} is computed from the model matrix with the intercept column
-removed. If \code{r >= auto_ratio_cutoff} the selection criterion is wAIC;
-otherwise it is wBIC.
-
-Implementation notes for safety:
+Weighting schemes:
 \itemize{
-\item The training terms object is stored with environment set to \code{baseenv()} to avoid
-accidental lookups in the calling environment.
-\item A compact schema (feature names, xlevels, contrasts) is stored to let \code{predict()}
-reconstruct the design matrix deterministically.
-\item A lightweight sampling schema (numeric ranges and factor levels for raw predictors)
-is cached to enable random-table generation without needing the original data.
+\item With \code{weight_scheme = "SVEM"}, SVEMnet uses a pair of
+anti-correlated FRW vectors for train and validation. All rows appear
+in every replicate, but train and validation contributions are
+separated through the shared uniform draws.
+\item With \code{weight_scheme = "FRW_plain"}, a single FRW vector is
+used for both train and validation, which reproduces FRW regression
+without a self-validation split. This is mainly provided for method
+comparison and teaching.
+\item With \code{weight_scheme = "Identity"}, both train and validation
+weights are 1. Setting \code{nBoot = 1} in this mode yields a single
+glmnet fit whose penalty is chosen by the selected information
+criterion, without any bootstrap variation.
 }
 
-For \code{family = "gaussian"}, the loss used in validation is a weighted SSE,
-and wAIC/wBIC are computed from a Gaussian log-likelihood proxy.
+Selection criteria (Gaussian):
+For \code{family = "gaussian"}, the validation loss is a weighted sum of
+squared errors on the validation copy. The criteria are:
+\itemize{
+\item \code{"wSSE"}: weighted sum of squared errors (loss-only selector),
+\item \code{"wAIC"}: Gaussian AIC analog based on the weighted SSE,
+\item \code{"wBIC"}: Gaussian BIC analog based on the weighted SSE.
+}
+The FRW validation weights are rescaled to have mean one so that their
+sum defines a likelihood scale \eqn{n_like = \sum_i w_i^{valid}} (equal to
+\code{n} when all validation weights are 1), and the Gaussian loss term is
+expressed as \eqn{n_like} times the log of the weighted mean squared error.
 
-For \code{family = "binomial"}, the validation loss is the weighted binomial
-deviance, and wAIC/wBIC are computed as \code{deviance + 2 * k} or
-\code{deviance + log(n_eff) * k}, where \code{k} is the number of active
-parameters (1 for the intercept plus the number of nonzero parameters) and
-\code{n_eff} is the effective validation size. The response must be numeric
-0/1 or a two-level factor; internally it is converted to 0/1.
+The effective validation size is computed from the FRW weights using Kish's
+effective sample size \eqn{n_eff = (\sum_i w_i^{valid})^2 / \sum_i (w_i^{valid})^2}
+and then truncated to lie between 2 and \code{n} to form \eqn{n_eff_adm}.
+The AIC-style selector uses a \eqn{2 k} penalty; the BIC-style selector uses
+a \eqn{log(n_eff_adm) k} penalty, so that the loss term is scaled by total
+validation weight while the complexity penalty reflects the effective amount
+of information under unequal weights. This follows the survey-weighted
+information-criterion literature, where the pseudo-likelihood uses total
+weight and the BIC penalty uses an effective sample size.
+
+For diagnostics, SVEMnet reports the raw Kish effective sizes across
+bootstraps (see \code{diagnostics$n_eff_summary}), while \eqn{n_eff_adm}
+is used internally in the penalty and model-size guardrail. Near-interpolating
+path points are screened out via a simple model size guardrail before
+minimization. When \code{objective = "auto"}, SVEMnet uses \code{"wAIC"}.
+
+This structure (pseudo-likelihood using total weight and BIC penalty using a
+Kish-type effective sample size) parallels survey-weighted information
+criteria as in Lumley and Scott (2015) and Kish (1965).
+
+Selection criteria (binomial):
+For \code{family = "binomial"}, the validation loss is the weighted
+negative log-likelihood on the FRW validation copy (equivalently,
+proportional to the binomial deviance up to a constant). The same labels
+are used:
+\itemize{
+\item \code{"wSSE"}: loss-only selector based on the weighted negative
+log-likelihood (the name is retained for backward compatibility),
+\item \code{"wAIC"}: deviance plus a \eqn{2 k} penalty,
+\item \code{"wBIC"}: deviance plus a \eqn{log(n_eff_adm) k} penalty.
+}
+The effective validation size \eqn{n_eff_adm} and the model size guardrail
+are handled as in the Gaussian case: we compute a Kish effective size from
+the FRW validation weights, truncate it to lie between 2 and \code{n}, and
+require the number of nonzero coefficients (excluding the intercept) to be
+less than this effective size before evaluating the criterion. For
+diagnostics, \code{diagnostics$n_eff_summary} reports the raw Kish effective
+sizes prior to truncation. When \code{objective = "auto"} and
+\code{family = "binomial"}, SVEMnet always uses \code{"wBIC"} for stability
+in small-n logistic fits.
+
+Auto rule:
+When \code{objective = "auto"}, SVEMnet selects the criterion by family:
+\itemize{
+\item \code{family = "gaussian"} -> \code{"wAIC"}
+\item \code{family = "binomial"} -> \code{"wBIC"}
+}
+
+Relaxed elastic net:
+When \code{relaxed = TRUE}, SVEMnet calls glmnet with
+\code{relax = TRUE} and traverses a small grid of relaxed refit values
+(gamma). For each alpha and gamma, SVEMnet evaluates all lambda path
+points on the validation copy and records the combination that minimizes
+the selected criterion. Model size is always defined as the number of
+nonzero coefficients including the intercept, so standard and relaxed
+paths are scored on the same scale.
+
+Gaussian debiasing:
+For Gaussian models, SVEMnet optionally performs a simple linear
+calibration of ensemble predictions on the training data. When there is
+sufficient variation in the fitted values and \code{nBoot} is at least
+10, the function fits \code{lm(y ~ y_pred)} and uses the coefficients to
+construct debiased coefficients and debiased fitted values. Binomial
+fits do not use debiasing; predictions are ensembled on the probability
+or link scale directly.
+
+Implementation notes:
+\itemize{
+\item Predictors are always standardized internally via
+\code{glmnet(..., standardize = TRUE)}.
+\item The terms object is stored with its environment set to
+\code{baseenv()} so that prediction does not accidentally capture
+objects from the calling environment.
+\item A compact schema (feature names, factor levels, contrasts, and
+a simple hash) is stored to allow \code{predict()} and companion
+functions to rebuild model matrices deterministically, even when the
+original data frame is not available.
+\item A separate sampling schema stores raw predictor ranges and
+factor levels for use in random candidate generation for optimization.
+}
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview and GPT-5 Thinking via ChatGPT) were
+OpenAI's GPT models (o1-preview through GPT-5 Pro) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -222,7 +328,8 @@ X1 <- rnorm(n)
 X2 <- rnorm(n)
 X3 <- rnorm(n)
 eps <- rnorm(n, sd = 0.5)
-y <- 1 + 2*X1 - 1.5*X2 + 0.5*X3 + 1.2*(X1*X2) + 0.8*(X1^2) + eps
+y <- 1 + 2 * X1 - 1.5 * X2 + 0.5 * X3 + 1.2 * (X1 * X2) +
+  0.8 * (X1^2) + eps
 dat <- data.frame(y, X1, X2, X3)
 
 # Minimal hand-written expansion
@@ -246,10 +353,10 @@ pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 # ---------------------------------------------------------------------------
 spec <- bigexp_terms(
   y ~ X1 + X2 + X3,
-  data            = dat,
-  factorial_order = 3,  # up to 3-way interactions among X1, X2, X3
-  polynomial_order = 3, # include I(X^3) for each continuous predictor
-  include_pc_3way = FALSE
+  data             = dat,
+  factorial_order  = 3,
+  polynomial_order = 3,
+  include_pc_3way  = FALSE
 )
 
 # Fit using the spec (auto-prepares data)
@@ -258,24 +365,24 @@ fit_y <- SVEMnet(
   glmnet_alpha  = c(1, 0.5),
   nBoot         = 50,
   objective     = "auto",
-  weight_scheme = "SVEM",
-  relaxed       = FALSE
+  weight_scheme = "SVEM"
 )
 
 # A second, independent response over the same expansion
 set.seed(99)
-dat$y2 <- 0.5 + 1.4*X1 - 0.6*X2 + 0.2*X3 + rnorm(n, 0, 0.4)
+dat$y2 <- 0.5 + 1.4 * X1 - 0.6 * X2 + 0.2 * X3 + rnorm(n, 0, 0.4)
 fit_y2 <- SVEMnet(
   spec, dat, response = "y2",
   glmnet_alpha  = c(1, 0.5),
   nBoot         = 50,
   objective     = "auto",
-  weight_scheme = "SVEM",
-  relaxed       = FALSE
+  weight_scheme = "SVEM"
 )
 
-p1  <- predict(fit_y,  dat)
-p2  <- predict(fit_y2, dat, debias = TRUE)
+svem_nonzero(fit_y2)
+
+p1 <- predict(fit_y,  dat)
+p2 <- predict(fit_y2, dat, debias = TRUE)
 
 # Show that a new batch expands identically under the same spec
 newdat <- data.frame(
@@ -291,32 +398,37 @@ stopifnot(identical(
 ))
 preds_new <- predict(fit_y, prep_new$data)
 
-
-#' ## ---- Binomial example ------------------------------------------------
+## Binomial example
 set.seed(2)
 n  <- 120
 X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
-eta <- -0.3 + 1.1*X1 - 0.8*X2 + 0.5*X1*X3
+eta <- -0.3 + 1.1 * X1 - 0.8 * X2 + 0.5 * X1 * X3
 p   <- plogis(eta)
 yb  <- rbinom(n, 1, p)
 db  <- data.frame(yb = yb, X1 = X1, X2 = X2, X3 = X3)
 
 fit_b <- SVEMnet(
   yb ~ (X1 + X2 + X3)^2, db,
-  nBoot = 50, glmnet_alpha = c(1, 0.5), relaxed = FALSE, family = "binomial"
+  nBoot        = 50,
+  glmnet_alpha = c(1, 0.5),
+  family       = "binomial"
 )
 
 ## Probabilities, link, and classes
 p_resp <- predict(fit_b, db, type = "response")
 p_link <- predict(fit_b, db, type = "link")
-y_hat  <- predict(fit_b, db, type = "class")      # 0/1 labels (no SE/interval)
+y_hat  <- predict(fit_b, db, type = "class")  # 0/1 labels
 
-## Mean-aggregation with uncertainty on probability scale
-out_b <- predict(fit_b, db, type = "response",
-                 se.fit = TRUE, interval = TRUE, level = 0.9)
+## Mean aggregation with uncertainty on probability scale
+out_b <- predict(
+  fit_b, db,
+  type     = "response",
+  se.fit   = TRUE,
+  interval = TRUE,
+  level    = 0.9
+)
 str(out_b)
 }
-
 }
 \references{
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
@@ -343,4 +455,12 @@ Journal of Statistical Software, 33(1), 1-22.
 
 Meinshausen, N. (2007).
 Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+
+Kish, L. (1965). \emph{Survey Sampling}. Wiley.
+
+Lumley, T. (2004). Analysis of complex survey samples.
+\emph{Journal of Statistical Software}, 9(1), 1–19.
+
+Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
+\emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }

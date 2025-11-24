@@ -46,7 +46,6 @@
 #' }
 #'
 #' @import ggplot2
-#' @importFrom rlang .data
 #' @importFrom utils tail
 #' @export
 #' @method plot svem_model
@@ -73,8 +72,8 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
 
   ggplot2::ggplot(
     plot_data,
-    ggplot2::aes(x = .data$Actual, y = .data$Predicted,
-                 color = .data$Type, shape = .data$Type)
+    ggplot2::aes(x = Actual, y = Predicted,
+                 color = Type, shape = Type)
   ) +
     ggplot2::geom_point(...) +
     ggplot2::geom_abline(slope = 1, intercept = 0,
@@ -147,8 +146,8 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
 #' }
 #'
 #' @import ggplot2
-#' @importFrom rlang .data
 #' @importFrom stats quantile aggregate runif
+#' @importFrom utils head
 #' @export
 #' @method plot svem_binomial
 plot.svem_binomial <- function(x,
@@ -231,17 +230,17 @@ plot.svem_binomial <- function(x,
     plt <- ggplot2::ggplot() +
       ggplot2::geom_point(
         data = pts,
-        ggplot2::aes(x = .data$p, y = .data$y),
+        ggplot2::aes(x = p, y = y),
         alpha = 0.25, size = 1.2, na.rm = TRUE, ...
       ) +
       ggplot2::geom_line(
         data = calib,
-        ggplot2::aes(x = .data$p_mean, y = .data$y_mean),
+        ggplot2::aes(x = p_mean, y = y_mean),
         linewidth = 1, na.rm = TRUE
       ) +
       ggplot2::geom_point(
         data = calib,
-        ggplot2::aes(x = .data$p_mean, y = .data$y_mean, size = .data$n),
+        ggplot2::aes(x = p_mean, y = y_mean, size = n),
         alpha = 0.85, na.rm = TRUE
       ) +
       ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
@@ -261,7 +260,7 @@ plot.svem_binomial <- function(x,
   if (type == "roc") {
     roc <- .roc_curve(p, y)
     auc <- .auc_trap(roc)
-    plt <- ggplot2::ggplot(roc, ggplot2::aes(x = .data$fpr, y = .data$tpr)) +
+    plt <- ggplot2::ggplot(roc, ggplot2::aes(x = fpr, y = tpr)) +
       ggplot2::geom_line(...) +
       ggplot2::geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
       ggplot2::labs(
@@ -277,7 +276,7 @@ plot.svem_binomial <- function(x,
   if (type == "pr") {
     pr <- .pr_curve(p, y)
     ap <- .ap_step(pr)
-    plt <- ggplot2::ggplot(pr, ggplot2::aes(x = .data$recall, y = .data$precision)) +
+    plt <- ggplot2::ggplot(pr, ggplot2::aes(x = recall, y = precision)) +
       ggplot2::geom_line(...) +
       ggplot2::labs(
         title = sprintf("Precision-Recall (AP = %.3f)", ap),

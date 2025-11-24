@@ -7,32 +7,58 @@
 svem_nonzero(object, tol = 1e-07, plot = TRUE, print_table = TRUE, ...)
 }
 \arguments{
-\item{object}{An object of class \code{svem_model}.}
+\item{object}{An object of class \code{svem_model} with a non-empty
+\code{$coef_matrix} component. \code{svem_nonzero()} is not defined for
+\code{svem_cv} objects.}
 
-\item{tol}{Numeric tolerance for "nonzero" (default \code{1e-7}).}
+\item{tol}{Numeric tolerance for "nonzero". Coefficients with
+\code{|beta| > tol} are counted as nonzero. Default is \code{1e-7}.}
 
-\item{plot}{Logical; if \code{TRUE}, draws a quick ggplot summary (default \code{TRUE}).}
+\item{plot}{Logical; if \code{TRUE}, draws a quick \pkg{ggplot2} summary plot
+of the nonzero percentages (default \code{TRUE}).}
 
-\item{print_table}{Logical; if \code{TRUE}, prints a compact table (default \code{TRUE}).}
+\item{print_table}{Logical; if \code{TRUE}, prints a compact table of
+nonzero percentages to the console (default \code{TRUE}).}
 
-\item{...}{Unused.}
+\item{...}{Unused; included for future extension.}
 }
 \value{
 Invisibly returns a data frame with columns:
 \itemize{
-\item \code{Variable}
-\item \code{Percent of Bootstraps Nonzero}
+\item \code{Variable}: coefficient name (excluding the intercept).
+\item \code{Percent of Bootstraps Nonzero}: percentage (0–100) of bootstrap
+fits in which \code{|beta| > tol}.
 }
+
+If no non-intercept coefficients are found (for example, if only the
+intercept is present), an empty data frame is returned and a message is
+issued.
 }
 \description{
-Calculates the percentage of bootstrap iterations in which each coefficient
+Summarizes variable-selection stability across SVEM bootstrap refits by
+computing the percentage of bootstrap iterations in which each coefficient
 (excluding the intercept) is nonzero, using a small tolerance. Optionally
-draws a quick \pkg{ggplot2} summary and/or prints a compact table.
+produces a quick \pkg{ggplot2} summary and/or prints a compact table.
 }
 \details{
-This function summarizes variable selection stability across SVEM bootstrap
-refits. It expects \code{object$coef_matrix} to contain the per-bootstrap
-coefficients (including an intercept column).
+This function expects \code{object$coef_matrix} to contain the per-bootstrap
+coefficients (including an intercept column), typically created by
+\code{\link{SVEMnet}} when \code{save_boot = TRUE} (or similar) is enabled.
+Rows correspond to bootstrap fits; columns correspond to coefficients.
+
+Internally, \code{svem_nonzero()}:
+\itemize{
+\item checks for and drops rows of \code{coef_matrix} that contain any
+non-finite values, to keep summaries stable;
+\item drops an \code{"(Intercept)"} column if present;
+\item computes \code{100 * mean(|beta_j| > tol)} across bootstrap rows
+for each remaining coefficient.
+}
+
+The plot is a simple line + point chart with labels, ordered by decreasing
+nonzero percentage. It is intended as a quick diagnostic; for publication
+graphics, you may want to customize the output data frame with your own
+plotting code.
 }
 \examples{
 \donttest{
@@ -46,9 +72,10 @@ coefficients (including an intercept column).
   y   <- 0.7 + 1.5*x1 - 0.8*x2 + 0.05*x3 + eps
   dat <- data.frame(y, x1, x2, x3)
 
-  fit <- SVEMnet(y ~ (x1 + x2 + x3)^2, data = dat, nBoot = 40, relaxed = TRUE)
+  fit <- SVEMnet(y ~ (x1 + x2 + x3)^2, data = dat,
+                 nBoot = 40, relaxed = TRUE)
 
-  # Table + plot
+  # Table + plot of bootstrap nonzero percentages
   nz <- svem_nonzero(fit, tol = 1e-7, plot = TRUE, print_table = TRUE)
   head(nz)
 
@@ -66,11 +93,12 @@ coefficients (including an intercept column).
   fit_b <- SVEMnet(y ~ x1 + x2 + x3, data = dat_b,
                    family = "binomial", nBoot = 40, relaxed = TRUE)
 
-  # Plot optional; still summarizes the bootstrap selection frequencies
+  # Still summarizes bootstrap selection frequencies for binomial fits
   svem_nonzero(fit_b, plot = TRUE, print_table = TRUE)
 }
 
 }
 \seealso{
-\code{\link[=coef.svem_model]{coef.svem_model}} for averaged (optionally debiased) coefficients.
+\code{\link[=coef.svem_model]{coef.svem_model}} for ensemble-averaged
+(optionally debiased) coefficients.
 }

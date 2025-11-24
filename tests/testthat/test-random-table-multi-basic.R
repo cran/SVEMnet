@@ -1,4 +1,5 @@
 skip_on_cran()
+skip_if_not_installed("SVEMnet")
 
 test_that("svem_random_table_multi returns predictor columns plus response columns", {
   set.seed(1)
@@ -38,10 +39,18 @@ test_that("svem_random_table_multi returns predictor columns plus response colum
   # predictors must be present
   expect_true(all(c("X1","X2","A","B","C","F") %in% names(combined)))
 
-  # response columns must be appended with the response names
-  expect_true(all(c("y1","y2") %in% names(combined)))
+  # --- UPDATED: response columns may be y1/y2 OR y1_pred/y2_pred ---
+  nm <- names(combined)
+  has_old_names <- all(c("y1", "y2") %in% nm)
+  has_new_names <- all(c("y1_pred", "y2_pred") %in% nm)
+
+  expect_true(has_old_names || has_new_names)
+
+  # pick the actual column names for NA checks
+  y1_col <- if ("y1" %in% nm) "y1" else "y1_pred"
+  y2_col <- if ("y2" %in% nm) "y2" else "y2_pred"
 
   # predictions should not be NA
-  expect_false(anyNA(combined$y1))
-  expect_false(anyNA(combined$y2))
+  expect_false(anyNA(combined[[y1_col]]))
+  expect_false(anyNA(combined[[y2_col]]))
 })

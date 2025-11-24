@@ -21,6 +21,11 @@ bigexp_formula() lets you reuse an existing expansion spec for multiple
 responses. It keeps the right hand side locked but changes the response
 variable on the left hand side.
 }
+\details{
+This is useful when you want to fit separate models for several responses
+on the same factor space while guaranteeing that they all use exactly the
+same design columns and coding.
+}
 \examples{
 set.seed(1)
 df2 <- data.frame(
