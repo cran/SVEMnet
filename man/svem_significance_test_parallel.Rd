@@ -139,6 +139,11 @@ Mahalanobis-type distance in the reduced space. A flexible SHASHo
 distribution is then fit to the permutation distances and used to obtain a
 whole-model \eqn{p}-value for the observed surface.
 
+Because the test is based on a finite number of permutations and a fitted
+null distribution, the reported \eqn{p}-values are approximate and are
+intended as a diagnostic measure of global factor signal, not as exact
+hypothesis tests.
+
 All SVEM refits (for the original and permuted responses) are run in
 parallel using \code{foreach} + \code{doParallel}. Random draws (including
 permutations and evaluation-grid sampling) are made reproducible across

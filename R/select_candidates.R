@@ -4,7 +4,9 @@
 #' Internal utility to select a small set of diverse candidate rows from a
 #' scored table. The function:
 #' \enumerate{
-#'   \item Orders rows in decreasing order of a score column \code{by}.
+#'   \item Orders rows according to a score column \code{by}, with larger or
+#'         smaller values treated as more desirable depending on
+#'         \code{direction}.
 #'   \item Retains the top fraction \code{top_frac} of rows.
 #'   \item Computes a dissimilarity matrix on \code{predictor_cols} using
 #'         \code{cluster::daisy()} with the requested metric.
@@ -20,8 +22,7 @@
 #'   score column referenced by \code{by} and the predictor columns listed in
 #'   \code{predictor_cols}.
 #' @param by Character scalar. Name of the column in \code{table} used for
-#'   ranking. Rows are sorted in decreasing order of this column; the highest
-#'   values are treated as most desirable.
+#'   ranking.
 #' @param top_frac Numeric scalar in the open interval \code{(0, 1]} giving
 #'   the fraction of top ranked rows to retain before clustering.
 #' @param k Integer scalar giving the desired number of medoids (candidates)
@@ -31,6 +32,9 @@
 #' @param predictor_cols Character vector of column names in \code{table} that
 #'   define the space on which diversity is measured. These columns are passed
 #'   to \code{cluster::daisy()}.
+#' @param direction Character scalar, either \code{"max"} or \code{"min"},
+#'   indicating whether larger or smaller values of \code{by} are treated as
+#'   more desirable when ranking rows and defining the top fraction.
 #' @param metric Character scalar giving the dissimilarity metric passed to
 #'   \code{cluster::daisy()}. Defaults to \code{"gower"}.
 #'
@@ -41,11 +45,43 @@
 #' \code{k <= 0} or \code{nrow(table) == 0}), returns \code{integer(0)}.
 #'
 #' @details
-#' The function assumes that larger values of \code{by} are better and always
-#' ranks in decreasing order. Any rows with missing values in the \code{by}
-#' column are placed at the end by \code{order()} and may or may not enter the
-#' top fraction, depending on \code{top_frac} and the number of nonmissing
-#' rows.
+#' Rows are ranked according to \code{by}, with larger or smaller values
+#' treated as better depending on \code{direction} ("max" or "min").
+#' Any rows with missing values in the \code{by} column are placed at the end
+#' by \code{order()} and may or may not enter the top fraction, depending on
+#' \code{top_frac} and the number of nonmissing rows.
+#'
+#' @examples
+#' \donttest{
+#' set.seed(1)
+#' n <- 100
+#' tab <- data.frame(
+#'   score = rnorm(n),
+#'   x1    = runif(n),
+#'   x2    = runif(n)
+#' )
+#'
+#' # Select 3 medoids from the top 20% by score (maximize score)
+#' idx_max <- svem_select_candidates(
+#'   table          = tab,
+#'   by             = "score",
+#'   top_frac       = 0.2,
+#'   k              = 3,
+#'   predictor_cols = c("x1", "x2"),
+#'   direction      = "max"
+#' )
+#'
+#' # Select 3 medoids from the bottom 20% by score (minimize score)
+#' idx_min <- svem_select_candidates(
+#'   table          = tab,
+#'   by             = "score",
+#'   top_frac       = 0.2,
+#'   k              = 3,
+#'   predictor_cols = c("x1", "x2"),
+#'   direction      = "min"
+#' )
+#' }
+#'
 #' @importFrom cluster daisy pam
 #' @keywords internal
 #' @noRd
@@ -54,6 +90,7 @@ svem_select_candidates <- function(table,
                                    top_frac,
                                    k,
                                    predictor_cols,
+                                   direction = c("max", "min"),
                                    metric = "gower") {
   # Basic checks
   if (!is.data.frame(table)) {
@@ -63,6 +100,8 @@ svem_select_candidates <- function(table,
   if (n == 0L || k <= 0L) {
     return(integer(0L))
   }
+
+  direction <- match.arg(direction)
 
   if (!is.character(by) || length(by) != 1L || !nzchar(by)) {
     stop("`by` must be a nonempty character scalar naming a column in `table`.")
@@ -96,8 +135,12 @@ svem_select_candidates <- function(table,
   # Determine how many top rows to keep
   m_top <- max(1L, min(n, ceiling(top_frac * n)))
 
-  # Order by score, decreasing; NA go to the end
-  ord     <- order(table[[by]], decreasing = TRUE, na.last = TRUE)
+  # Order by score according to direction; NA go to the end
+  ord <- order(
+    table[[by]],
+    decreasing = (direction == "max"),
+    na.last    = TRUE
+  )
   top_idx <- ord[seq_len(m_top)]
 
   top_X <- table[top_idx, predictor_cols, drop = FALSE]
@@ -109,7 +152,7 @@ svem_select_candidates <- function(table,
   }
 
   # Dissimilarities and PAM medoids (cluster is a hard dependency)
-  d <- cluster::daisy(top_X, metric = metric)
+  d       <- cluster::daisy(top_X, metric = metric)
   pam_fit <- cluster::pam(d, k = k, diss = TRUE)
 
   med_top_pos    <- pam_fit$id.med

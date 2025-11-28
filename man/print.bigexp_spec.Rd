@@ -13,5 +13,45 @@
 }
 \description{
 This print method shows a compact summary of the expansion settings and the
-predictors that are treated as continuous or categorical.
+predictors that are treated as continuous or categorical. It also reports any
+variables that were designated as blocking factors and therefore enter the
+model only additively (no interactions, no polynomials).
+}
+\examples{
+set.seed(1)
+df4 <- data.frame(
+  y  = rnorm(10),
+  X1 = rnorm(10),
+  G  = factor(sample(c("A", "B"), 10, replace = TRUE))
+)
+
+spec4 <- bigexp_terms(
+  y ~ X1 + G,
+  data             = df4,
+  factorial_order  = 2,
+  polynomial_order = 2
+)
+
+print(spec4)
+
+## Example with a blocking factor:
+set.seed(2)
+df_block2 <- data.frame(
+  y           = rnorm(12),
+  X1          = rnorm(12),
+  G           = factor(sample(c("A", "B"), 12, replace = TRUE)),
+  Operator    = factor(sample(letters[1:3], 12, replace = TRUE)),
+  AmbientTemp = rnorm(12, mean = 22, sd = 1.5)
+)
+
+spec_block2 <- bigexp_terms(
+  y ~ X1 + G,
+  data             = df_block2,
+  factorial_order  = 2,
+  polynomial_order = 3,
+  blocking         = c("Operator", "AmbientTemp")
+)
+
+print(spec_block2)
+
 }

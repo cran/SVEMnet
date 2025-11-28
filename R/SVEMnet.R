@@ -32,13 +32,13 @@
 #'     \item \code{"SVEM"} (default): Self-Validated Ensemble Model weights.
 #'       For each replicate and row, a shared uniform draw \code{U_i ~ Unif(0, 1)}
 #'       is converted to anti-correlated FRW weights
-#'       \code{w_train_i = -log(U_i)} and \code{w_valid_i = -log(1 - U_i)},
-#'       each rescaled to have mean 1.
+#'       \code{w_train_i = -log(U_i)} and \code{w_valid_i = -log(1 - U_i)}.
+#'       Each weight vector is then rescaled to have mean 1 (sum \code{n}).
 #'     \item \code{"FRW_plain"}: Fractional random-weight regression without a
 #'       separate validation copy. A single FRW vector
-#'       \code{w_i = -log(U_i)} (rescaled to mean 1) is used for both training
-#'       and validation. This reproduces the FRW bootstrap regression of
-#'       Xu et al. (2020) and related work.
+#'       \code{w_i = -log(U_i)} is used for both training and validation and
+#'       rescaled to have mean 1 (sum \code{n}). This reproduces the FRW
+#'       bootstrap regression of Xu et al. (2020) and related work.
 #'     \item \code{"Identity"}: Uses unit weights for both training and
 #'       validation (no resampling). In combination with \code{nBoot = 1} this
 #'       wraps a single \code{glmnet} fit and selects the penalty by the chosen
@@ -48,8 +48,8 @@
 #' @param objective Character. One of \code{"auto"}, \code{"wAIC"},
 #'   \code{"wBIC"}, or \code{"wSSE"}.
 #'   \itemize{
-#'     \item For \code{family = "gaussian"}, \code{objective = "auto"} resolves to \code{"wAIC"}.
-#'     \item For \code{family = "binomial"}, \code{objective = "auto"} resolves to \code{"wBIC"}.
+#'   \item \code{"wAIC"}: Gaussian AIC-like criterion based on the weighted SSE.
+#'   \item \code{"wBIC"}: Gaussian BIC-like criterion based on the weighted SSE.
 #'   }
 #'   See Details for the exact criteria in the Gaussian and binomial cases.
 #' @param relaxed Logical or character. Default \code{"auto"}.
@@ -190,26 +190,39 @@
 #'
 #' Selection criteria (Gaussian):
 #' For \code{family = "gaussian"}, the validation loss is a weighted sum of
-#' squared errors on the validation copy. The criteria are:
+#' squared errors on the validation copy. Let
+#' \eqn{\mathrm{SSE}_w = \sum_i w_i^{valid} r_i^2} denote the weighted SSE.
+#' The criteria are:
 #' \itemize{
-#'   \item \code{"wSSE"}: weighted sum of squared errors (loss-only selector),
-#'   \item \code{"wAIC"}: Gaussian AIC analog based on the weighted SSE,
-#'   \item \code{"wBIC"}: Gaussian BIC analog based on the weighted SSE.
+#'   \item \code{"wSSE"}: loss-only selector that minimizes the weighted SSE
+#'     \eqn{\mathrm{SSE}_w},
+#'   \item \code{"wAIC"}: Gaussian AIC analog
+#'     \eqn{C(\lambda) = n \log\{\mathrm{SSE}_w(\lambda)/n\} + 2 k},
+#'   \item \code{"wBIC"}: Gaussian BIC analog
+#'     \eqn{C(\lambda) = n \log\{\mathrm{SSE}_w(\lambda)/n\} +
+#'       \log(n_eff_adm)\, k}.
 #' }
-#' The FRW validation weights are rescaled to have mean one so that their
-#' sum defines a likelihood scale \eqn{n_like = \sum_i w_i^{valid}} (equal to
-#' \code{n} when all validation weights are 1), and the Gaussian loss term is
-#' expressed as \eqn{n_like} times the log of the weighted mean squared error.
+#' The FRW validation weights are rescaled to have mean one, so that their sum
+#' is always \eqn{\sum_i w_i^{valid} = n}. The AIC/BIC analogs therefore use
+#' \eqn{n \log(\mathrm{SSE}_w/n)} as the Gaussian loss term, while the
+#' \code{"wSSE"} selector uses \eqn{\mathrm{SSE}_w} directly.
 #'
 #' The effective validation size is computed from the FRW weights using Kish's
-#' effective sample size \eqn{n_eff = (\sum_i w_i^{valid})^2 / \sum_i (w_i^{valid})^2}
-#' and then truncated to lie between 2 and \code{n} to form \eqn{n_eff_adm}.
-#' The AIC-style selector uses a \eqn{2 k} penalty; the BIC-style selector uses
-#' a \eqn{log(n_eff_adm) k} penalty, so that the loss term is scaled by total
-#' validation weight while the complexity penalty reflects the effective amount
-#' of information under unequal weights. This follows the survey-weighted
-#' information-criterion literature, where the pseudo-likelihood uses total
-#' weight and the BIC penalty uses an effective sample size.
+#' effective sample size \eqn{n_eff = (\sum_i w_i^{valid})^2 /
+#'   \sum_i (w_i^{valid})^2} and then truncated to lie between 2 and \code{n}
+#' to form \eqn{n_eff_adm}. The AIC-style selector uses a \eqn{2 k} penalty;
+#' the BIC-style selector uses a \eqn{\log(n_eff_adm) k} penalty, so that the
+#' loss term is scaled by total validation weight while the complexity penalty
+#' reflects the effective amount of information under unequal weights. For
+#' \code{"wAIC"} and \code{"wBIC"}, path points with more than
+#' \eqn{n_eff_adm} non-intercept coefficients are treated as inadmissible when
+#' evaluating the criterion.
+#'
+#' Because the FRW validation weights are random rather than fixed design
+#' weights, these information-criterion scores are used heuristically for
+#' relative model comparison within each FRW replicate, rather than as exact
+#' AIC/BIC values.
+
 #'
 #' For diagnostics, SVEMnet reports the raw Kish effective sizes across
 #' bootstraps (see \code{diagnostics$n_eff_summary}), while \eqn{n_eff_adm}
@@ -224,23 +237,23 @@
 #' Selection criteria (binomial):
 #' For \code{family = "binomial"}, the validation loss is the weighted
 #' negative log-likelihood on the FRW validation copy (equivalently,
-#' proportional to the binomial deviance up to a constant). The same labels
-#' are used:
+#' proportional to the binomial deviance up to a constant factor). Let
+#' \eqn{\mathrm{NLL}} denote the weighted negative log-likelihood. The same
+#' labels are used:
 #' \itemize{
-#'   \item \code{"wSSE"}: loss-only selector based on the weighted negative
-#'     log-likelihood (the name is retained for backward compatibility),
-#'   \item \code{"wAIC"}: deviance plus a \eqn{2 k} penalty,
-#'   \item \code{"wBIC"}: deviance plus a \eqn{log(n_eff_adm) k} penalty.
+#'   \item \code{"wSSE"}: loss-only selector based on \eqn{\mathrm{NLL}}
+#'     (the name is retained for backward compatibility),
+#'   \item \code{"wAIC"}: deviance-style criterion
+#'     \eqn{C(\lambda) = 2\,\mathrm{NLL}(\lambda) + 2 k},
+#'   \item \code{"wBIC"}: deviance-style criterion
+#'     \eqn{C(\lambda) = 2\,\mathrm{NLL}(\lambda) + \log(n_eff_adm)\, k}.
 #' }
 #' The effective validation size \eqn{n_eff_adm} and the model size guardrail
-#' are handled as in the Gaussian case: we compute a Kish effective size from
-#' the FRW validation weights, truncate it to lie between 2 and \code{n}, and
-#' require the number of nonzero coefficients (excluding the intercept) to be
-#' less than this effective size before evaluating the criterion. For
-#' diagnostics, \code{diagnostics$n_eff_summary} reports the raw Kish effective
-#' sizes prior to truncation. When \code{objective = "auto"} and
-#' \code{family = "binomial"}, SVEMnet always uses \code{"wBIC"} for stability
-#' in small-n logistic fits.
+#' are handled as in the Gaussian case: for \code{"wAIC"} and \code{"wBIC"}
+#' we compute a Kish effective size from the FRW validation weights, truncate
+#' it to lie between 2 and \code{n}, and require the number of nonzero
+#' coefficients (excluding the intercept) to be less than this effective size
+#' when evaluating the criterion.
 #'
 #' Auto rule:
 #' When \code{objective = "auto"}, SVEMnet selects the criterion by family:
@@ -396,6 +409,30 @@
 #'   level    = 0.9
 #' )
 #' str(out_b)
+#'
+#' #' ## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
+#' set.seed(2)
+#' df_block <- data.frame(
+#'   y1         = rnorm(40),
+#'   y2         = rnorm(40),
+#'   X1         = runif(40),
+#'   X2         = runif(40),
+#'   Operator   = factor(sample(paste0("Op", 1:3), 40, TRUE)),
+#'   AmbientTmp = rnorm(40, mean = 22, sd = 2)
+#' )
+#'
+#' spec_block <- bigexp_terms(
+#'   y1 ~ X1 + X2,
+#'   data             = df_block,
+#'   factorial_order  = 2,
+#'   polynomial_order = 2,
+#'   blocking         = c("Operator", "AmbientTmp")
+#' )
+#'
+#' fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
+#' fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
+#'
+#' tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
 #' }
 #' @export
 SVEMnet <- function(formula, data,
@@ -463,22 +500,50 @@ SVEMnet <- function(formula, data,
 
   ## ---- model frame / matrix construction ----
   data <- as.data.frame(data)
-  using_spec <- inherits(formula, "bigexp_spec")
   contrasts_opts_used <- NULL
 
+  # Detect bigexp_spec either passed directly or attached to the formula
+  using_spec     <- inherits(formula, "bigexp_spec")
+  spec           <- NULL
+  spec_from_attr <- FALSE
+
   if (using_spec) {
+    # Case 1: SVEMnet(spec, data, ...)
     spec <- formula
-    if (is.null(response)) {
-      f_use <- spec$formula
-    } else {
-      rhs_txt <- paste(deparse(spec$formula[[3]]), collapse = " ")
-      f_use <- stats::as.formula(paste(response, "~", rhs_txt))
+  } else {
+    # Case 2: SVEMnet(form_with_attr, data, ...)
+    spec_attr <- attr(formula, "bigexp_spec", exact = TRUE)
+    if (!is.null(spec_attr) && inherits(spec_attr, "bigexp_spec")) {
+      using_spec     <- TRUE
+      spec           <- spec_attr
+      spec_from_attr <- TRUE
     }
+  }
+
+  if (using_spec) {
+    # Decide which formula to use:
+    # - If 'response' is supplied, always swap LHS to that name.
+    # - Else, if the spec came via attribute, respect the formula's own LHS.
+    # - Else (direct spec), use spec$formula as stored.
+    if (!is.null(response)) {
+      rhs_txt <- paste(deparse(spec$formula[[3L]]), collapse = " ")
+      f_use   <- stats::as.formula(paste(response, "~", rhs_txt))
+    } else if (spec_from_attr) {
+      f_use <- formula
+    } else {
+      f_use <- spec$formula
+    }
+
     prep <- bigexp_prepare(spec, data, unseen = unseen)
 
     spec_settings <- spec$settings
     if (is.null(spec_settings)) spec_settings <- list()
 
+    # Blocking variables from the bigexp_spec (may be NULL / empty)
+    blocking <- spec_settings$blocking
+    if (is.null(blocking)) blocking <- character(0L)
+
+    # Contrast options + per-factor contrasts from the spec
     if (!is.null(spec_settings$contrasts_options)) {
       spec_contrasts_opts <- spec_settings$contrasts_options
     } else {
@@ -498,13 +563,18 @@ SVEMnet <- function(formula, data,
     mf <- stats::model.frame(f_use, prep$data, na.action = stats::na.omit)
     if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
     X  <- stats::model.matrix(f_use, mf, contrasts.arg = spec_contrasts)
+
   } else {
+    # Plain formula path, no bigexp_spec
     f_use <- formula
     mf    <- stats::model.frame(f_use, data, na.action = stats::na.omit)
     if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
     contrasts_opts_used <- getOption("contrasts")
-    X     <- stats::model.matrix(f_use, mf)
+    X       <- stats::model.matrix(f_use, mf)
+    blocking <- character(0L)   # no blocking when not using bigexp_spec
   }
+
+
 
   y <- stats::model.response(mf)
 
@@ -584,6 +654,46 @@ SVEMnet <- function(formula, data,
     }
   }
   contrasts_used <- attr(X, "contrasts")
+  # Helper for categorical mode (used for blocking factors)
+  .mode_level <- function(x) {
+    if (is.null(x)) return(NA_character_)
+    x_chr <- as.character(x)
+    x_chr <- x_chr[!is.na(x_chr)]
+    if (!length(x_chr)) return(NA_character_)
+    tab <- table(x_chr)
+    if (!length(tab)) return(NA_character_)
+    maxfreq <- max(tab)
+    modes <- names(tab)[tab == maxfreq]
+    modes[1L]  # break ties arbitrarily but deterministically
+  }
+
+  # Normalize blocking to be only predictors actually present
+  blocking <- intersect(blocking, predictor_vars)
+
+  # Modes for blocking categorical variables, if any
+  block_cat_modes <- NULL
+  if (length(blocking)) {
+    # "Categorical" here means we stored factor_levels
+    block_cat <- intersect(blocking, names(factor_levels))
+    if (length(block_cat)) {
+      block_cat_modes <- vector("list", length(block_cat))
+      names(block_cat_modes) <- block_cat
+      for (v in block_cat) {
+        if (v %in% colnames(mf)) {
+          mode_v <- .mode_level(mf[[v]])
+          if (!is.na(mode_v)) {
+            block_cat_modes[[v]] <- mode_v
+          }
+        }
+      }
+      # Drop if everything came back NA / empty
+      if (!length(block_cat_modes) ||
+          all(vapply(block_cat_modes, is.null, logical(1)))) {
+        block_cat_modes <- NULL
+      }
+    }
+  }
+
 
   num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
     v %in% colnames(mf) && is.numeric(mf[[v]])
@@ -933,11 +1043,14 @@ SVEMnet <- function(formula, data,
   )
 
   sampling_schema <- list(
-    predictor_vars = predictor_vars,
-    var_classes    = var_classes,
-    num_ranges     = num_ranges,
-    factor_levels  = factor_levels
+    predictor_vars  = predictor_vars,
+    var_classes     = var_classes,
+    num_ranges      = num_ranges,
+    factor_levels   = factor_levels,
+    blocking        = blocking,        # character(0) when no blocking
+    block_cat_modes = block_cat_modes  # NULL when none / not available
   )
+
 
   result <- list(
     parms             = avg_coefficients,

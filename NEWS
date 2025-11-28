@@ -1,5 +1,8 @@
 # NEWS for SVEMnet
 
+[3.1.4]
+- Add blocking argument to bigexp_terms()
+
 [3.1.2]
 - Replaced svem_optimize_random() with svem_score_random and svem_select_score_from_table. Changes to "auto" objective rule.
 

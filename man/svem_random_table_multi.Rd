@@ -25,7 +25,8 @@ Default is \code{1000}.}
 \item{mixture_groups}{Optional list of mixture constraint groups. Each group
 is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
 (see \emph{Notes on mixtures}). Mixture variables must be numeric-like and
-must also appear in the models' \code{predictor_vars}.}
+must also appear in the models' \code{predictor_vars} (that is, they must
+be used as predictors in all models).}
 
 \item{debias}{Logical; if \code{TRUE}, apply each model's calibration during
 prediction when available (for Gaussian fits). This is passed to
@@ -61,7 +62,7 @@ Samples the original predictor factor space cached in fitted \code{svem_model}
 objects and computes predictions from each model at the same random points.
 This is intended for multiple responses built over the same factor space and
 a deterministic factor expansion (for example via a shared
-\code{\link{bigexp_terms}}),  so that a shared sampling schema is available.
+\code{\link{bigexp_terms}}), so that a shared sampling schema is available.
 }
 \details{
 No refitting is performed. Predictions are obtained by
@@ -76,17 +77,18 @@ All models must share an identical predictor schema. Specifically, their
 predictors.
 \item Numeric \code{num_ranges} that match within \code{range_tol} for all
 continuous predictors.
+\item When present, the same \code{blocking} set (up to order).
 }
 The function stops with an informative error message if any of these checks fail.
 
 Models may be Gaussian or binomial. For binomial fits, predictions are
-returned on the probability scale (i.e., on the response scale) by default,
+returned on the probability scale (that is, on the response scale) by default,
 consistent with the default behaviour of \code{predict.svem_model()}.
 }
 \section{Typical workflow}{
 
 \enumerate{
-\item Build a deterministic expansion (e.g. with \code{\link{bigexp_terms}})
+\item Build a deterministic expansion (for example with \code{\link{bigexp_terms}})
 and fit several \code{SVEMnet()} models for different responses on
 the same factor space, using the same expansion / sampling settings.
 \item Ensure that the fitted models were created with a version of
@@ -97,6 +99,37 @@ the same factor space, using the same expansion / sampling settings.
 \code{$all} (\code{cbind(data, pred)}) for downstream plotting,
 summarization, or cross-response comparison.
 }
+}
+
+\section{Blocking variables}{
+
+If the models were fit using a \code{bigexp_spec} that included blocking
+variables (for example \code{blocking = c("Operator", "Plate_ID")}) and
+\code{SVEMnet()} stored these in \code{$sampling_schema$blocking}, then
+\code{svem_random_table_multi()} will:
+\itemize{
+\item treat those variables as blocking factors; and
+\item hold them fixed at a single value across the sampled table.
+}
+
+Specifically:
+\itemize{
+\item For blocking numeric variables, the function uses the midpoint of the
+recorded numeric range, \code{(min + max) / 2}, for all rows.
+\item For blocking categorical variables, the function uses a single
+reference level equal to the most frequent observed level (mode) in the
+training data, with ties broken deterministically; if the mode is
+unavailable, it falls back to the first stored level.
+}
+
+Blocking variables are not allowed to appear in \code{mixture_groups}. If
+any mixture group tries to use a blocking variable, the function stops with
+an error.
+
+When no blocking information is present in \code{$sampling_schema} (for
+example for models fit without a \code{bigexp_spec} or without blocking),
+the behavior is unchanged from earlier versions: all predictors are sampled
+according to the rules described under "Sampling strategy".
 }
 
 \section{Sampling strategy}{
@@ -112,8 +145,12 @@ else independent uniforms on each range.
 
 Mixture variables (if any) are sampled jointly within each specified group using
 a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
-Categorical variables are sampled from cached factor levels. The same random
-predictor table is fed to each model so response columns are directly comparable.
+Categorical variables are sampled from cached factor levels. Blocking variables
+(if present) are held fixed (single level or single numeric value) and are not
+randomized.
+
+The same random predictor table is fed to each model so response columns are
+directly comparable.
 }
 
 \section{Notes on mixtures}{
@@ -121,12 +158,13 @@ predictor table is fed to each model so response columns are directly comparable
 Each mixture group should list only numeric-like variables. Bounds are interpreted
 on the original scale of those variables. If \code{total} equals the sum of lower
 bounds, the sampler returns the lower-bound corner for that group. Infeasible
-constraints (i.e., \code{sum(lower) > total} or \code{sum(upper) < total}) produce
-an error.
+constraints (that is, \code{sum(lower) > total} or \code{sum(upper) < total})
+produce an error.
 
 Mixture variables are removed from the pool of "non-mixture" numeric variables
 before numeric sampling, so they are controlled entirely by the mixture
-constraints and not also sampled independently.
+constraints and not also sampled independently. Mixture variables are not
+allowed to be blocking variables.
 }
 
 \examples{
@@ -179,7 +217,36 @@ tab_uni <- svem_random_table_multi(
   numeric_sampler = "uniform"
 )
 head(tab_uni$all)
+
+## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
+set.seed(2)
+df_block <- data.frame(
+  y1         = rnorm(40),
+  y2         = rnorm(40),
+  X1         = runif(40),
+  X2         = runif(40),
+  Operator   = factor(sample(paste0("Op", 1:3), 40, TRUE)),
+  AmbientTmp = rnorm(40, mean = 22, sd = 2)
+)
+
+spec_block <- bigexp_terms(
+  y1 ~ X1 + X2,
+  data             = df_block,
+  factorial_order  = 2,
+  polynomial_order = 2,
+  blocking         = c("Operator", "AmbientTmp")
+)
+
+fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
+fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
+
+tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
+
+## Operator and AmbientTmp are held fixed across rows:
+length(unique(tab_block$data$Operator))
+range(tab_block$data$AmbientTmp)
 }
+
 }
 \seealso{
 \code{\link{SVEMnet}}, \code{\link{predict.svem_model}},

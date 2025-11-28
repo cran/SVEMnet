@@ -32,3 +32,65 @@ test_that("svem_random_table_multi validates schemas and predicts", {
   expect_equal(nrow(res$pred), 50)
   expect_equal(nrow(res$all), 50)
 })
+
+
+
+test_that("svem_random_table_multi respects blocking for numeric and categorical", {
+  set.seed(2)
+  df_block <- data.frame(
+    y1         = rnorm(40),
+    y2         = rnorm(40),
+    X1         = runif(40),
+    X2         = runif(40),
+    Operator   = factor(sample(paste0("Op", 1:3), 40, TRUE)),
+    AmbientTmp = rnorm(40, mean = 22, sd = 2)
+  )
+
+  spec_block <- SVEMnet::bigexp_terms(
+    y1 ~ X1 + X2,
+    data             = df_block,
+    factorial_order  = 2,
+    polynomial_order = 2,
+    blocking         = c("Operator", "AmbientTmp")
+  )
+
+  fit_b1 <- SVEMnet::SVEMnet(
+    spec_block, df_block,
+    response = "y1",
+    nBoot    = 20,
+    glmnet_alpha = 1
+  )
+  fit_b2 <- SVEMnet::SVEMnet(
+    spec_block, df_block,
+    response = "y2",
+    nBoot    = 20,
+    glmnet_alpha = 1
+  )
+
+  res <- SVEMnet::svem_random_table_multi(list(fit_b1, fit_b2), n = 200)
+
+  expect_true(is.list(res))
+  expect_true(all(c("data","pred","all") %in% names(res)))
+
+  ## Blocking variables are present
+  expect_true(all(c("Operator", "AmbientTmp") %in% names(res$data)))
+
+  ## Operator (factor) is held fixed at a single level
+  expect_equal(length(unique(res$data$Operator)), 1L)
+
+  ## AmbientTmp (numeric) is held fixed at a single value (up to tiny numerical noise)
+  expect_true(diff(range(res$data$AmbientTmp)) < 1e-8)
+
+  ## Row counts align
+  expect_equal(nrow(res$data), 200)
+  expect_equal(nrow(res$pred), 200)
+  expect_equal(nrow(res$all), 200)
+
+  ## Prediction column names: allow old and new conventions
+  pred_names <- names(res$pred)
+  has_old_plain <- all(c("y1", "y2") %in% pred_names)
+  has_old_dot   <- all(c("y1.pred", "y2.pred") %in% pred_names)
+  has_new_suf   <- all(c("y1_pred", "y2_pred") %in% pred_names)
+
+  expect_true(has_old_plain || has_old_dot || has_new_suf)
+})

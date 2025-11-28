@@ -22,6 +22,7 @@
 #'   \item{Ionizable_Lipid_Type}{factor. Categorical identity of the ionizable lipid.}
 #'   \item{N_P_ratio}{numeric. Molar or mass \eqn{N:P} ratio (unitless).}
 #'   \item{flow_rate}{numeric. Process flow rate (arbitrary units).}
+#'   \item{Operator}{factor. Categorical blocking factor.}
 #'   \item{Potency}{numeric. Response (for example, normalized activity).}
 #'   \item{Size}{numeric. Response (for example, particle size in nm).}
 #'   \item{PDI}{numeric. Response (polydispersity index).}
@@ -66,9 +67,10 @@
 #' data(lipid_screen)
 #' str(lipid_screen)
 #'
-#' # 2) Build a deterministic expansion using bigexp_terms()
-#' #    Provide main effects only on the right-hand side; expansion width
-#' #    is controlled via arguments.
+#' #2) Build a deterministic expansion using bigexp_terms()
+#' #  Provide main effects only on the right-hand side; expansion width
+#' #  is controlled via arguments. Here Operator is treated as a blocking
+#' #  factor: additive only, no interactions or polynomial terms.
 #' spec <- bigexp_terms(
 #'   Potency ~ PEG + Helper + Ionizable + Cholesterol +
 #'     Ionizable_Lipid_Type + N_P_ratio + flow_rate,
@@ -76,7 +78,8 @@
 #'   factorial_order  = 3,   # up to 3-way interactions
 #'   polynomial_order = 3,   # include up to cubic terms I(X^2), I(X^3)
 #'   include_pc_2way  = TRUE,  # partial-cubic two-way terms Z:I(X^2)
-#'   include_pc_3way  = FALSE  # no partial-cubic three-way terms I(X^2):Z:W
+#'   include_pc_3way  = FALSE,  # no partial-cubic three-way terms I(X^2):Z:W
+#'    blocking         = "Operator"
 #' )
 #'
 #' # 3) Reuse the same locked expansion for other responses

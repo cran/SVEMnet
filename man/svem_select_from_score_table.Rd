@@ -225,6 +225,7 @@ if (!is.null(scored$original_data_scored)) {
   best_existing$best
 }
 }
+
 }
 \seealso{
 \code{\link{svem_score_random}},

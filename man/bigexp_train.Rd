@@ -13,7 +13,7 @@ Only main effects should appear on the right hand side.}
 \item{data}{Training data frame used to lock types and levels.}
 
 \item{...}{Additional arguments forwarded to \code{bigexp_terms()}, such as
-\code{factorial_order}, \code{discrete_threshold}, \code{polynomial_order},
+\code{factorial_order},  \code{polynomial_order},
 \code{include_pc_2way}, \code{include_pc_3way}, and \code{intercept}.}
 }
 \value{

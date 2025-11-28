@@ -126,13 +126,15 @@
 #' \code{bigexp_terms()} builds a specification object that:
 #' \itemize{
 #'   \item decides which predictors are treated as continuous or categorical,
+#'   \item optionally treats selected variables as blocking factors that enter
+#'         the model only additively and never in interactions or polynomials,
 #'   \item locks factor levels from the supplied data,
 #'   \item records the contrast settings used when the model matrix is first built, and
-#'   \item constructs a reusable right-hand side (RHS) string for a large expansion
-#'         that can be shared across multiple responses and datasets.
+#'   \item constructs a reusable right-hand side (RHS) expression string for a large
+#'         expansion that can be shared across multiple responses and datasets.
 #' }
 #'
-#' The expansion can include:
+#' The expansion for non-blocking predictors can include:
 #' \itemize{
 #'   \item full factorial interactions among the listed main effects, up to a
 #'         chosen order;
@@ -145,18 +147,22 @@
 #' Predictor types are inferred from \code{data}:
 #' \itemize{
 #'   \item factors, characters, and logicals are treated as categorical;
-#'   \item numeric predictors with at most \code{discrete_threshold} distinct
-#'         finite values are treated as categorical; and
 #'   \item all other numeric predictors are treated as continuous, and their
 #'         observed ranges are stored.
 #' }
 #'
+#' Variables listed in \code{blocking} are included in the spec and are typed
+#' using the same rules as other predictors (for example, a numeric blocking
+#' variable with many distinct values is treated as continuous). However,
+#' blocking variables enter the model only as additive main effects, without
+#' interactions or polynomial terms, regardless of \code{factorial_order} or
+#' \code{polynomial_order}.
+#'
 #' Once built, a \code{"bigexp_spec"} can be reused to create consistent
-#' expansions for new datasets via \code{\link{bigexp_prepare}}, and
-#' \code{\link{bigexp_formula}}. The RHS
-#' and contrast settings are locked, so the same spec applied to different data
-#' produces design matrices with the same columns in the same order (up to
-#' missing levels for specific batches).
+#' expansions for new datasets via \code{\link{bigexp_prepare}} and
+#' \code{\link{bigexp_formula}}. The RHS and contrast settings are locked, so
+#' the same spec applied to different data produces design matrices with the
+#' same columns in the same order (up to missing levels for specific batches).
 #'
 #' @section Typical workflow:
 #' In a typical multi-response workflow you:
@@ -166,8 +172,9 @@
 #'   \item Fit models using \code{spec$formula} and the original data
 #'         (for example, \code{SVEMnet(spec$formula, data, ...)} or
 #'         \code{lm(spec$formula, data)}).
-#'   \item For new batches, call \code{\link{bigexp_prepare}} with the same \code{spec} so that
-#'         design matrices have exactly the same columns and coding.
+#'   \item For new batches, call \code{\link{bigexp_prepare}} with the same
+#'         \code{spec} so that design matrices have exactly the same columns
+#'         and coding.
 #'   \item For additional responses on the same factor space, use
 #'         \code{\link{bigexp_formula}} to swap the left-hand side while
 #'         reusing the locked expansion.
@@ -180,29 +187,36 @@
 #'   generate interactions and polynomial terms automatically.
 #' @param data Data frame used to decide types and lock factor levels.
 #' @param factorial_order Integer >= 1. Maximum order of factorial interactions
-#'   among the main effects. For example, 1 gives main effects only, 2 gives
-#'   up to two-way interactions, 3 gives up to three-way interactions, and so on.
-#' @param discrete_threshold Numeric predictors with at most this many unique
-#'   finite values are treated as categorical. Default is \code{2}.
+#'   among the non-blocking main effects. For example, 1 gives main effects
+#'   only, 2 gives up to two-way interactions, 3 gives up to three-way
+#'   interactions, and so on.
 #' @param polynomial_order Integer >= 1. Maximum polynomial degree for continuous
-#'   predictors. A value of 1 means only linear terms; 2 adds squares \code{I(X^2)};
-#'   3 adds cubes \code{I(X^3)}; in general, all powers \code{I(X^k)} for
-#'   \code{k} from 2 up to \code{polynomial_order} are added.
+#'   non-blocking predictors. A value of 1 means only linear terms; 2 adds
+#'   squares \code{I(X^2)}; 3 adds cubes \code{I(X^3)}; in general, all powers
+#'   \code{I(X^k)} for \code{k} from 2 up to \code{polynomial_order} are added.
 #' @param include_pc_2way Logical. If \code{TRUE} (default) and
 #'   \code{polynomial_order >= 2}, include partial-cubic two-way terms of the
-#'   form \code{Z:I(X^2)}.
+#'   form \code{Z:I(X^2)} where \code{X} is continuous and \code{Z} is another
+#'   non-blocking predictor.
 #' @param include_pc_3way Logical. If \code{TRUE} and \code{polynomial_order >= 2},
-#'   include partial-cubic three-way terms \code{I(X^2):Z:W}.
+#'   include partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
+#'   predictors.
 #' @param intercept Logical. If \code{TRUE} (default), include an intercept in the
 #'   expansion; if \code{FALSE}, the generated RHS drops the intercept.
+#' @param blocking Optional character vector of column names in \code{data} to
+#'   treat as blocking factors. These variables are included in the spec and
+#'   typed like other predictors (categorical vs continuous), but they enter the
+#'   model only as additive main effects and never appear in interactions,
+#'   polynomials, or partial-cubic terms. Blocking variables must not also
+#'   appear on the right-hand side of \code{formula}.
 #'
 #' @return An object of class \code{"bigexp_spec"} with components:
 #' \itemize{
 #'   \item \code{formula}: expanded formula of the form \code{y ~ <big expansion>},
 #'         using the response from the input formula.
 #'   \item \code{rhs}: right-hand side expansion string (reusable for any response).
-#'   \item \code{vars}: character vector of predictor names in the order discovered
-#'         from the formula and data.
+#'   \item \code{vars}: character vector of predictor names (including blocking
+#'         variables) in the order discovered from the formula and data.
 #'   \item \code{is_cat}: named logical vector indicating which predictors are
 #'         treated as categorical (\code{TRUE}) versus continuous (\code{FALSE}).
 #'   \item \code{levels}: list of locked factor levels for categorical predictors.
@@ -210,9 +224,9 @@
 #'         (rows \code{c("min","max")}).
 #'   \item \code{settings}: list of expansion settings, including
 #'         \code{factorial_order}, \code{polynomial_order},
-#'         \code{discrete_threshold}, \code{include_pc_2way},
-#'         \code{include_pc_3way}, \code{intercept}, and stored contrast
-#'         information.
+#'         \code{include_pc_2way},
+#'         \code{include_pc_3way}, \code{intercept}, \code{blocking}, and
+#'         stored contrast information.
 #' }
 #'
 #' @seealso \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},
@@ -238,7 +252,6 @@
 #'
 #' print(spec)
 #'
-#'
 #' ## Example 2: pure main effects (no interactions, no polynomial terms)
 #' spec_main <- bigexp_terms(
 #'   y ~ X1 + X2 + G,
@@ -247,17 +260,40 @@
 #'   polynomial_order = 1   # no I(X^2) or higher
 #' )
 #'
+#' ## Example 3: blocking factors (categorical and continuous)
+#' set.seed(2)
+#' df_block <- data.frame(
+#'   y           = rnorm(30),
+#'   X1          = rnorm(30),
+#'   X2          = rnorm(30),
+#'   G           = factor(sample(c("A", "B"), 30, replace = TRUE)),
+#'   Operator    = factor(sample(paste0("Op", 1:3), 30, replace = TRUE)),
+#'   AmbientTemp = rnorm(30, mean = 22, sd = 2)  # continuous blocking covariate
+#' )
+#'
+#' ## Here Operator (categorical) and AmbientTemp (continuous) are blocking factors:
+#' ## they enter additively, but do not appear in interactions or polynomials.
+#' spec_block <- bigexp_terms(
+#'   y ~ X1 + X2 + G,
+#'   data             = df_block,
+#'   factorial_order  = 2,
+#'   polynomial_order = 3,
+#'   blocking         = c("Operator", "AmbientTemp")
+#' )
+#'
+#' print(spec_block)
+#' spec_block$rhs
 #'
 #' @export
 #' @importFrom stats model.frame na.pass as.formula model.matrix
 #' @importFrom utils combn
 bigexp_terms <- function(formula, data,
                          factorial_order    = 3L,
-                         discrete_threshold = 2L,
                          polynomial_order   = 3L,
                          include_pc_2way    = TRUE,
                          include_pc_3way    = FALSE,
-                         intercept          = TRUE) {
+                         intercept          = TRUE,
+                         blocking           = NULL) {
   stopifnot(is.data.frame(data))
 
   if (!is.numeric(factorial_order) || length(factorial_order) != 1L ||
@@ -268,14 +304,28 @@ bigexp_terms <- function(formula, data,
       !is.finite(polynomial_order) || polynomial_order < 1) {
     stop("polynomial_order must be a single finite integer >= 1.")
   }
-  if (!is.numeric(discrete_threshold) || length(discrete_threshold) != 1L ||
-      !is.finite(discrete_threshold) || discrete_threshold < 0) {
-    stop("discrete_threshold must be a single non-negative number.")
-  }
+
 
   factorial_order    <- as.integer(factorial_order)
   polynomial_order   <- as.integer(polynomial_order)
-  discrete_threshold <- as.integer(discrete_threshold)
+
+
+  ## Validate blocking
+  if (is.null(blocking)) {
+    blocking <- character(0L)
+  } else {
+    if (!is.character(blocking)) {
+      stop("blocking must be a character vector of column names, or NULL.")
+    }
+    blocking <- unique(blocking)
+    missing_blocking <- setdiff(blocking, names(data))
+    if (length(missing_blocking)) {
+      stop(
+        "Blocking variable(s) not found in 'data': ",
+        paste(missing_blocking, collapse = ", ")
+      )
+    }
+  }
 
   ftxt <- paste(deparse(formula), collapse = "")
   if (grepl("[:^]|I\\(", ftxt)) {
@@ -302,52 +352,77 @@ bigexp_terms <- function(formula, data,
   }
   resp <- as.character(lhs_call)
 
+  # Disallow response as a blocking variable
+  if (length(blocking) && resp %in% blocking) {
+    stop(
+      "Blocking variables must not include the response '", resp, "'. ",
+      "Remove it from the 'blocking' argument."
+    )
+  }
+
+
   vars <- attr(tt, "term.labels")
   if (length(vars) == 0L && grepl("~\\s*\\.", ftxt)) {
     # Use the terms object: all RHS vars that actually entered the terms
     vars <- all.vars(stats::delete.response(tt))
   }
-  if (!length(vars)) {
-    stop("No predictors found on the right hand side of formula.")
+
+  if (!length(vars) && !length(blocking)) {
+    stop("No predictors found on the right hand side of formula, and no blocking variables supplied.")
   }
 
-  is_cat      <- setNames(logical(length(vars)), vars)
-  levels_list <- vector("list", length(vars)); names(levels_list) <- vars
+  # Disallow variables listed both in the RHS and in 'blocking'
+  if (length(blocking)) {
+    conflict_blocking <- intersect(blocking, vars)
+    if (length(conflict_blocking)) {
+      stop(
+        "The following variables are listed both in the model RHS and in 'blocking': ",
+        paste(conflict_blocking, collapse = ", "),
+        ". Blocking variables are included automatically via the 'blocking' argument; ",
+        "remove them from the formula RHS."
+      )
+    }
+  }
+
+
+  ## All predictors in the spec: union of RHS vars and blocking cols
+  vars_all <- if (length(blocking)) unique(c(vars, blocking)) else vars
+
+  is_cat      <- setNames(logical(length(vars_all)), vars_all)
+  levels_list <- vector("list", length(vars_all)); names(levels_list) <- vars_all
   num_range   <- matrix(
     NA_real_, nrow = 2, ncol = 0,
     dimnames = list(c("min", "max"), character())
   )
   dat0 <- as.data.frame(data)
 
-  # Decide which predictors are categorical vs continuous, and lock levels/ranges
-  for (v in vars) {
+  blocking_vars <- intersect(vars_all, blocking)
+
+  ## Decide which predictors are categorical vs continuous, and lock levels/ranges
+  for (v in vars_all) {
     x <- dat0[[v]]
+
     if (is.factor(x) || is.character(x) || is.logical(x)) {
       is_cat[v] <- TRUE
       fx <- factor(x)
       levels_list[[v]] <- levels(fx)
       dat0[[v]] <- fx
+
     } else if (is.numeric(x)) {
-      ux <- unique(x[is.finite(x)])
-      if (length(ux) <= discrete_threshold) {
-        is_cat[v] <- TRUE
-        fx <- factor(x)
-        levels_list[[v]] <- levels(fx)
-        dat0[[v]] <- fx
-      } else {
-        is_cat[v] <- FALSE
-        r <- range(x, finite = TRUE, na.rm = TRUE)
-        if (!all(is.finite(r))) {
-          stop(
-            "Continuous predictor '", v,
-            "' has no finite values in the data used to build the expansion. ",
-            "Either drop this predictor or clean/impute the data before calling bigexp_terms()."
-          )
-        }
-        col_mat <- matrix(r, nrow = 2)
-        colnames(col_mat) <- v
-        num_range <- cbind(num_range, col_mat)
+      # ALWAYS treat numeric as continuous; no auto-discretization
+      is_cat[v] <- FALSE
+      r <- range(x, finite = TRUE, na.rm = TRUE)
+      if (!all(is.finite(r))) {
+        stop(
+          "Continuous predictor '", v,
+          "' has no finite values in the data used to build the expansion. ",
+          "Either drop this predictor or clean/impute the data before calling bigexp_terms()."
+        )
       }
+      col_mat <- matrix(r, nrow = 2)
+      colnames(col_mat) <- v
+      num_range <- cbind(num_range, col_mat)
+
     } else {
       is_cat[v] <- TRUE
       fx <- factor(x)
@@ -356,17 +431,42 @@ bigexp_terms <- function(formula, data,
     }
   }
 
+  ## Non-blocking predictors are eligible for factorial / polynomial terms
+  main_vars <- setdiff(vars_all, blocking_vars)
+  cont_vars <- main_vars[!is_cat[main_vars]]
 
-  cont_vars <- vars[!is_cat]
-  rhs <- .bigexp_build_rhs(
-    vars             = vars,
-    cont_vars        = cont_vars,
-    factorial_order  = factorial_order,
-    polynomial_order = polynomial_order,
-    include_pc_2way  = include_pc_2way,
-    include_pc_3way  = include_pc_3way,
-    intercept        = intercept
-  )
+  rhs_terms <- character()
+
+  if (length(main_vars) > 0L) {
+    rhs_main <- .bigexp_build_rhs(
+      vars             = main_vars,
+      cont_vars        = cont_vars,
+      factorial_order  = factorial_order,
+      polynomial_order = polynomial_order,
+      include_pc_2way  = include_pc_2way,
+      include_pc_3way  = include_pc_3way,
+      intercept        = intercept
+    )
+    rhs_terms <- c(rhs_terms, rhs_main)
+  }
+
+  if (length(blocking_vars) > 0L) {
+    rhs_terms <- c(rhs_terms, blocking_vars)
+  }
+
+  rhs <- paste(rhs_terms, collapse = " + ")
+
+  ## If there are no main_vars, handle intercept explicitly
+  if (!length(main_vars)) {
+    if (!isTRUE(intercept)) {
+      if (nzchar(rhs)) {
+        rhs <- paste(rhs, "- 1")
+      } else {
+        rhs <- "- 1"
+      }
+    }
+  }
+
   form_expanded <- stats::as.formula(paste(resp, "~", rhs))
 
   # Record factor-contrast mapping as used today (and current global options)
@@ -378,17 +478,17 @@ bigexp_terms <- function(formula, data,
     list(
       formula   = form_expanded,
       rhs       = rhs,
-      vars      = vars,
+      vars      = vars_all,
       is_cat    = is_cat,
       levels    = levels_list,
       num_range = num_range,
       settings  = list(
         factorial_order    = factorial_order,
-        discrete_threshold = discrete_threshold,
         polynomial_order   = polynomial_order,
         include_pc_2way    = include_pc_2way,
         include_pc_3way    = include_pc_3way,
         intercept          = intercept,
+        blocking           = blocking_vars,
         contrasts          = contrasts_used,
         contrasts_options  = contrasts_opts
       )
@@ -396,6 +496,7 @@ bigexp_terms <- function(formula, data,
     class = "bigexp_spec"
   )
 }
+
 
 # ---- 2) data preparer ---------------------------------------------------------
 
@@ -571,7 +672,9 @@ bigexp_formula <- function(spec, response) {
     return(spec$formula)
   }
   stopifnot(is.character(response), length(response) == 1L, nzchar(response))
-  stats::as.formula(paste(response, "~", spec$rhs))
+  f <- stats::as.formula(paste(response, "~", spec$rhs))
+  attr(f, "bigexp_spec") <- spec
+  f
 }
 
 
@@ -638,7 +741,7 @@ with_bigexp_contrasts <- function(spec, code) {
 #'   Only main effects should appear on the right hand side.
 #' @param data Training data frame used to lock types and levels.
 #' @param ... Additional arguments forwarded to \code{bigexp_terms()}, such as
-#'   \code{factorial_order}, \code{discrete_threshold}, \code{polynomial_order},
+#'   \code{factorial_order},  \code{polynomial_order},
 #'   \code{include_pc_2way}, \code{include_pc_3way}, and \code{intercept}.
 #'
 #' @return An object of class \code{"bigexp_train"} which is a list with components:
@@ -694,10 +797,49 @@ bigexp_train <- function(formula, data, ...) {
 #' Print method for bigexp_spec objects
 #'
 #' This print method shows a compact summary of the expansion settings and the
-#' predictors that are treated as continuous or categorical.
+#' predictors that are treated as continuous or categorical. It also reports any
+#' variables that were designated as blocking factors and therefore enter the
+#' model only additively (no interactions, no polynomials).
 #'
 #' @param x A "bigexp_spec" object.
 #' @param ... Unused.
+#'
+#' @examples
+#' set.seed(1)
+#' df4 <- data.frame(
+#'   y  = rnorm(10),
+#'   X1 = rnorm(10),
+#'   G  = factor(sample(c("A", "B"), 10, replace = TRUE))
+#' )
+#'
+#' spec4 <- bigexp_terms(
+#'   y ~ X1 + G,
+#'   data             = df4,
+#'   factorial_order  = 2,
+#'   polynomial_order = 2
+#' )
+#'
+#' print(spec4)
+#'
+#' ## Example with a blocking factor:
+#' set.seed(2)
+#' df_block2 <- data.frame(
+#'   y           = rnorm(12),
+#'   X1          = rnorm(12),
+#'   G           = factor(sample(c("A", "B"), 12, replace = TRUE)),
+#'   Operator    = factor(sample(letters[1:3], 12, replace = TRUE)),
+#'   AmbientTemp = rnorm(12, mean = 22, sd = 1.5)
+#' )
+#'
+#' spec_block2 <- bigexp_terms(
+#'   y ~ X1 + G,
+#'   data             = df_block2,
+#'   factorial_order  = 2,
+#'   polynomial_order = 3,
+#'   blocking         = c("Operator", "AmbientTemp")
+#' )
+#'
+#' print(spec_block2)
 #'
 #' @export
 print.bigexp_spec <- function(x, ...) {
@@ -727,6 +869,14 @@ print.bigexp_spec <- function(x, ...) {
     cat(
       "  Categorical: ",
       paste(names(x$is_cat)[x$is_cat], collapse = ", "),
+      "\n",
+      sep = ""
+    )
+  }
+  if (!is.null(x$settings$blocking) && length(x$settings$blocking)) {
+    cat(
+      "  Blocking (additive only): ",
+      paste(x$settings$blocking, collapse = ", "),
       "\n",
       sep = ""
     )

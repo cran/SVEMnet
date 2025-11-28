@@ -8,11 +8,11 @@ bigexp_terms(
   formula,
   data,
   factorial_order = 3L,
-  discrete_threshold = 2L,
   polynomial_order = 3L,
   include_pc_2way = TRUE,
   include_pc_3way = FALSE,
-  intercept = TRUE
+  intercept = TRUE,
+  blocking = NULL
 )
 }
 \arguments{
@@ -25,26 +25,33 @@ generate interactions and polynomial terms automatically.}
 \item{data}{Data frame used to decide types and lock factor levels.}
 
 \item{factorial_order}{Integer >= 1. Maximum order of factorial interactions
-among the main effects. For example, 1 gives main effects only, 2 gives
-up to two-way interactions, 3 gives up to three-way interactions, and so on.}
-
-\item{discrete_threshold}{Numeric predictors with at most this many unique
-finite values are treated as categorical. Default is \code{2}.}
+among the non-blocking main effects. For example, 1 gives main effects
+only, 2 gives up to two-way interactions, 3 gives up to three-way
+interactions, and so on.}
 
 \item{polynomial_order}{Integer >= 1. Maximum polynomial degree for continuous
-predictors. A value of 1 means only linear terms; 2 adds squares \code{I(X^2)};
-3 adds cubes \code{I(X^3)}; in general, all powers \code{I(X^k)} for
-\code{k} from 2 up to \code{polynomial_order} are added.}
+non-blocking predictors. A value of 1 means only linear terms; 2 adds
+squares \code{I(X^2)}; 3 adds cubes \code{I(X^3)}; in general, all powers
+\code{I(X^k)} for \code{k} from 2 up to \code{polynomial_order} are added.}
 
 \item{include_pc_2way}{Logical. If \code{TRUE} (default) and
 \code{polynomial_order >= 2}, include partial-cubic two-way terms of the
-form \code{Z:I(X^2)}.}
+form \code{Z:I(X^2)} where \code{X} is continuous and \code{Z} is another
+non-blocking predictor.}
 
 \item{include_pc_3way}{Logical. If \code{TRUE} and \code{polynomial_order >= 2},
-include partial-cubic three-way terms \code{I(X^2):Z:W}.}
+include partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
+predictors.}
 
 \item{intercept}{Logical. If \code{TRUE} (default), include an intercept in the
 expansion; if \code{FALSE}, the generated RHS drops the intercept.}
+
+\item{blocking}{Optional character vector of column names in \code{data} to
+treat as blocking factors. These variables are included in the spec and
+typed like other predictors (categorical vs continuous), but they enter the
+model only as additive main effects and never appear in interactions,
+polynomials, or partial-cubic terms. Blocking variables must not also
+appear on the right-hand side of \code{formula}.}
 }
 \value{
 An object of class \code{"bigexp_spec"} with components:
@@ -52,8 +59,8 @@ An object of class \code{"bigexp_spec"} with components:
 \item \code{formula}: expanded formula of the form \code{y ~ <big expansion>},
 using the response from the input formula.
 \item \code{rhs}: right-hand side expansion string (reusable for any response).
-\item \code{vars}: character vector of predictor names in the order discovered
-from the formula and data.
+\item \code{vars}: character vector of predictor names (including blocking
+variables) in the order discovered from the formula and data.
 \item \code{is_cat}: named logical vector indicating which predictors are
 treated as categorical (\code{TRUE}) versus continuous (\code{FALSE}).
 \item \code{levels}: list of locked factor levels for categorical predictors.
@@ -61,23 +68,25 @@ treated as categorical (\code{TRUE}) versus continuous (\code{FALSE}).
 (rows \code{c("min","max")}).
 \item \code{settings}: list of expansion settings, including
 \code{factorial_order}, \code{polynomial_order},
-\code{discrete_threshold}, \code{include_pc_2way},
-\code{include_pc_3way}, \code{intercept}, and stored contrast
-information.
+\code{include_pc_2way},
+\code{include_pc_3way}, \code{intercept}, \code{blocking}, and
+stored contrast information.
 }
 }
 \description{
 \code{bigexp_terms()} builds a specification object that:
 \itemize{
 \item decides which predictors are treated as continuous or categorical,
+\item optionally treats selected variables as blocking factors that enter
+the model only additively and never in interactions or polynomials,
 \item locks factor levels from the supplied data,
 \item records the contrast settings used when the model matrix is first built, and
-\item constructs a reusable right-hand side (RHS) string for a large expansion
-that can be shared across multiple responses and datasets.
+\item constructs a reusable right-hand side (RHS) expression string for a large
+expansion that can be shared across multiple responses and datasets.
 }
 }
 \details{
-The expansion can include:
+The expansion for non-blocking predictors can include:
 \itemize{
 \item full factorial interactions among the listed main effects, up to a
 chosen order;
@@ -90,18 +99,22 @@ chosen degree; and
 Predictor types are inferred from \code{data}:
 \itemize{
 \item factors, characters, and logicals are treated as categorical;
-\item numeric predictors with at most \code{discrete_threshold} distinct
-finite values are treated as categorical; and
 \item all other numeric predictors are treated as continuous, and their
 observed ranges are stored.
 }
 
+Variables listed in \code{blocking} are included in the spec and are typed
+using the same rules as other predictors (for example, a numeric blocking
+variable with many distinct values is treated as continuous). However,
+blocking variables enter the model only as additive main effects, without
+interactions or polynomial terms, regardless of \code{factorial_order} or
+\code{polynomial_order}.
+
 Once built, a \code{"bigexp_spec"} can be reused to create consistent
-expansions for new datasets via \code{\link{bigexp_prepare}}, and
-\code{\link{bigexp_formula}}. The RHS
-and contrast settings are locked, so the same spec applied to different data
-produces design matrices with the same columns in the same order (up to
-missing levels for specific batches).
+expansions for new datasets via \code{\link{bigexp_prepare}} and
+\code{\link{bigexp_formula}}. The RHS and contrast settings are locked, so
+the same spec applied to different data produces design matrices with the
+same columns in the same order (up to missing levels for specific batches).
 }
 \section{Typical workflow}{
 
@@ -112,8 +125,9 @@ lock the expansion (types, levels, contrasts, RHS).
 \item Fit models using \code{spec$formula} and the original data
 (for example, \code{SVEMnet(spec$formula, data, ...)} or
 \code{lm(spec$formula, data)}).
-\item For new batches, call \code{\link{bigexp_prepare}} with the same \code{spec} so that
-design matrices have exactly the same columns and coding.
+\item For new batches, call \code{\link{bigexp_prepare}} with the same
+\code{spec} so that design matrices have exactly the same columns
+and coding.
 \item For additional responses on the same factor space, use
 \code{\link{bigexp_formula}} to swap the left-hand side while
 reusing the locked expansion.
@@ -140,7 +154,6 @@ spec <- bigexp_terms(
 
 print(spec)
 
-
 ## Example 2: pure main effects (no interactions, no polynomial terms)
 spec_main <- bigexp_terms(
   y ~ X1 + X2 + G,
@@ -149,6 +162,29 @@ spec_main <- bigexp_terms(
   polynomial_order = 1   # no I(X^2) or higher
 )
 
+## Example 3: blocking factors (categorical and continuous)
+set.seed(2)
+df_block <- data.frame(
+  y           = rnorm(30),
+  X1          = rnorm(30),
+  X2          = rnorm(30),
+  G           = factor(sample(c("A", "B"), 30, replace = TRUE)),
+  Operator    = factor(sample(paste0("Op", 1:3), 30, replace = TRUE)),
+  AmbientTemp = rnorm(30, mean = 22, sd = 2)  # continuous blocking covariate
+)
+
+## Here Operator (categorical) and AmbientTemp (continuous) are blocking factors:
+## they enter additively, but do not appear in interactions or polynomials.
+spec_block <- bigexp_terms(
+  y ~ X1 + X2 + G,
+  data             = df_block,
+  factorial_order  = 2,
+  polynomial_order = 3,
+  blocking         = c("Operator", "AmbientTemp")
+)
+
+print(spec_block)
+spec_block$rhs
 
 }
 \seealso{

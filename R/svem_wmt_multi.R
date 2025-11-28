@@ -221,22 +221,28 @@ svem_wmt_multi <- function(formulas,
   }
 
   # ---- optional combined plot using plot.svem_significance_test ----
-  if (isTRUE(plot)) {
-    non_null <- Filter(Negate(is.null), res_list)
-    if (length(non_null) >= 1L) {
-      lbls <- names(non_null)
-      # plot(wmt1, wmt2, ..., labels = lbls)
-      try(
-        {
-          args_plot <- c(non_null[1L],
-                         non_null[-1L],
-                         list(labels = lbls))
-          print(do.call(plot, args_plot))
-        },
-        silent = TRUE
-      )
-    }
+# ---- optional combined plot using plot.svem_significance_test ----
+if (isTRUE(plot)) {
+  non_null <- Filter(Negate(is.null), res_list)
+  if (length(non_null) >= 1L) {
+    lbls <- names(non_null)
+    # plot(wmt1, wmt2, ..., labels = lbls)
+    try(
+      {
+        args_plot <- c(
+          list(non_null[[1L]]),
+          non_null[-1L],
+          list(labels = lbls)
+        )
+        # Call the S3 method directly, not the generic
+        print(do.call(plot.svem_significance_test, args_plot))
+
+      },
+      silent = TRUE
+    )
   }
+}
+
 
   if (isTRUE(verbose)) {
     cat("\nWMT p-values:\n")

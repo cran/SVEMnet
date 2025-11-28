@@ -51,6 +51,7 @@
 #'   row and \code{candidates}. If \code{"Notes_from_SVEMnet"} is missing, it is created;
 #'   if present and nonempty, the label is appended using \code{"; "} as
 #'   separator.
+#'
 #' @return
 #' A list with components:
 #' \describe{
@@ -68,6 +69,7 @@
 #' @seealso
 #' \code{\link{svem_score_random}},
 #' \code{svem_select_candidates()}
+#'
 #' @examples
 #' \donttest{
 #' ## ------------------------------------------------------------------------
@@ -204,7 +206,7 @@
 #'   best_existing$best
 #' }
 #' }
-
+#'
 #' @export
 svem_select_from_score_table <- function(score_table,
                                          target         = "score",
@@ -334,6 +336,7 @@ svem_select_from_score_table <- function(score_table,
         top_frac       = top_frac,
         k              = k,
         predictor_cols = predictor_cols,
+        direction      = direction,
         metric         = "gower"
       )
 
