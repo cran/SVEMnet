@@ -49,14 +49,11 @@
   fam <- tolower(object$family %||% "gaussian")
 
   # Rebuild design matrix (mirror predict.svem_model)
-  # Always use baseenv() to avoid depending on any stale environments
-  # captured when the model was fitted.
   terms_obj <- stats::delete.response(object$terms)
   environment(terms_obj) <- baseenv()
 
   # Harmonize factor / character predictors to training levels
   xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else list()
-
   if (length(xlev)) {
     for (v in names(xlev)) {
       if (v %in% names(newdata)) {
@@ -73,7 +70,7 @@
 
   mf <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
 
-  # Use stored contrasts or saved global contrast options
+  # Use stored contrasts when available; otherwise restore fit-time contrast options
   ctr <- object$contrasts
   have_ctr <- !is.null(ctr)
 
@@ -84,49 +81,43 @@
     fit_opts <- tryCatch(object$schema$contrasts_options,
                          error = function(e) NULL)
     fit_opts <- fit_opts %||% old_opts$contrasts
-    if (!is.null(fit_opts)) {
-      options(contrasts = fit_opts)
-    }
+    if (!is.null(fit_opts)) options(contrasts = fit_opts)
+
     mm <- stats::model.matrix(terms_obj, data = mf)
+
   } else {
-    # More robust reconstruction of contrasts from stored spec
-    if (!is.list(ctr)) {
-      stop("Invalid contrasts specification in fitted svem_model object.",
-           call. = FALSE)
-    }
+    # Be forgiving: coerce to list if possible
+    if (!is.list(ctr)) ctr <- as.list(ctr)
+
+    # Coerce any character contrast names back to functions; drop invalid entries
     if (length(ctr)) {
       for (nm in names(ctr)) {
         val <- ctr[[nm]]
         if (is.character(val)) {
-          # skip empty / NA names: use default contrast for this variable
-          if (!length(val) || is.na(val)) {
+          if (!length(val) || is.na(val) || !nzchar(val)) {
             ctr[[nm]] <- NULL
-            next
-          }
-          if (!exists(val, mode = "function")) {
+          } else if (!exists(val, mode = "function", inherits = TRUE)) {
             warning(
               "Contrast function '", val,
               "' not found; using default contrasts for variable '", nm, "'."
             )
             ctr[[nm]] <- NULL
           } else {
-            ctr[[nm]] <- get(val, mode = "function")
+            ctr[[nm]] <- get(val, mode = "function", inherits = TRUE)
           }
         }
       }
     }
+
     mm <- stats::model.matrix(terms_obj, data = mf, contrasts.arg = ctr)
   }
 
   # Drop intercept column: glmnet handled the intercept separately
   int_col <- which(colnames(mm) == "(Intercept)")
-  if (length(int_col)) {
-    mm <- mm[, -int_col, drop = FALSE]
-  }
+  if (length(int_col)) mm <- mm[, -int_col, drop = FALSE]
 
-  # Identify "bad" rows (non-finite entries in the model matrix)
-  bad_rows <- !stats::complete.cases(mm) |
-    rowSums(!is.finite(mm), na.rm = TRUE) > 0L
+  # Identify "bad" rows (unseen levels / missingness produce NA in mm)
+  bad_rows <- rowSums(!is.finite(mm)) > 0L
   if (any(bad_rows)) {
     mm[!is.finite(mm)] <- 0
   }
@@ -146,19 +137,19 @@
   if (length(common_cols)) {
     mm_use[, common_cols] <- mm[, common_cols, drop = FALSE]
   }
-
   storage.mode(mm_use) <- "double"
 
   # Member predictions from coef_matrix
   coef_matrix <- object$coef_matrix  # nBoot x (p + 1)
   if (!is.matrix(coef_matrix) || ncol(coef_matrix) < 1L) {
-    stop("`object$coef_matrix` must be a numeric matrix with intercept and slopes.")
+    stop("`object$coef_matrix` must be a non-empty matrix with an intercept column.")
   }
+  storage.mode(coef_matrix) <- "double"
 
   n_boot <- nrow(coef_matrix)
 
-  intercepts <- coef_matrix[, 1]                # length B
-  betas      <- coef_matrix[, -1, drop = FALSE] # B x p
+  intercepts <- as.numeric(coef_matrix[, 1])
+  betas      <- coef_matrix[, -1, drop = FALSE]
 
   # Ensure coefficient columns align with training_X order
   if (!is.null(colnames(betas))) {
@@ -167,8 +158,8 @@
       stop(
         "`object$coef_matrix` is missing coefficients for training design columns: ",
         paste(missing_cols, collapse = ", "),
-        ". This usually means the stored object is out of sync with the ",
-        "training design (e.g. formula/specification or contrasts changed).",
+        ". This usually means the stored object is out of sync with the training design ",
+        "(e.g. formula/specification/contrasts/factor levels changed).",
         call. = FALSE
       )
     }
@@ -184,26 +175,19 @@
     )
   }
 
-  # Compute eta matrix: n x B
-  eta_mat <- mm_use %*% t(betas) +
-    matrix(intercepts, nrow = m, ncol = n_boot, byrow = TRUE)
+  # Compute eta matrix: n x B (use sweep to avoid intercept recycling pitfalls)
+  eta_mat <- mm_use %*% t(betas)
+  eta_mat <- sweep(eta_mat, 2, intercepts, `+`)
 
   # Transform to requested scale
   if (identical(fam, "binomial")) {
-    if (type == "response") {
-      pred_mat <- stats::plogis(eta_mat)
-    } else {
-      pred_mat <- eta_mat
-    }
+    pred_mat <- if (type == "response") stats::plogis(eta_mat) else eta_mat
   } else {
-    # Gaussian (and other identity-link families): response equals link
     pred_mat <- eta_mat
   }
 
-  # Set bad rows to NA in the returned matrix
-  if (any(bad_rows)) {
-    pred_mat[bad_rows, ] <- NA_real_
-  }
+  # Set bad rows to NA
+  if (any(bad_rows)) pred_mat[bad_rows, ] <- NA_real_
 
   list(
     pred_mat = pred_mat,
@@ -267,15 +251,16 @@ svem_append_design_space_cols <- function(score_table,
   if (!is.data.frame(score_table)) {
     stop("`score_table` must be a data.frame.")
   }
-  if (!is.list(objects) || is.null(names(objects)) ||
-      any(names(objects) == "")) {
+  if (!is.list(objects) || is.null(names(objects)) || any(!nzchar(names(objects)))) {
     stop("`objects` must be a named list of svem_model objects.")
   }
   if (!is.null(specs) && !is.list(specs)) {
     stop("`specs` must be NULL or a named list.")
   }
-  if (is.list(specs)) {
-    if (is.null(names(specs)) || any(names(specs) == "")) {
+  if (is.null(specs)) specs <- list()
+
+  if (length(specs)) {
+    if (is.null(names(specs)) || any(!nzchar(names(specs)))) {
       stop("`specs` must be a named list when provided.")
     }
     bad_names <- setdiff(names(specs), names(objects))
@@ -283,11 +268,9 @@ svem_append_design_space_cols <- function(score_table,
       stop("The following names in `specs` do not match any response in `objects`: ",
            paste(bad_names, collapse = ", "))
     }
-  } else {
-    specs <- list()
   }
 
-  # Ensure coef_matrix exists for all models
+  # Ensure coef_matrix exists for all models (this is a hard requirement)
   for (nm in names(objects)) {
     obj <- objects[[nm]]
     if (!inherits(obj, "svem_model")) {
@@ -302,7 +285,7 @@ svem_append_design_space_cols <- function(score_table,
   n_row <- nrow(score_table)
   if (n_row == 0L) return(score_table)
 
-  # Extract predictor columns from score_table via sampling_schema
+  # Predictor columns: use sampling_schema$predictor_vars (must be present)
   first_obj <- objects[[1L]]
   if (is.null(first_obj$sampling_schema) ||
       is.null(first_obj$sampling_schema$predictor_vars)) {
@@ -321,7 +304,7 @@ svem_append_design_space_cols <- function(score_table,
 
   X <- score_table[, pred_vars, drop = FALSE]
 
-  # Ensure point prediction columns <resp>_pred are present for each response
+  # Ensure point prediction columns <resp>_pred exist for each response
   pred_cols_expected <- paste0(names(objects), "_pred")
   missing_pred <- setdiff(pred_cols_expected, colnames(score_table))
   if (length(missing_pred)) {
@@ -337,13 +320,10 @@ svem_append_design_space_cols <- function(score_table,
   ind_cols <- list()
 
   for (resp in names(objects)) {
-    obj <- objects[[resp]]
-    sp  <- specs[[resp]]
+    sp <- specs[[resp]]
 
     # No specs provided: skip
-    if (is.null(sp)) {
-      next
-    }
+    if (is.null(sp)) next
     if (!is.list(sp)) {
       stop("Specs for response '", resp, "' must be NULL or a list with components ",
            "`lower` and/or `upper`.")
@@ -353,64 +333,42 @@ svem_append_design_space_cols <- function(score_table,
     lo_raw <- sp$lower
     hi_raw <- sp$upper
 
-    lo_is_missing <- is.null(lo_raw) || (length(lo_raw) == 1L && is.na(lo_raw))
-    hi_is_missing <- is.null(hi_raw) || (length(hi_raw) == 1L && is.na(hi_raw))
+    lo_missing <- is.null(lo_raw) || (length(lo_raw) == 1L && is.na(lo_raw))
+    hi_missing <- is.null(hi_raw) || (length(hi_raw) == 1L && is.na(hi_raw))
 
     # Both bounds missing: treat as no active spec
-    if (lo_is_missing && hi_is_missing) {
-      next
-    }
+    if (lo_missing && hi_missing) next
 
-    lo <- if (lo_is_missing) -Inf else as.numeric(lo_raw)
-    hi <- if (hi_is_missing)  Inf else as.numeric(hi_raw)
+    lo <- if (lo_missing) -Inf else as.numeric(lo_raw)
+    hi <- if (hi_missing)  Inf else as.numeric(hi_raw)
 
     if (!is.numeric(lo) || length(lo) != 1L ||
-        !is.numeric(hi) || length(hi) != 1L) {
-      stop("Specs for response '", resp, "' must have numeric `lower` and `upper` ",
-           "(or NULL/NA to indicate one-sided or no spec).")
+        !is.numeric(hi) || length(hi) != 1L ||
+        !is.finite(lo) && lo != -Inf ||
+        !is.finite(hi) && hi !=  Inf) {
+      stop("Specs for response '", resp, "' must have numeric scalar bounds (or NULL/NA for one-sided).")
+    }
+    if (is.finite(lo) && is.finite(hi) && lo > hi) {
+      stop("Specs for response '", resp, "' are invalid: lower > upper.")
     }
 
-    # Member predictions on response scale (no debias), with try-safety
-    memb <- try(
-      .svem_member_predictions(
-        object  = obj,
-        newdata = X,
-        type    = "response"
-      ),
-      silent = TRUE
-    )
+    obj <- objects[[resp]]
 
-    if (inherits(memb, "try-error") || !is.list(memb) || is.null(memb$pred_mat)) {
-      if (isTRUE(getOption("svem.verbose", TRUE))) {
-        msg_txt <- if (inherits(memb, "try-error")) as.character(memb)[1] else "invalid return from .svem_member_predictions()"
-        message("Mean-level probability append: member predictions failed for response '",
-                resp, "'. ", msg_txt)
-      }
-      p_cols[[resp]]   <- rep(NA_real_,    n_row)
-      ind_cols[[resp]] <- rep(NA_integer_, n_row)
-      next
-    }
-
-    pred_mat <- memb$pred_mat  # n x B
+    # Member predictions on response scale (no debias)
+    memb <- .svem_member_predictions(object = obj, newdata = X, type = "response")
+    pred_mat <- memb$pred_mat
 
     if (!is.matrix(pred_mat) || nrow(pred_mat) != n_row) {
-      if (isTRUE(getOption("svem.verbose", TRUE))) {
-        message("Mean-level probability append: pred_mat has unexpected dimension for response '",
-                resp, "'. Filling NA.")
-      }
-      p_cols[[resp]]   <- rep(NA_real_,    n_row)
-      ind_cols[[resp]] <- rep(NA_integer_, n_row)
-      next
+      stop("Member prediction matrix has unexpected dimensions for response '", resp, "'.")
     }
 
-    # Probability that the fitted mean is in spec
+    # Probability that the fitted mean is in spec (ignore NA members)
     inside_mat <- (pred_mat >= lo & pred_mat <= hi)
     p_in_spec  <- rowMeans(inside_mat, na.rm = TRUE)
     p_in_spec[!is.finite(p_in_spec)] <- NA_real_
 
-    # Point prediction in spec? (use <resp>_pred from score_table)
-    pred_col <- paste0(resp, "_pred")
-    mu_hat   <- score_table[[pred_col]]
+    # Point prediction in spec (use <resp>_pred from score_table)
+    mu_hat <- score_table[[paste0(resp, "_pred")]]
     in_spec_point <- as.integer(mu_hat >= lo & mu_hat <= hi)
     in_spec_point[!is.finite(mu_hat)] <- NA_integer_
 
@@ -420,38 +378,35 @@ svem_append_design_space_cols <- function(score_table,
 
   spec_resps <- names(p_cols)
 
-  # Joint probabilities and indicators
-  if (length(spec_resps) == 0L) {
-    # No active specs: joint quantities undefined
+  # Joint quantities
+  if (!length(spec_resps)) {
     p_joint_mean <- rep(NA_real_,    n_row)
     joint_ind    <- rep(NA_integer_, n_row)
   } else {
-    # Product of mean-level probabilities over responses with active specs
+    # Product of mean-level probabilities; NA if any component is NA
     p_joint_mean <- rep(1, n_row)
+    any_na <- rep(FALSE, n_row)
     for (resp in spec_resps) {
       pj <- p_cols[[resp]]
-      na_idx <- is.na(pj)
+      any_na <- any_na | is.na(pj)
       p_joint_mean <- p_joint_mean * pj
-      p_joint_mean[na_idx] <- NA_real_
     }
+    p_joint_mean[any_na] <- NA_real_
 
-    # Point indicator: 0 dominates NA; NA dominates 1
-    ind_mat <- do.call(cbind, ind_cols[spec_resps])  # n_row x R
-
+    ind_mat  <- do.call(cbind, ind_cols[spec_resps])
     zero_any <- rowSums(ind_mat == 0L, na.rm = TRUE) > 0L
-    na_any   <- apply(ind_mat, 1L, function(z) any(is.na(z)))
+    na_any   <- rowSums(is.na(ind_mat)) > 0L
 
     joint_ind <- integer(n_row)
-    joint_ind[zero_any]             <- 0L
-    joint_ind[!zero_any & na_any]   <- NA_integer_
-    joint_ind[!zero_any & !na_any]  <- 1L
+    joint_ind[zero_any]            <- 0L
+    joint_ind[!zero_any & na_any]  <- NA_integer_
+    joint_ind[!zero_any & !na_any] <- 1L
   }
 
   # Assemble appended columns
   if (length(spec_resps)) {
     p_df   <- as.data.frame(p_cols,   check.names = FALSE, optional = FALSE)
     ind_df <- as.data.frame(ind_cols, check.names = FALSE, optional = FALSE)
-
     colnames(p_df)   <- paste0(spec_resps, "_p_in_spec_mean")
     colnames(ind_df) <- paste0(spec_resps, "_in_spec_point")
   } else {
@@ -464,10 +419,5 @@ svem_append_design_space_cols <- function(score_table,
     joint_in_spec_point = joint_ind
   )
 
-  cbind(
-    score_table,
-    p_df,
-    ind_df,
-    joint_df
-  )
+  cbind(score_table, p_df, ind_df, joint_df)
 }

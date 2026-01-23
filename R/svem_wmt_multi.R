@@ -63,7 +63,6 @@
 #' @seealso
 #' \code{\link{svem_significance_test_parallel}},
 #' \code{\link{plot.svem_significance_test}}
-#' @importFrom stats sd ave
 #' @examples
 #' \donttest{
 #' data(lipid_screen)
@@ -126,26 +125,43 @@ svem_wmt_multi <- function(formulas,
   if (is.null(data) || !is.data.frame(data)) {
     stop("`data` must be a data.frame.")
   }
+  if (!is.list(wmt_control)) {
+    stop("`wmt_control` must be a list (or an empty list).")
+  }
 
   wmt_transform <- match.arg(wmt_transform)
 
-  # ---- infer / clean response names ----
+  # ---- infer / clean response names (preserve any user-supplied names) ----
   f_names <- names(formulas)
-  if (is.null(f_names) || any(!nzchar(f_names))) {
-    f_names <- vapply(formulas, function(fml) {
+  if (is.null(f_names)) f_names <- rep("", length(formulas))
+
+  fill_idx <- which(!nzchar(f_names))
+  if (length(fill_idx)) {
+    inferred <- vapply(formulas[fill_idx], function(fml) {
       if (!inherits(fml, "formula")) return(NA_character_)
-      lhs <- tryCatch(as.character(fml[[2L]]),
-                      error = function(e) NA_character_)
+      lhs <- tryCatch(as.character(fml[[2L]]), error = function(e) NA_character_)
       if (!is.na(lhs) && nzchar(lhs)) lhs else "response"
     }, character(1))
+    f_names[fill_idx] <- inferred
+  }
 
-    # make unique if needed
-    if (anyDuplicated(f_names)) {
-      idx <- ave(seq_along(f_names), f_names, FUN = seq_along)
-      dup <- duplicated(f_names) | (idx > 1L)
-      f_names[dup] <- paste0(f_names[dup], "_", idx[dup])
-    }
-    names(formulas) <- f_names
+  # ensure uniqueness deterministically: second duplicate gets suffix _2, etc.
+  idx <- stats::ave(seq_along(f_names), f_names, FUN = seq_along)
+  dup <- idx > 1L
+  if (any(dup)) {
+    f_names[dup] <- paste0(f_names[dup], "_", idx[dup])
+  }
+  names(formulas) <- f_names
+
+  # ---- protect required args from being overridden via wmt_control ----
+  protected <- c("formula", "data", "mixture_groups")
+  if (length(intersect(names(wmt_control), protected))) {
+    warning(
+      "svem_wmt_multi(): ignoring the following entries in `wmt_control` because they ",
+      "are supplied by svem_wmt_multi itself: ",
+      paste(intersect(names(wmt_control), protected), collapse = ", ")
+    )
+    wmt_control[intersect(names(wmt_control), protected)] <- NULL
   }
 
   # transform constants (aligned with svem_score_random)
@@ -169,9 +185,6 @@ svem_wmt_multi <- function(formulas,
       cat("Running whole-model test (WMT) for", nm, "...\n")
     }
 
-    # Build argument list:
-    # - always supply formula, data, mixture_groups
-    # - allow wmt_control to override (e.g., seed, nPerm, nPoint, spec, ...)
     args <- c(
       list(
         formula        = fml,
@@ -192,11 +205,17 @@ svem_wmt_multi <- function(formulas,
     )
     res_list[[nm]] <- wmt_obj
 
+    # robust extraction of scalar p-value
     p <- NA_real_
-    if (!is.null(wmt_obj) && is.finite(wmt_obj$p_value)) {
-      p <- as.numeric(wmt_obj$p_value)
-      # bound away from 0 and 1 to stabilize transforms
-      p <- min(max(p, 1e-16), 1 - 1e-12)
+    if (!is.null(wmt_obj)) {
+      pv <- wmt_obj$p_value
+      if (!is.null(pv) && length(pv) >= 1L) {
+        pv <- as.numeric(pv[1L])
+        if (is.finite(pv)) {
+          # bound away from 0 and 1 to stabilize transforms
+          p <- min(max(pv, 1e-16), 1 - 1e-12)
+        }
+      }
     }
     p_vals[nm] <- p
 
@@ -209,41 +228,37 @@ svem_wmt_multi <- function(formulas,
         one_minus_p = (1 - p)^wmt_strength
       )
     }
-    mult <- max(mult_raw, wmt_floor)
-    mults[nm] <- mult
+    mults[nm] <- max(as.numeric(mult_raw), wmt_floor)
 
     if (isTRUE(verbose)) {
       cat(sprintf(" - %s: p = %s, multiplier = %.4g\n",
                   nm,
                   if (is.na(p)) "NA" else format(p, digits = 4),
-                  mult))
+                  mults[nm]))
     }
   }
 
-  # ---- optional combined plot using plot.svem_significance_test ----
-# ---- optional combined plot using plot.svem_significance_test ----
-if (isTRUE(plot)) {
-  non_null <- Filter(Negate(is.null), res_list)
-  if (length(non_null) >= 1L) {
-    lbls <- names(non_null)
-    # plot(wmt1, wmt2, ..., labels = lbls)
-    try(
-      {
-        args_plot <- c(
-          list(non_null[[1L]]),
-          non_null[-1L],
-          list(labels = lbls)
-        )
-        # Call the S3 method directly, not the generic
-        print(do.call(plot.svem_significance_test, args_plot))
+  # ---- optional combined plot using S3 dispatch ----
+  if (isTRUE(plot)) {
+    non_null <- Filter(Negate(is.null), res_list)
+    if (length(non_null) >= 1L) {
+      lbls <- names(non_null)
+      # plot(wmt1, wmt2, ..., labels = lbls)
+      try(
+        {
+          args_plot <- c(
+            list(non_null[[1L]]),
+            non_null[-1L],
+            list(labels = lbls)
+          )
+          # Call the S3 method directly, not the generic
+          print(do.call(plot.svem_significance_test, args_plot))
 
-      },
-      silent = TRUE
-    )
+        },
+        silent = TRUE
+      )
+    }
   }
-}
-
-
   if (isTRUE(verbose)) {
     cat("\nWMT p-values:\n")
     print(p_vals)

@@ -34,8 +34,7 @@ plot.svem_significance_test <- function(x, ..., labels = NULL) {
 
   # Build labels
   if (is.null(labels)) {
-    labels <- vapply(seq_along(results_list), function(i) {
-      res <- results_list[[i]]
+    inferred <- vapply(results_list, function(res) {
       nm <- tryCatch({
         if (!is.null(res$data_d) && "Response" %in% names(res$data_d) && length(res$data_d$Response)) {
           as.character(res$data_d$Response[1])
@@ -45,22 +44,23 @@ plot.svem_significance_test <- function(x, ..., labels = NULL) {
           "Response"
         }
       }, error = function(e) "Response")
-      paste0(nm, "_", i)
+      if (!nzchar(nm)) "Response" else nm
     }, character(1))
+    labels <- make.unique(inferred)
   } else {
-    labels <- make.unique(labels)
-    if (length(labels) != length(results_list)) {
+    if (!is.character(labels) || length(labels) != length(results_list)) {
       stop("Length of 'labels' must match the number of results.")
     }
+    labels <- make.unique(as.character(labels))
   }
 
   # Combine plottable pieces
   pieces <- lapply(seq_along(results_list), function(i) {
     res <- results_list[[i]]
     dd  <- res$data_d
-    if (is.null(dd) || !all(c("D", "Source_Type", "Response") %in% names(dd))) return(NULL)
+    if (is.null(dd) || !all(c("D", "Source_Type") %in% names(dd))) return(NULL)
 
-    out <- dd[, c("D", "Source_Type", "Response"), drop = FALSE]
+    out <- dd[, intersect(c("D", "Source_Type"), names(dd)), drop = FALSE]
     out$D <- as.numeric(out$D)
     out$Source_Type <- as.character(out$Source_Type)
     out$Response <- labels[i]

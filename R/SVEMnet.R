@@ -222,7 +222,6 @@
 #' weights, these information-criterion scores are used heuristically for
 #' relative model comparison within each FRW replicate, rather than as exact
 #' AIC/BIC values.
-
 #'
 #' For diagnostics, SVEMnet reports the raw Kish effective sizes across
 #' bootstraps (see \code{diagnostics$n_eff_summary}), while \eqn{n_eff_adm}
@@ -436,15 +435,15 @@
 #' }
 #' @export
 SVEMnet <- function(formula, data,
-                        nBoot = 200,
-                        glmnet_alpha = c( 0.5, 1),
-                        weight_scheme = c("SVEM", "FRW_plain", "Identity"),
-                        objective = c("auto", "wAIC", "wBIC", "wSSE"),
-                        relaxed = "auto",
-                        response = NULL,
-                        unseen = c("warn_na","error"),
-                        family = c("gaussian", "binomial"),
-                        ...) {
+                    nBoot = 200,
+                    glmnet_alpha = c( 0.5, 1),
+                    weight_scheme = c("SVEM", "FRW_plain", "Identity"),
+                    objective = c("auto", "wAIC", "wBIC", "wSSE"),
+                    relaxed = "auto",
+                    response = NULL,
+                    unseen = c("warn_na","error"),
+                    family = c("gaussian", "binomial"),
+                    ...) {
 
   ## ----------------- family handling -----------------
   if (inherits(family, "family")) {
@@ -486,6 +485,7 @@ SVEMnet <- function(formula, data,
     stop("nBoot must be >= 1.")
   }
   nBoot <- as.integer(nBoot)
+  nBoot_input <- nBoot  # keep what user asked for (fix #2)
 
   if (!is.numeric(glmnet_alpha) || any(!is.finite(glmnet_alpha))) {
     stop("'glmnet_alpha' must be numeric and finite.")
@@ -520,14 +520,15 @@ SVEMnet <- function(formula, data,
     }
   }
 
+  contrasts_used_full <- NULL  # will capture pre-intercept-drop contrasts (fix #1)
+
   if (using_spec) {
     # Decide which formula to use:
     # - If 'response' is supplied, always swap LHS to that name.
     # - Else, if the spec came via attribute, respect the formula's own LHS.
     # - Else (direct spec), use spec$formula as stored.
     if (!is.null(response)) {
-      rhs_txt <- paste(deparse(spec$formula[[3L]]), collapse = " ")
-      f_use   <- stats::as.formula(paste(response, "~", rhs_txt))
+      f_use <- stats::as.formula(paste(response, "~", spec$rhs))
     } else if (spec_from_attr) {
       f_use <- formula
     } else {
@@ -564,6 +565,9 @@ SVEMnet <- function(formula, data,
     if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
     X  <- stats::model.matrix(f_use, mf, contrasts.arg = spec_contrasts)
 
+    # capture contrasts BEFORE any subsetting that might drop attributes (fix #1)
+    contrasts_used_full <- attr(X, "contrasts")
+
   } else {
     # Plain formula path, no bigexp_spec
     f_use <- formula
@@ -572,6 +576,9 @@ SVEMnet <- function(formula, data,
     contrasts_opts_used <- getOption("contrasts")
     X       <- stats::model.matrix(f_use, mf)
     blocking <- character(0L)   # no blocking when not using bigexp_spec
+
+    # capture contrasts BEFORE any subsetting that might drop attributes (fix #1)
+    contrasts_used_full <- attr(X, "contrasts")
   }
 
 
@@ -608,6 +615,12 @@ SVEMnet <- function(formula, data,
   ## drop intercept column (glmnet adds its own)
   int_idx <- which(colnames(X) %in% c("(Intercept)", "Intercept"))
   if (length(int_idx)) X <- X[, -int_idx, drop = FALSE]
+
+  # re-attach contrasts explicitly in case subsetting dropped them (fix #1)
+  if (!is.null(contrasts_used_full)) {
+    attr(X, "contrasts") <- contrasts_used_full
+  }
+
   if (ncol(X) == 0L) stop("SVEMnet requires at least one predictor.")
 
   if (any(!is.finite(y_vec)) || any(!is.finite(X))) {
@@ -653,7 +666,10 @@ SVEMnet <- function(formula, data,
       }
     }
   }
-  contrasts_used <- attr(X, "contrasts")
+
+  # Use the contrasts captured before subsetting (fix #1)
+  contrasts_used <- contrasts_used_full
+
   # Helper for categorical mode (used for blocking factors)
   .mode_level <- function(x) {
     if (is.null(x)) return(NA_character_)
@@ -694,24 +710,86 @@ SVEMnet <- function(formula, data,
     }
   }
 
+  # Numeric ranges for sampling:
+  # If a bigexp_spec was used and it stored num_range, prefer the locked ranges
+  # (this does not affect fitting; it only affects downstream random sampling).
+  if (using_spec &&
+      !is.null(spec$num_range) &&
+      is.matrix(spec$num_range) &&
+      ncol(spec$num_range) > 0L &&
+      !is.null(colnames(spec$num_range))) {
 
-  num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
-    v %in% colnames(mf) && is.numeric(mf[[v]])
-  }, logical(1))]
-  if (length(num_vars)) {
-    rng_mat <- vapply(num_vars, function(v) {
-      r <- range(mf[[v]], na.rm = TRUE)
-      if (!all(is.finite(r)) || r[1] == r[2]) {
-        r <- c(min(mf[[v]], na.rm = TRUE), max(mf[[v]], na.rm = TRUE))
-      }
-      r
-    }, numeric(2))
-    rownames(rng_mat) <- c("min","max")
-    num_ranges <- as.matrix(rng_mat)
+    # Determine numeric vars using the spec typing (if available), else fall back to mf
+    if (!is.null(spec$is_cat) && length(spec$is_cat)) {
+      num_vars <- predictor_vars[predictor_vars %in% names(spec$is_cat) & !spec$is_cat[predictor_vars]]
+    } else {
+      num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
+        v %in% colnames(mf) && is.numeric(mf[[v]])
+      }, logical(1))]
+    }
+
+    cols <- intersect(num_vars, colnames(spec$num_range))
+    if (length(cols)) {
+      num_ranges <- spec$num_range[, cols, drop = FALSE]
+      storage.mode(num_ranges) <- "double"
+    } else {
+      num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
+                           dimnames = list(c("min","max"), NULL))
+    }
+
+    # Prefer locked factor levels for sampling, too
+    if (!is.null(spec$levels) && length(spec$levels)) {
+      fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
+      fl <- fl[!vapply(fl, is.null, logical(1))]
+      if (length(fl)) factor_levels <- fl
+    }
+
   } else {
-    num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
-                         dimnames = list(c("min","max"), NULL))
+    num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
+      v %in% colnames(mf) && is.numeric(mf[[v]])
+    }, logical(1))]
+    if (length(num_vars)) {
+      rng_mat <- vapply(num_vars, function(v) {
+        r <- range(mf[[v]], na.rm = TRUE)
+        if (!all(is.finite(r)) || r[1] == r[2]) {
+          r <- c(min(mf[[v]], na.rm = TRUE), max(mf[[v]], na.rm = TRUE))
+        }
+        r
+      }, numeric(2))
+      rownames(rng_mat) <- c("min","max")
+      num_ranges <- as.matrix(rng_mat)
+    } else {
+      num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
+                           dimnames = list(c("min","max"), NULL))
+    }
   }
+
+  # Discrete numeric levels recorded in a bigexp_spec (for downstream sampling only)
+  discrete_numeric_vars   <- character(0L)
+  discrete_numeric_levels <- list()
+  if (using_spec && !is.null(spec$settings)) {
+    dn <- spec$settings$discrete_numeric
+    dl <- spec$settings$discrete_levels
+
+    if (is.null(dn)) dn <- character(0L)
+    if (!is.character(dn)) dn <- character(0L)
+    dn <- intersect(unique(dn), predictor_vars)
+
+    if (!is.null(dl) && is.list(dl) && length(dn)) {
+      # keep only named entries matching dn
+      dl <- dl[intersect(names(dl), dn)]
+      # coerce each to numeric unique sorted finite
+      for (nm in names(dl)) {
+        vv <- as.numeric(dl[[nm]])
+        vv <- sort(unique(vv[is.finite(vv)]))
+        if (length(vv)) discrete_numeric_levels[[nm]] <- vv
+      }
+    }
+
+    if (length(dn)) discrete_numeric_vars <- dn
+  }
+
+
 
   ## ---- objective selection (auto) ----
   auto_used     <- identical(objective, "auto")
@@ -969,21 +1047,45 @@ SVEMnet <- function(formula, data,
   fallbacks         <- fallbacks[valid_rows]
   n_eff_keep        <- n_eff_keep[valid_rows]
 
+  nBoot_used <- nrow(coef_matrix)  # fix #2
+
   avg_coefficients <- colMeans(coef_matrix)
   lin_pred <- as.vector(X %*% avg_coefficients[-1L] + avg_coefficients[1L])
 
   if (fam_name == "gaussian") {
     y_pred <- lin_pred
   } else {
-    y_pred <- 1 / (1 + exp(-lin_pred))  # in-model scale = probability
+    y_pred <- tryCatch({
+      cm <- coef_matrix
+      if (!is.matrix(cm) || nrow(cm) < 1L || ncol(cm) != (ncol(X) + 1L)) {
+        stop("coef_matrix shape mismatch")
+      }
+
+      intercepts <- cm[, 1L]
+      betas      <- cm[, -1L, drop = FALSE]
+
+      eta_mat <- X %*% t(betas) + matrix(intercepts, nrow = nrow(X), ncol = length(intercepts), byrow = TRUE)
+
+      # prevent exp overflow/underflow
+      eta_mat <- pmin(pmax(eta_mat, -30), 30)
+
+      p_mat <- 1 / (1 + exp(-eta_mat))
+      p_mat <- pmin(pmax(p_mat, 1e-8), 1 - 1e-8)
+
+      rowMeans(p_mat)
+    }, error = function(e) {
+      p <- 1 / (1 + exp(-lin_pred))
+      pmin(pmax(p, 1e-8), 1 - 1e-8)
+    })
   }
+
 
   ## debias: only for gaussian (leave binomial as-is for now)
   debias_fit <- NULL
   y_pred_debiased <- NULL
   parms_debiased  <- avg_coefficients
 
-  if (fam_name == "gaussian" && nBoot >= 10 && stats::var(y_pred) > 0) {
+  if (fam_name == "gaussian" && nBoot_used >= 10 && stats::var(y_pred) > 0) {  # fix #2
     debias_fit <- stats::lm(y_vec ~ y_pred)
     y_pred_debiased <- stats::predict(debias_fit)
     parms_debiased <- avg_coefficients
@@ -1048,7 +1150,9 @@ SVEMnet <- function(formula, data,
     num_ranges      = num_ranges,
     factor_levels   = factor_levels,
     blocking        = blocking,        # character(0) when no blocking
-    block_cat_modes = block_cat_modes  # NULL when none / not available
+    block_cat_modes = block_cat_modes, # NULL when none / not available
+    discrete_numeric = discrete_numeric_vars,
+    discrete_levels  = discrete_numeric_levels
   )
 
 
@@ -1057,7 +1161,8 @@ SVEMnet <- function(formula, data,
     parms_debiased    = parms_debiased,
     debias_fit        = debias_fit,
     coef_matrix       = coef_matrix,
-    nBoot             = nBoot,
+    nBoot             = nBoot_used,     # fix #2 (actual used)
+    nBoot_input       = nBoot_input,    # keep what user asked for (added, non-breaking)
     glmnet_alpha      = glmnet_alpha,
     best_alphas       = best_alphas,
     best_lambdas      = best_lambdas,

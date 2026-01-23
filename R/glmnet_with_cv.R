@@ -476,10 +476,73 @@ glmnet_with_cv <- function(formula, data,
     ))
   }
 
+  # --- Binomial guardrails (small-sample stability) ---
+  #
+  # In tiny Bernoulli samples it is possible (especially under extreme
+  # probabilities) to observe only one outcome class. In that case, logistic
+  # glmnet / cv.glmnet can fail. We return an intercept-only model on the
+  # probability scale rather than erroring.
+  #
+  # Additionally, some glmnet versions are more stable for binomial fits when
+  # y is provided as a 2-column success/failure matrix. We keep y_glm as a 0/1
+  # vector for storage, but use y_fit for model fitting.
+  y_fit <- y_glm
+  if (identical(fam, "binomial")) {
+    uy <- unique(y_glm)
+    uy <- uy[is.finite(uy)]
+    if (length(uy) < 2L) {
+      # Compute the effective folds/repeats for meta fields, even though we
+      # are returning early.
+      max_folds_tmp  <- max(3L, floor(n / 3))
+      nfolds_eff_tmp <- min(max(5L, min(nfolds, n)), max_folds_tmp)
+      repeats_tmp    <- max(1L, as.integer(repeats))
+
+      return(.cv_return_intercept_only(
+        fam          = fam,
+        y_glm        = y_glm,
+        X            = X,
+        mf           = mf,
+        glmnet_alpha = glmnet_alpha,
+        choose_rule  = choose_rule,
+        drop_msg     = drop_msg,
+        nfolds_val   = nfolds_eff_tmp,
+        repeats_val  = repeats_tmp,
+        relaxed      = relaxed,
+        w            = w,
+        note_extra   = "binomial_one_class_intercept_only"
+      ))
+    }
+    y_fit <- cbind(1 - y_glm, y_glm)
+  }
+
   # --- Safe folds & repeats ---
   max_folds  <- max(3L, floor(n / 3))
   nfolds_eff <- min(max(5L, min(nfolds, n)), max_folds)
   repeats    <- max(1L, as.integer(repeats))
+
+  # Binomial CV needs at least 2 observations in each class; otherwise
+  # at least one fold's training set will contain a single class and
+  # glmnet's binomial CV (especially relaxed CV) can fail.
+  if (identical(fam, "binomial")) {
+    n1 <- sum(y_glm == 1L, na.rm = TRUE)
+    n0 <- sum(y_glm == 0L, na.rm = TRUE)
+    if (n1 < 2L || n0 < 2L) {
+      return(.cv_return_intercept_only(
+        fam          = fam,
+        y_glm        = y_glm,
+        X            = X,
+        mf           = mf,
+        glmnet_alpha = glmnet_alpha,
+        choose_rule  = choose_rule,
+        drop_msg     = drop_msg,
+        nfolds_val   = nfolds_eff,
+        repeats_val  = repeats,
+        relaxed      = relaxed,
+        w            = w,
+        note_extra   = "binomial_min_class_lt2_intercept_only"
+      ))
+    }
+  }
 
   # --- Clean alphas ---
   glmnet_alpha <- unique(as.numeric(glmnet_alpha))
@@ -539,9 +602,24 @@ glmnet_with_cv <- function(formula, data,
   }
 
   # Build one set of fold IDs reused across alphas and repeats (paired comparison)
+  # For binomial models, use stratified folds to avoid placing all
+  # observations of a class into a single fold (which can make the
+  # corresponding training set one-class and cause glmnet to fail).
   if (!is.null(seed)) set.seed(seed)
-  foldids <- replicate(repeats, sample(rep(seq_len(nfolds_eff), length.out = n)),
-                       simplify = FALSE)
+  make_foldid <- function() {
+    if (identical(fam, "binomial")) {
+      y01 <- as.integer(y_glm)
+      idx1 <- which(y01 == 1L)
+      idx0 <- which(y01 == 0L)
+      foldid <- integer(length(y01))
+      if (length(idx1)) foldid[idx1] <- sample(rep(seq_len(nfolds_eff), length.out = length(idx1)))
+      if (length(idx0)) foldid[idx0] <- sample(rep(seq_len(nfolds_eff), length.out = length(idx0)))
+      foldid
+    } else {
+      sample(rep(seq_len(nfolds_eff), length.out = n))
+    }
+  }
+  foldids <- replicate(repeats, make_foldid(), simplify = FALSE)
 
   # --- One alpha -> repeated CV ---
   fit_alpha_repeated <- function(alpha_val) {
@@ -557,7 +635,7 @@ glmnet_with_cv <- function(formula, data,
 
       fit_cv <- tryCatch(
         do.call(glmnet::cv.glmnet,
-                c(list(x = X, y = y_glm,
+                c(list(x = X, y = y_fit,
                        alpha  = alpha_val,
                        foldid = foldid,
                        exclude = exclude),
@@ -569,7 +647,7 @@ glmnet_with_cv <- function(formula, data,
             fallback_count <<- fallback_count + 1L
             tryCatch(
               do.call(glmnet::cv.glmnet,
-                      c(list(x = X, y = y_glm,
+                      c(list(x = X, y = y_fit,
                              alpha  = alpha_val,
                              foldid = foldid,
                              exclude = exclude),
@@ -673,16 +751,26 @@ glmnet_with_cv <- function(formula, data,
 
     crit_num <- crit_den <- rep(0, length(lam_seq))
 
+    # Ridge fallback should *not* use relaxation even if requested; ridge +
+    # relax is not supported and is not needed for this emergency path.
+    glmnet_fit_args_ridge <- glmnet_fit_args
+    glmnet_fit_args_ridge$relax <- FALSE
+    glmnet_fit_args_ridge$gamma <- NULL
+
     for (j in seq_along(lam_seq)) {
       lam <- lam_seq[j]
       for (fold in seq_len(nfolds_eff)) {
         tr_idx <- which(foldid != fold); te_idx <- which(foldid == fold)
         glmnet_fit_args_fold <- glmnet_fit_args
+        glmnet_fit_args_fold$relax <- FALSE
+        glmnet_fit_args_fold$gamma <- NULL
         if (!is.null(w)) glmnet_fit_args_fold$weights <- w[tr_idx]
         if (!is.null(off)) glmnet_fit_args_fold$offset <- off[tr_idx]
+
+        y_tr_fit <- if (is.matrix(y_fit)) y_fit[tr_idx, , drop = FALSE] else y_fit[tr_idx]
         fit_j <- tryCatch(
           do.call(glmnet::glmnet, c(
-            list(x = X[tr_idx, , drop = FALSE], y = y_glm[tr_idx],
+            list(x = X[tr_idx, , drop = FALSE], y = y_tr_fit,
                  alpha = 0, lambda = lam),
             glmnet_fit_args_fold
           )),
@@ -718,13 +806,49 @@ glmnet_with_cv <- function(formula, data,
       }
     }
     crit_by_lambda <- crit_num / crit_den
+    if (!any(is.finite(crit_by_lambda))) {
+      return(.cv_return_intercept_only(
+        fam          = fam,
+        y_glm        = y_glm,
+        X            = X,
+        mf           = mf,
+        glmnet_alpha = glmnet_alpha,
+        choose_rule  = choose_rule,
+        drop_msg     = drop_msg,
+        nfolds_val   = nfolds_eff,
+        repeats_val  = repeats,
+        relaxed      = relaxed,
+        w            = w,
+        note_extra   = "ridge_fallback_failed"
+      ))
+    }
+
     j_best <- which.min(crit_by_lambda)
     best_lambda <- lam_seq[j_best]
 
-    final_ridge <- do.call(glmnet::glmnet, c(
-      list(x = X, y = y_glm, alpha = 0, lambda = best_lambda),
-      glmnet_fit_args
-    ))
+    final_ridge <- tryCatch(
+      do.call(glmnet::glmnet, c(
+        list(x = X, y = y_fit, alpha = 0, lambda = best_lambda),
+        glmnet_fit_args_ridge
+      )),
+      error = function(e) NULL
+    )
+    if (is.null(final_ridge)) {
+      return(.cv_return_intercept_only(
+        fam          = fam,
+        y_glm        = y_glm,
+        X            = X,
+        mf           = mf,
+        glmnet_alpha = glmnet_alpha,
+        choose_rule  = choose_rule,
+        drop_msg     = drop_msg,
+        nfolds_val   = nfolds_eff,
+        repeats_val  = repeats,
+        relaxed      = relaxed,
+        w            = w,
+        note_extra   = "ridge_final_fit_failed"
+      ))
+    }
     coef_mat   <- as.matrix(stats::coef(final_ridge, s = best_lambda))
     best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
     y_pred <- drop(stats::predict(final_ridge, newx = X, s = best_lambda, type = "response"))
@@ -818,25 +942,42 @@ glmnet_with_cv <- function(formula, data,
 
   if (isTRUE(relaxed)) {
     reserved_cv <- c("x","y","alpha","lambda","foldid","exclude")
-    cv_one <- do.call(glmnet::cv.glmnet,
-                      c(list(x = X, y = y_glm,
-                             alpha  = best_alpha,
-                             foldid = foldids[[1]],
-                             exclude = exclude),
-                        drop_reserved(cv_base_args, reserved_cv)))
-    coef_mat   <- as.matrix(stats::coef(cv_one, s = best_lambda))
-    best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
-    mm <- cbind("(Intercept)" = 1, X)
-    y_pred <- as.numeric(mm %*% best_coefs[match(colnames(mm), names(best_coefs))])
-    if (!is_gaussian && identical(fam, "binomial")) {
-      # transform to probability scale for consistency with type = "response"
-      y_pred <- 1 / (1 + exp(-y_pred))
+    cv_one <- tryCatch(
+      do.call(glmnet::cv.glmnet,
+              c(list(x = X, y = y_fit,
+                     alpha  = best_alpha,
+                     foldid = foldids[[1]],
+                     exclude = exclude),
+                drop_reserved(cv_base_args, reserved_cv))),
+      error = function(e) NULL
+    )
+
+    if (is.null(cv_one)) {
+      warning("Final cv.glmnet(relax=TRUE) failed; refitting final model without relaxation.")
+      final_fit <- do.call(glmnet::glmnet, c(
+        list(x = X, y = y_fit, alpha = best_alpha, lambda = best_lambda),
+        glmnet_fit_args
+      ))
+      coef_mat   <- as.matrix(stats::coef(final_fit, s = best_lambda))
+      best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
+      y_pred <- drop(stats::predict(final_fit, newx = X, s = best_lambda, type = "response"))
+      note_relax <- "final relaxed CV failed; coefs from glmnet (non-relaxed)"
+      cv_obj_to_keep <- NULL
+    } else {
+      coef_mat   <- as.matrix(stats::coef(cv_one, s = best_lambda))
+      best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
+      mm <- cbind("(Intercept)" = 1, X)
+      y_pred <- as.numeric(mm %*% best_coefs[match(colnames(mm), names(best_coefs))])
+      if (!is_gaussian && identical(fam, "binomial")) {
+        # transform to probability scale for consistency with type = "response"
+        y_pred <- 1 / (1 + exp(-y_pred))
+      }
+      note_relax <- "coefs from cv.glmnet (relaxed)"
+      if (isTRUE(is.null(dots$keep)) || isTRUE(dots$keep)) cv_obj_to_keep <- cv_one
     }
-    note_relax <- "coefs from cv.glmnet (relaxed)"
-    if (isTRUE(is.null(dots$keep)) || isTRUE(dots$keep)) cv_obj_to_keep <- cv_one
   } else {
     final_fit <- do.call(glmnet::glmnet, c(
-      list(x = X, y = y_glm, alpha = best_alpha, lambda = best_lambda),
+      list(x = X, y = y_fit, alpha = best_alpha, lambda = best_lambda),
       glmnet_fit_args
     ))
     coef_mat   <- as.matrix(stats::coef(final_fit, s = best_lambda))

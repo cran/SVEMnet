@@ -1,5 +1,10 @@
 # NEWS for SVEMnet
 
+[3.1.9]
+- No longer use doRNG package in svem_significance_test_parallel.
+- Added discrete numeric argument to bigexp_terms()
+- Added column-type checking to bigexp_terms() to help prevent unexpected behavior (e.g. user provides a column of numbers that is cast as character)
+
 [3.1.4]
 - Add blocking argument to bigexp_terms()
 

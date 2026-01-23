@@ -80,11 +80,13 @@ When \code{FALSE}, the standard \code{glmnet} path is used. If
 \item{nCore}{Number of CPU cores for parallel processing. Default is
 \code{parallel::detectCores() - 2}, with a floor of \code{1}.}
 
-\item{seed}{Optional integer seed for reproducible parallel RNG (default
-\code{NULL}). When supplied, the master RNG kind is set to
-\code{"L'Ecuyer-CMRG"} with \code{sample.kind = "Rounding"}, and
-\code{doRNG::registerDoRNG()} is used so that the \code{\%dorng\%} loops are
-reproducible regardless of scheduling.}
+\item{seed}{Optional integer seed for reproducible RNG (default \code{NULL}).
+When supplied, the master RNG kind is set to \code{"L'Ecuyer-CMRG"} (with
+\code{sample.kind = "Rounding"} when supported), and deterministic
+per-iteration seeds are generated on the master and applied inside each
+parallel \code{\%dopar\%} iteration via \code{set.seed()}.
+This yields reproducibility regardless of parallel scheduling and core
+count.}
 
 \item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
 If provided, the test reuses its locked expansion. The working formula
@@ -92,7 +94,11 @@ becomes \code{bigexp_formula(spec, response_name)}, where
 \code{response_name} is taken from \code{response} if supplied, otherwise
 from the left-hand side of \code{formula}. Categorical sampling uses
 \code{spec$levels}, and numeric sampling prefers \code{spec$num_range}
-when available.}
+when available.
+Discrete numeric predictors recorded by \code{bigexp_terms()}
+(\code{spec$settings$discrete_numeric} + \code{spec$settings$discrete_levels})
+are sampled only from their recorded allowed levels when building the
+evaluation grid.}
 
 \item{response}{Optional character name for the response variable to use when
 \code{spec} is supplied. If omitted, the response is taken from the
@@ -145,11 +151,17 @@ intended as a diagnostic measure of global factor signal, not as exact
 hypothesis tests.
 
 All SVEM refits (for the original and permuted responses) are run in
-parallel using \code{foreach} + \code{doParallel}. Random draws (including
-permutations and evaluation-grid sampling) are made reproducible across
-workers using \code{doRNG} together with
-\code{RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")} when a
-\code{seed} is supplied.
+parallel using \code{foreach} + \code{doParallel}.
+
+Reproducible parallel RNG (Windows/macOS/Linux): when \code{seed} is supplied,
+the function sets the master RNG to \code{RNGkind("L'Ecuyer-CMRG",
+sample.kind = "Rounding")} (falling back to \code{"L'Ecuyer-CMRG"} on older R),
+and generates a deterministic, per-iteration seed schedule on the master.
+Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
+assigned seed before performing any random draws (including permutations and
+the bootstrap randomness inside \code{SVEMnet()}).
+This makes results reproducible regardless of worker scheduling (including
+\code{preschedule = FALSE}) and independent of the number of cores.
 
 The function can optionally reuse a deterministic, locked expansion built
 with \code{bigexp_terms()}. Supply \code{spec} (and optionally

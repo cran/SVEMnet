@@ -53,10 +53,11 @@ test_that("svem_export_candidates_csv combines selection objects correctly", {
   set.seed(5)
   n  <- 30
   x1 <- rnorm(n)
+  x2 <- rnorm(n)
   y  <- x1 + rnorm(n)
-  dat <- data.frame(y, x1)
+  dat <- data.frame(y, x1,x2)
 
-  fit <- SVEMnet(y ~ x1, dat, nBoot = 10)
+  fit <- SVEMnet(y ~ x1+x2, dat, nBoot = 30)
   objs  <- list(y = fit)
   goals <- list(y = list(goal = "max", weight = 1))
 

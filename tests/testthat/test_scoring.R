@@ -450,3 +450,182 @@ test_that("svem_score_random works with all-categorical predictors", {
   }
 
 })
+skip_on_cran()
+skip_if_not_installed("SVEMnet")
+
+test_that("discrete numeric from bigexp_spec is stored and honored through svem_score_random (multi-response)", {
+  skip_on_cran()
+  skip_if_not_installed("SVEMnet")
+
+  if (!exists("bigexp_terms", mode = "function")) {
+    skip("bigexp_terms() not available in this installation.")
+  }
+
+  set.seed(101)
+  n <- 140
+
+  # Discrete numeric predictor (numeric type, finite support)
+  D_allowed <- c(0.5, 1, 2, 4)
+  D <- sample(D_allowed, n, replace = TRUE)
+  X <- runif(n, -1, 1)
+
+  y1 <- 80 +  6 * D - 5 * X + rnorm(n, 0, 2)
+  y2 <- 60 +  2 * D + 3 * X + rnorm(n, 0, 3)
+  dat <- data.frame(y1 = y1, y2 = y2, D = D, X = X)
+
+  # Build a deterministic expansion ONCE
+  spec <- bigexp_terms(
+    y1 ~ D + X,
+    data             = dat,
+    factorial_order  = 2,
+    polynomial_order = 2,
+    include_pc_2way  = TRUE,
+    include_pc_3way  = FALSE
+  )
+
+  # --- Force discrete-numeric metadata onto the spec (robust across versions) ---
+  # This is the contract SVEMnet() is supposed to read from spec$settings.
+  if (is.null(spec$settings) || !is.list(spec$settings)) spec$settings <- list()
+  spec$settings$discrete_numeric <- "D"
+  spec$settings$discrete_levels  <- list(D = sort(unique(dat$D)))
+
+  # Fit two responses over the SAME expansion / factor space
+  fit_y1 <- SVEMnet(spec, dat, response = "y1", nBoot = 12)
+  fit_y2 <- SVEMnet(spec, dat, response = "y2", nBoot = 12)
+
+  # ---- Hard checks: SVEMnet must store discrete numeric in sampling_schema ----
+  for (fit in list(fit_y1, fit_y2)) {
+    ss <- fit$sampling_schema
+    expect_true(is.list(ss))
+
+    # Accept either naming convention (your newer SVEMnet uses discrete_levels)
+    disc_vars <- character(0L)
+    disc_map  <- list()
+
+    if (is.character(ss$discrete_numeric) && length(ss$discrete_numeric)) {
+      disc_vars <- unique(as.character(ss$discrete_numeric))
+      # supports may be stored under discrete_levels (preferred) or discrete_values (legacy)
+      if (is.list(ss$discrete_levels) && !is.null(ss$discrete_levels[["D"]])) {
+        disc_map[["D"]] <- ss$discrete_levels[["D"]]
+      } else if (is.list(ss$discrete_values) && !is.null(ss$discrete_values[["D"]])) {
+        disc_map[["D"]] <- ss$discrete_values[["D"]]
+      }
+    } else if (is.list(ss$discrete_numeric) && !is.null(names(ss$discrete_numeric))) {
+      # alternate encoding: named list mapping var -> allowed values
+      disc_vars <- names(ss$discrete_numeric)
+      disc_map  <- ss$discrete_numeric
+    } else if (is.list(ss$discrete_levels) && length(ss$discrete_levels) &&
+               !is.null(names(ss$discrete_levels))) {
+      # alternate encoding: just discrete_levels implies discreteness
+      disc_vars <- names(ss$discrete_levels)
+      disc_map  <- ss$discrete_levels
+    } else if (is.list(ss$discrete_values) && length(ss$discrete_values) &&
+               !is.null(names(ss$discrete_values))) {
+      disc_vars <- names(ss$discrete_values)
+      disc_map  <- ss$discrete_values
+    }
+
+    expect_true("D" %in% disc_vars)
+
+    disc_support <- sort(unique(as.numeric(disc_map[["D"]])))
+    disc_support <- disc_support[is.finite(disc_support)]
+    expect_true(length(disc_support) >= 2)
+    expect_true(setequal(disc_support, sort(unique(dat$D))))
+  }
+
+  objs <- list(y1 = fit_y1, y2 = fit_y2)
+  goals <- list(
+    y1 = list(goal = "max", weight = 0.6),
+    y2 = list(goal = "max", weight = 0.4)
+  )
+
+  # Check both numeric samplers; discrete vars must be respected in both.
+  for (sampler in c("random", "uniform")) {
+    res <- svem_score_random(
+      objects         = objs,
+      goals           = goals,
+      data            = dat,
+      n               = 600,
+      level           = 0.90,
+      numeric_sampler = sampler,
+      verbose         = FALSE
+    )
+
+    st <- res$score_table
+    expect_s3_class(st, "data.frame")
+    expect_equal(nrow(st), 600L)
+
+    # Discrete numeric must remain on allowed support in the sampled table
+    expect_true("D" %in% names(st))
+    expect_true(is.numeric(st$D) || is.integer(st$D))
+    expect_true(all(st$D %in% D_allowed))
+    expect_gt(length(unique(st$D)), 1L)
+
+    # Also ensure original_data_scored (when provided) keeps D on support
+    od <- res$original_data_scored
+    expect_s3_class(od, "data.frame")
+    expect_equal(nrow(od), nrow(dat))
+    expect_true(all(od$D %in% D_allowed))
+
+    # Sanity: core output columns exist
+    expect_true(all(c("y1_pred", "y2_pred", "score", "uncertainty_measure",
+                      "y1_lwr", "y1_upr", "y2_lwr", "y2_upr") %in% names(st)))
+  }
+})
+
+
+test_that("discrete numeric predictors are forbidden as mixture variables (via svem_score_random)", {
+  skip_on_cran()
+  skip_if_not_installed("SVEMnet")
+
+  if (!exists("bigexp_terms", mode = "function")) {
+    skip("bigexp_terms() not available in this installation.")
+  }
+
+  set.seed(102)
+  n <- 120
+  D_allowed <- c(1, 2, 3, 4)
+  D <- sample(D_allowed, n, replace = TRUE)
+  X <- runif(n, -1, 1)
+  y <- 10 + 2 * D + 3 * X + rnorm(n, 0, 1.5)
+  dat <- data.frame(y = y, D = D, X = X)
+
+  spec <- bigexp_terms(
+    y ~ D + X,
+    data             = dat,
+    factorial_order  = 2,
+    polynomial_order = 2,
+    include_pc_2way  = TRUE,
+    include_pc_3way  = FALSE
+  )
+
+  # Force discrete metadata onto spec (same contract SVEMnet reads)
+  if (is.null(spec$settings) || !is.list(spec$settings)) spec$settings <- list()
+  spec$settings$discrete_numeric <- "D"
+  spec$settings$discrete_levels  <- list(D = sort(unique(dat$D)))
+
+  fit <- SVEMnet(spec, dat, response = "y", nBoot = 10)
+
+  objs  <- list(y = fit)
+  goals <- list(y = list(goal = "max", weight = 1))
+
+  mix_bad <- list(list(
+    vars  = c("D"),
+    lower = c(min(D_allowed)),
+    upper = c(max(D_allowed)),
+    total = 2
+  ))
+
+  expect_error(
+    svem_score_random(
+      objects         = objs,
+      goals           = goals,
+      n               = 200,
+      mixture_groups  = mix_bad,
+      numeric_sampler = "random",
+      verbose         = FALSE
+    ),
+    "Discrete numeric|discrete numeric|discrete",
+    ignore.case = TRUE
+  )
+})

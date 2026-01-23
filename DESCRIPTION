@@ -2,8 +2,8 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.1.4
-Date: 2025-11-24
+Version: 3.2.0
+Date: 2026-01-21
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
@@ -11,9 +11,10 @@ Authors@R:
            role = c("cre", "aut"),
            comment = c(ORCID = "0000-0002-5933-8706"))
 Description: Tools for fitting self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) in small-sample design-of-experiments and related workflows, using elastic net and relaxed elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Package code was drafted with assistance from generative AI tools.
+URL: https://arxiv.org/abs/2511.20968
 Depends: R (>= 4.0.0)
 Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, lhs, foreach,
-        doParallel, doRNG, parallel, gamlss, gamlss.dist
+        doParallel, parallel, gamlss, gamlss.dist, utils
 Suggests: covr, knitr, rmarkdown, testthat (>= 3.0.0), withr, vdiffr,
         RhpcBLASctl
 License: GPL-2 | GPL-3
@@ -22,9 +23,9 @@ RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 LazyData: true
 NeedsCompilation: no
-Packaged: 2025-11-26 23:04:42 UTC; andre
+Packaged: 2026-01-22 20:20:02 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2025-11-28 13:20:31 UTC
+Date/Publication: 2026-01-23 09:40:28 UTC

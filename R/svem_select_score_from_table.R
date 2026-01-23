@@ -18,9 +18,9 @@
 #'   \code{\link{svem_score_random}}. When medoids are requested
 #'   (\code{k > 0}), the predictor columns used for clustering are taken
 #'   from the \code{"svem_predictor_cols"} attribute by default. If that
-#'   attribute is missing, a numeric-column heuristic is used. If you
-#'   accidentally pass the full \code{scored} list, a helpful error is
-#'   thrown reminding you to use \code{scored$score_table}.
+#'   attribute is missing, a heuristic is used. If you accidentally pass the
+#'   full \code{scored} list, a helpful error is thrown reminding you to use
+#'   \code{scored$score_table}.
 #' @param target Character scalar naming the column in \code{score_table}
 #'   to optimize (e.g. \code{"score"}, \code{"wmt_score"},
 #'   \code{"uncertainty_measure"}).
@@ -38,13 +38,13 @@
 #'   used to measure diversity in the PAM step when \code{k > 0}. When
 #'   \code{NULL} (default), the function first tries
 #'   \code{attr(score_table, "svem_predictor_cols")}. If that is unavailable,
-#'   it falls back to using numeric, non-meta columns (excluding e.g.
-#'   \code{*_pred}, \code{*_des}, \code{*_lwr}, \code{*_upr},
+#'   it falls back to a heuristic that prefers non-derived predictor columns
+#'   (excluding e.g. \code{*_pred}, \code{*_des}, \code{*_lwr}, \code{*_upr},
 #'   \code{*_ciw_w}, \code{*_p_in_spec_mean}, \code{*_in_spec_point},
 #'   \code{score}, \code{wmt_score}, \code{uncertainty_measure},
 #'   \code{p_joint_mean}, \code{joint_in_spec_point},
-#'   \code{candidate_type}, \code{selection_label}, \code{Notes_from_SVEMnet}). If no
-#'   usable predictor columns can be inferred, a warning is issued and only
+#'   \code{candidate_type}, \code{selection_label}, \code{Notes_from_SVEMnet}).
+#'   If no usable predictor columns can be inferred, a warning is issued and only
 #'   \code{best} is returned.
 #' @param label Optional character scalar. When non-\code{NULL}, this label
 #'   is appended into a \code{"Notes_from_SVEMnet"} column for the returned \code{best}
@@ -69,143 +69,6 @@
 #' @seealso
 #' \code{\link{svem_score_random}},
 #' \code{svem_select_candidates()}
-#'
-#' @examples
-#' \donttest{
-#' ## ------------------------------------------------------------------------
-#' ## Selecting optimal and exploration candidates from a scored SVEM table
-#' ## ------------------------------------------------------------------------
-#'
-#' data(lipid_screen)
-#'
-#' # Build expansion and fit three SVEM models (Potency, Size, PDI)
-#' spec <- bigexp_terms(
-#'   Potency ~ PEG + Helper + Ionizable + Cholesterol +
-#'     Ionizable_Lipid_Type + N_P_ratio + flow_rate,
-#'   data             = lipid_screen,
-#'   factorial_order  = 3,
-#'   polynomial_order = 3,
-#'   include_pc_2way  = TRUE,
-#'   include_pc_3way  = FALSE
-#' )
-#'
-#' form_pot <- bigexp_formula(spec, "Potency")
-#' form_siz <- bigexp_formula(spec, "Size")
-#' form_pdi <- bigexp_formula(spec, "PDI")
-#'
-#' set.seed(1)
-#' fit_pot <- SVEMnet(form_pot, lipid_screen)
-#' fit_siz <- SVEMnet(form_siz, lipid_screen)
-#' fit_pdi <- SVEMnet(form_pdi, lipid_screen)
-#'
-#' objs <- list(Potency = fit_pot, Size = fit_siz, PDI = fit_pdi)
-#'
-#' goals <- list(
-#'   Potency = list(goal = "max", weight = 0.6),
-#'   Size    = list(goal = "min", weight = 0.3),
-#'   PDI     = list(goal = "min", weight = 0.1)
-#' )
-#'
-#' mix <- list(list(
-#'   vars  = c("PEG", "Helper", "Ionizable", "Cholesterol"),
-#'   lower = c(0.01, 0.10, 0.10, 0.10),
-#'   upper = c(0.05, 0.60, 0.60, 0.60),
-#'   total = 1.0
-#' ))
-#'
-#' set.seed(3)
-#' scored <- svem_score_random(
-#'   objects         = objs,
-#'   goals           = goals,
-#'   n               = 20000,
-#'   mixture_groups  = mix,
-#'   combine         = "geom",
-#'   numeric_sampler = "random",
-#'   verbose         = FALSE
-#' )
-#'
-#' # The scored table contains predictors, <resp>_pred, <resp>_des, score,
-#' # uncertainty_measure, and per-response CI columns.
-#' names(scored$score_table)
-#'
-#' ## ------------------------------------------------------------------------
-#' ## 1) Optimal candidates by multi-response score
-#' ## ------------------------------------------------------------------------
-#'
-#' opt_sel <- svem_select_from_score_table(
-#'   score_table = scored$score_table,
-#'   target      = "score",    # column to optimize
-#'   direction   = "max",      # maximize score
-#'   k           = 5,          # 5 medoid candidates
-#'   top_type    = "frac",     # sample medoids from top fraction
-#'   top         = 0.02,       # top 2% by score
-#'   label       = "round1_optimal"
-#' )
-#'
-#' # Single best row (highest score) with predictions and CIs
-#' opt_sel$best
-#'
-#' # Diverse high-score candidates (medoids)
-#' head(opt_sel$candidates)
-#'
-#' ## ------------------------------------------------------------------------
-#' ## 2) Exploration candidates: highest model uncertainty
-#' ## ------------------------------------------------------------------------
-#'
-#' explore_sel <- svem_select_from_score_table(
-#'   score_table = scored$score_table,
-#'   target      = "uncertainty_measure",  # scalar uncertainty
-#'   direction   = "max",                  # look for high-uncertainty settings
-#'   k           = 5,
-#'   top_type    = "frac",
-#'   top         = 0.05,                   # top 5% most uncertain
-#'   label       = "round1_explore"
-#' )
-#'
-#' explore_sel$best
-#' head(explore_sel$candidates)
-#'
-#' ## ------------------------------------------------------------------------
-#' ## 3) Re-ranking by design-space assurance (if p_joint_mean is available)
-#' ## ------------------------------------------------------------------------
-#'
-#' # If svem_score_random() was called with a non-NULL `specs` argument,
-#' # the score_table may contain p_joint_mean (joint mean-level in-spec prob).
-#' if ("p_joint_mean" %in% names(scored$score_table)) {
-#'   inspec_sel <- svem_select_from_score_table(
-#'     score_table = scored$score_table,
-#'     target      = "p_joint_mean",   # maximize mean-level spec assurance
-#'     direction   = "max",
-#'     k           = 5,
-#'     top_type    = "frac",
-#'     top         = 0.10,
-#'     label       = "round1_inspec"
-#'   )
-#'
-#'   inspec_sel$best
-#'   head(inspec_sel$candidates)
-#' }
-#'
-#' ## ------------------------------------------------------------------------
-#' ## 4) Selecting the best existing run from a scored original data table
-#' ## ------------------------------------------------------------------------
-#'
-#' # If svem_score_random() was called with data = lipid_screen,
-#' # the original_data_scored component contains scored existing runs.
-#' if (!is.null(scored$original_data_scored)) {
-#'   best_existing <- svem_select_from_score_table(
-#'     score_table = scored$original_data_scored,
-#'     target      = "score",
-#'     direction   = "max",
-#'     k           = 0,          # k <= 0: only return the single best row
-#'     top_type    = "frac",
-#'     top         = 1.0,
-#'     label       = "round1_existing_best"
-#'   )
-#'
-#'   best_existing$best
-#' }
-#' }
 #'
 #' @export
 svem_select_from_score_table <- function(score_table,
@@ -259,8 +122,16 @@ svem_select_from_score_table <- function(score_table,
   if (!is.numeric(vals))
     stop("Column `", target, "` must be numeric for ranking.")
 
+  if (all(!is.finite(vals))) {
+    stop("All values in `target = '", target, "'` are non-finite; cannot select best row.")
+  }
+
   decreasing_flag <- (direction == "max")
-  ord <- order(vals, decreasing = decreasing_flag, na.last = TRUE)
+
+  # Deterministic tie-breaker: keep original row order among ties
+  # (order() is not guaranteed stable across all R/OS builds)
+  key <- if (decreasing_flag) -vals else vals
+  ord <- order(key, seq_along(key), na.last = TRUE)
 
   if (!length(ord))
     stop("No rows available in score_table for selection.")
@@ -281,15 +152,13 @@ svem_select_from_score_table <- function(score_table,
       predictor_cols <- attr(score_table, "svem_predictor_cols")
     }
 
-    # ensure predictors actually exist in this table
     if (!is.null(predictor_cols)) {
-      predictor_cols <- intersect(predictor_cols, names(score_table))
+      predictor_cols <- intersect(as.character(predictor_cols), names(score_table))
     }
 
     # heuristic fallback if attributes / explicit predictors are not usable
     if (is.null(predictor_cols) || !length(predictor_cols)) {
-      nm     <- names(score_table)
-      is_num <- vapply(score_table, is.numeric, logical(1L))
+      nm <- names(score_table)
 
       is_meta <- grepl("(_pred|_des|_lwr|_upr|_ciw_w|_p_in_spec_mean|_in_spec_point)$", nm) |
         nm %in% c("score",
@@ -301,7 +170,14 @@ svem_select_from_score_table <- function(score_table,
                   "selection_label",
                   "Notes_from_SVEMnet")
 
-      predictor_cols <- nm[is_num & !is_meta]
+      # Prefer any non-meta columns that are usable in Gower
+      # (numeric/integer/factor/character/logical; including discrete numerics).
+      is_usable <- vapply(score_table, function(x) {
+        is.numeric(x) || is.integer(x) || is.factor(x) || is.character(x) || is.logical(x) ||
+          inherits(x, "integer64")
+      }, logical(1L))
+
+      predictor_cols <- nm[is_usable & !is_meta]
     }
 
     if (!length(predictor_cols)) {
@@ -319,13 +195,21 @@ svem_select_from_score_table <- function(score_table,
           stop("When top_type = 'frac', `top` must be in (0, 1].")
         }
         top_frac <- top
+        n_top_est <- max(1L, floor(top_frac * n_total))
       } else {  # top_type == "n"
         if (!(is.numeric(top) && length(top) == 1L &&
               is.finite(top) && top >= 1)) {
           stop("When top_type = 'n', `top` must be >= 1.")
         }
-        n_top   <- min(n_total, as.integer(top))
-        top_frac <- n_top / n_total
+        n_top_est <- min(n_total, as.integer(top))
+        top_frac  <- n_top_est / n_total
+      }
+
+      if (n_top_est < k) {
+        warning(
+          "svem_select_from_score_table(): top set size (", n_top_est,
+          ") is smaller than k = ", k, "; returning at most ", n_top_est, " candidates."
+        )
       }
 
       ## --- delegate PAM / medoid selection to svem_select_candidates() ---

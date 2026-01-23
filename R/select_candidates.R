@@ -92,12 +92,12 @@ svem_select_candidates <- function(table,
                                    predictor_cols,
                                    direction = c("max", "min"),
                                    metric = "gower") {
-  # Basic checks
+  # ---- basic checks ----
   if (!is.data.frame(table)) {
     stop("`table` must be a data.frame.")
   }
   n <- nrow(table)
-  if (n == 0L || k <= 0L) {
+  if (n == 0L) {
     return(integer(0L))
   }
 
@@ -122,6 +122,9 @@ svem_select_candidates <- function(table,
     stop("`k` must be a single finite numeric value.")
   }
   k <- as.integer(k)
+  if (k <= 0L) {
+    return(integer(0L))
+  }
 
   if (!is.character(predictor_cols) || !length(predictor_cols)) {
     stop("`predictor_cols` must be a nonempty character vector of column names.")
@@ -132,12 +135,18 @@ svem_select_candidates <- function(table,
          paste(missing_pred, collapse = ", "))
   }
 
+  # Guard: ranking must have at least one finite value
+  vals <- table[[by]]
+  if (!any(is.finite(vals))) {
+    stop("Column `", by, "` has no finite values; cannot rank candidates.")
+  }
+
   # Determine how many top rows to keep
   m_top <- max(1L, min(n, ceiling(top_frac * n)))
 
   # Order by score according to direction; NA go to the end
   ord <- order(
-    table[[by]],
+    vals,
     decreasing = (direction == "max"),
     na.last    = TRUE
   )
@@ -145,18 +154,54 @@ svem_select_candidates <- function(table,
 
   top_X <- table[top_idx, predictor_cols, drop = FALSE]
 
+  # Coerce problematic types for daisy() (character -> factor; integer64 -> numeric)
+  for (nm in names(top_X)) {
+    if (is.character(top_X[[nm]])) {
+      top_X[[nm]] <- factor(top_X[[nm]])
+    } else if (inherits(top_X[[nm]], "integer64")) {
+      top_X[[nm]] <- as.numeric(top_X[[nm]])
+    }
+  }
+
   # If k is larger than available rows, truncate
-  k <- min(k, m_top)
+  k <- min(k, nrow(top_X))
   if (k <= 0L) {
     return(integer(0L))
   }
 
+  # Critical: reset rownames so pam id.med maps to positions 1..m_top reliably
+  rownames(top_X) <- as.character(seq_len(nrow(top_X)))
+
   # Dissimilarities and PAM medoids (cluster is a hard dependency)
-  d       <- cluster::daisy(top_X, metric = metric)
+  # daisy() warns when a numeric column has only 2 unique values; still interval-scaled.
+
+  d <- withCallingHandlers(
+    cluster::daisy(top_X, metric = metric),
+    warning = function(w) {
+      msg <- conditionMessage(w)
+      if (grepl("binary variable\\(s\\).*treated as interval scaled", msg, ignore.case = TRUE)) {
+        invokeRestart("muffleWarning")
+      }
+    }
+  )
+
+
   pam_fit <- cluster::pam(d, k = k, diss = TRUE)
 
-  med_top_pos    <- pam_fit$id.med
-  med_global_idx <- top_idx[med_top_pos]
+  # pam_fit$id.med may be labels; map back robustly
+  med_id <- pam_fit$id.med
+  med_pos <- suppressWarnings(as.integer(med_id))
 
-  med_global_idx
+  if (anyNA(med_pos)) {
+    # fall back to matching by labels if coercion fails
+    labs <- attr(d, "Labels")
+    med_pos <- match(as.character(med_id), labs)
+  }
+
+  med_pos <- med_pos[!is.na(med_pos)]
+  if (!length(med_pos)) {
+    return(integer(0L))
+  }
+
+  top_idx[med_pos]
 }

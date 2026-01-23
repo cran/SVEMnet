@@ -194,6 +194,13 @@ Lumley, T. (2004). Analysis of complex survey samples.
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }
+\seealso{
+Useful links:
+\itemize{
+  \item \url{https://arxiv.org/abs/2511.20968}
+}
+
+}
 \author{
 \strong{Maintainer}: Andrew T. Karl \email{akarl@asu.edu} (\href{https://orcid.org/0000-0002-5933-8706}{ORCID})
 

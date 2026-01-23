@@ -120,7 +120,6 @@
 }
 
 # ---- 1) spec builder ----------------------------------------------------------
-
 #' Create a deterministic expansion spec for wide polynomial and interaction models
 #'
 #' \code{bigexp_terms()} builds a specification object that:
@@ -207,8 +206,43 @@
 #'   treat as blocking factors. These variables are included in the spec and
 #'   typed like other predictors (categorical vs continuous), but they enter the
 #'   model only as additive main effects and never appear in interactions,
-#'   polynomials, or partial-cubic terms. Blocking variables must not also
-#'   appear on the right-hand side of \code{formula}.
+#'   polynomials, or partial-cubic terms.
+#'   \strong{Important:} when using \code{y ~ .}, blocking variables are
+#'   automatically excluded from the "non-blocking" predictor set so they do not
+#'   trigger a conflict error.
+#'   When using an explicit RHS (for example \code{y ~ X1 + X2}), blocking
+#'   variables must not also be explicitly listed on the right-hand side.
+#' @param discrete_numeric Optional specification of "discrete numeric" predictors
+#'   for downstream sampling (for example in \code{svem_random_table_multi()}).
+#'   These predictors are still treated as numeric for modeling and expansion
+#'   (that is, they remain continuous in the design matrix and may participate
+#'   in polynomial and interaction terms). This option only records a finite set
+#'   of preferred numeric levels to be used when randomly generating recipes.
+#'   Supply either:
+#'   \itemize{
+#'     \item a character vector of predictor names, in which case the allowed
+#'           levels are inferred as the sorted unique finite values observed in
+#'           \code{data}; or
+#'     \item a named list mapping predictor names to numeric vectors of allowed
+#'           levels. If an entry is \code{NULL} or length zero, levels are
+#'           inferred from \code{data} for that predictor.
+#'   }
+#' @param audit How to handle suspicious typing / high-cardinality issues when
+#'   building the spec. One of \code{"warn"} (default), \code{"error"}, or
+#'   \code{"none"}. Audits cover numeric-like character/factor columns (including
+#'   percent strings like \code{"25\%"}), and very high-cardinality categorical
+#'   predictors that are likely IDs or mis-typed numerics.
+#' @param audit_numeric_rate Numeric in (0,1). If at least this fraction of
+#'   non-missing values parse as numeric (after stripping commas and an optional
+#'   trailing \code{\%}), the column is flagged as numeric-like when stored as
+#'   character/factor.
+#' @param audit_unique_ratio Numeric in (0, 1). For categorical predictors, warn/error
+#'   if \code{unique(non-missing) / n_nonmissing >= audit_unique_ratio}.
+#' @param audit_min_n Integer >= 1. Minimum number of non-missing values required
+#'   before audits are applied.
+#' @param report Logical. If \code{TRUE} (default), print a compact summary of the
+#'   inferred predictor types and settings (via \code{print.bigexp_spec}) when
+#'   \code{bigexp_terms()} returns.
 #'
 #' @return An object of class \code{"bigexp_spec"} with components:
 #' \itemize{
@@ -284,6 +318,47 @@
 #' print(spec_block)
 #' spec_block$rhs
 #'
+#' ## Example 4: discrete numeric predictors (finite numeric support)
+#' ## A common case is a numeric process setting that only takes a small set
+#' ## of allowed values (e.g., 0.5, 1, 2, 4). Use `discrete_numeric` in
+#' ## bigexp_terms() so downstream sampling respects those levels automatically.
+#' \donttest{
+#' set.seed(3)
+#' D_allowed <- c(0.5, 1, 2, 4)
+#' df_disc <- data.frame(
+#'   y  = rnorm(60),
+#'   D  = sample(D_allowed, 60, replace = TRUE),   # numeric with discrete support
+#'   X1 = rnorm(60),
+#'   G  = factor(sample(c("A", "B"), 60, replace = TRUE))
+#' )
+#'
+#' # Record that D should be treated as "discrete numeric" for downstream sampling.
+#' # Levels are inferred automatically from the training data.
+#' spec_disc <- bigexp_terms(
+#'   y ~ D + X1 + G,
+#'   data             = df_disc,
+#'   factorial_order  = 2,
+#'   polynomial_order = 2,
+#'   discrete_numeric = "D"
+#' )
+#'
+#'
+#' # Fit. The discrete support is expected to propagate into fit$sampling_schema
+#' # (assuming the updated SVEMnet implementation that stores sampling_schema).
+#' fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 20)
+#'
+#' # Score random candidates; sampled D values stay in D_allowed
+#' scored <- svem_score_random(
+#'   objects         = list(y = fit_disc),
+#'   goals           = list(y = list(goal = "max", weight = 1)),
+#'   n               = 2000,
+#'   numeric_sampler = "random",
+#'   verbose         = FALSE
+#' )
+#'
+#' table(scored$score_table$D)
+#' stopifnot(all(scored$score_table$D %in% D_allowed))
+#' }
 #' @export
 #' @importFrom stats model.frame na.pass as.formula model.matrix
 #' @importFrom utils combn
@@ -293,7 +368,13 @@ bigexp_terms <- function(formula, data,
                          include_pc_2way    = TRUE,
                          include_pc_3way    = FALSE,
                          intercept          = TRUE,
-                         blocking           = NULL) {
+                         blocking           = NULL,
+                         discrete_numeric   = NULL,
+                         audit              = c("warn", "error", "none"),
+                         audit_numeric_rate = 0.90,
+                         audit_unique_ratio = 0.80,
+                         audit_min_n        = 12L,
+                         report             = TRUE) {
   stopifnot(is.data.frame(data))
 
   if (!is.numeric(factorial_order) || length(factorial_order) != 1L ||
@@ -305,10 +386,26 @@ bigexp_terms <- function(formula, data,
     stop("polynomial_order must be a single finite integer >= 1.")
   }
 
+  if (!is.numeric(audit_numeric_rate) || length(audit_numeric_rate) != 1L ||
+      !is.finite(audit_numeric_rate) || audit_numeric_rate <= 0 || audit_numeric_rate > 1) {
+    stop("audit_numeric_rate must be a single finite number in (0, 1].")
+  }
+  if (!is.numeric(audit_unique_ratio) || length(audit_unique_ratio) != 1L ||
+      !is.finite(audit_unique_ratio) || audit_unique_ratio <= 0 || audit_unique_ratio > 1) {
+    stop("audit_unique_ratio must be a single finite number in (0, 1].")
+  }
+  if (!is.numeric(audit_min_n) || length(audit_min_n) != 1L ||
+      !is.finite(audit_min_n) || audit_min_n < 1) {
+    stop("audit_min_n must be a single finite integer >= 1.")
+  }
+  audit_min_n <- as.integer(audit_min_n)
 
-  factorial_order    <- as.integer(factorial_order)
-  polynomial_order   <- as.integer(polynomial_order)
+  if (!is.logical(report) || length(report) != 1L || is.na(report)) {
+    stop("report must be TRUE/FALSE.")
+  }
 
+  factorial_order  <- as.integer(factorial_order)
+  polynomial_order <- as.integer(polynomial_order)
 
   ## Validate blocking
   if (is.null(blocking)) {
@@ -334,6 +431,7 @@ bigexp_terms <- function(formula, data,
       "The helper will generate interactions and powers."
     )
   }
+  dot_rhs <- grepl("~\\s*\\.", ftxt)
 
   mf <- stats::model.frame(formula, data, na.action = stats::na.pass)
   tt <- attr(mf, "terms")
@@ -360,19 +458,26 @@ bigexp_terms <- function(formula, data,
     )
   }
 
-
   vars <- attr(tt, "term.labels")
-  if (length(vars) == 0L && grepl("~\\s*\\.", ftxt)) {
-    # Use the terms object: all RHS vars that actually entered the terms
-    vars <- all.vars(stats::delete.response(tt))
+
+  ## Robust handling for y ~ . (and any case where '.' leaks into term labels)
+  if (length(vars) && any(vars == ".")) {
+    vars <- vars[vars != "."]
+  }
+  if ((length(vars) == 0L && dot_rhs) || dot_rhs) {
+    # Use training-data columns, excluding the response.
+    # IMPORTANT: if blocking is supplied, exclude blocking variables from the
+    # non-blocking predictor set so they do not trigger a conflict.
+    vars <- setdiff(names(data), c(resp, blocking))
   }
 
   if (!length(vars) && !length(blocking)) {
     stop("No predictors found on the right hand side of formula, and no blocking variables supplied.")
   }
 
-  # Disallow variables listed both in the RHS and in 'blocking'
-  if (length(blocking)) {
+  # Disallow variables listed both in the RHS and in 'blocking' for explicit RHS.
+  # For y ~ ., blocking variables are excluded above.
+  if (length(blocking) && !dot_rhs) {
     conflict_blocking <- intersect(blocking, vars)
     if (length(conflict_blocking)) {
       stop(
@@ -384,9 +489,50 @@ bigexp_terms <- function(formula, data,
     }
   }
 
-
   ## All predictors in the spec: union of RHS vars and blocking cols
   vars_all <- if (length(blocking)) unique(c(vars, blocking)) else vars
+
+  # ---- discrete-numeric parsing (record-only; modeling stays numeric) ----
+  discrete_numeric_vars   <- character(0L)
+  discrete_numeric_levels <- list()
+
+  if (!is.null(discrete_numeric)) {
+    if (is.character(discrete_numeric)) {
+      discrete_numeric_vars <- unique(discrete_numeric)
+      if (any(!nzchar(discrete_numeric_vars))) {
+        stop("discrete_numeric must not contain empty names.")
+      }
+      bad <- setdiff(discrete_numeric_vars, vars_all)
+      if (length(bad)) {
+        stop(
+          "discrete_numeric variable(s) not found among predictors: ",
+          paste(bad, collapse = ", ")
+        )
+      }
+      # levels inferred from data below (after dat0 is created)
+    } else if (is.list(discrete_numeric)) {
+      if (is.null(names(discrete_numeric)) || any(!nzchar(names(discrete_numeric)))) {
+        stop(
+          "When discrete_numeric is a list, it must be a *named* list mapping ",
+          "predictor names to numeric vectors of allowed levels."
+        )
+      }
+      discrete_numeric_vars <- unique(names(discrete_numeric))
+      bad <- setdiff(discrete_numeric_vars, vars_all)
+      if (length(bad)) {
+        stop(
+          "discrete_numeric variable(s) not found among predictors: ",
+          paste(bad, collapse = ", ")
+        )
+      }
+      discrete_numeric_levels <- discrete_numeric
+    } else {
+      stop(
+        "discrete_numeric must be NULL, a character vector of predictor names, ",
+        "or a named list mapping predictor names to numeric vectors of allowed levels."
+      )
+    }
+  }
 
   is_cat      <- setNames(logical(length(vars_all)), vars_all)
   levels_list <- vector("list", length(vars_all)); names(levels_list) <- vars_all
@@ -394,7 +540,56 @@ bigexp_terms <- function(formula, data,
     NA_real_, nrow = 2, ncol = 0,
     dimnames = list(c("min", "max"), character())
   )
-  dat0 <- as.data.frame(data)
+  dat0  <- as.data.frame(data)
+  audit <- match.arg(audit)
+
+  .emit <- function(...) {
+    if (identical(audit, "warn")) warning(..., call. = FALSE)
+    if (identical(audit, "error")) stop(...)
+    invisible(NULL) # "none" => do nothing
+  }
+
+  # ---- preflight audit for common "CSV typing" pitfalls ----
+  for (v in vars_all) {
+    x <- dat0[[v]]
+
+    if (is.character(x) || is.factor(x)) {
+      # requires helper defined elsewhere in file:
+      # .bigexp_numeric_like_info()
+      info <- .bigexp_numeric_like_info(x)
+
+      if (is.finite(info$rate) && info$rate >= audit_numeric_rate) {
+        vals <- as.character(x)
+        nonmiss <- !is.na(vals) & nzchar(trimws(vals))
+        n <- sum(nonmiss)
+        if (n >= audit_min_n) {
+          u <- length(unique(vals[nonmiss]))
+          prop_unique <- u / n
+
+          if (prop_unique >= audit_unique_ratio) {
+            .emit(
+              "Predictor '", v, "' is ",
+              if (info$kind == "percent") "percent-like" else "numeric-like",
+              " but stored as ", class(x)[1L], " with very high cardinality (",
+              u, " unique / ", n, " non-missing; ", sprintf("%.0f%%", 100 * prop_unique), ").\n",
+              "This will be treated as *categorical* and can explode the design matrix.\n",
+              "Example values: ", paste(info$example, collapse = ", "), "\n",
+              "Optional Fix (if current behavior not intended): convert it to numeric before bigexp_terms() (e.g., strip '%' and divide by 100), ",
+              "or exclude/block it if it's an ID."
+            )
+          } else {
+            .emit(
+              "Predictor '", v, "' looks ",
+              if (info$kind == "percent") "percent-like" else "numeric-like",
+              " but is stored as ", class(x)[1L], ". bigexp_terms() will treat it as *categorical*.\n",
+              "Example values: ", paste(info$example, collapse = ", "), "\n",
+              "Optional Fix (if current behavior not intended): convert it to numeric before bigexp_terms()"
+            )
+          }
+        }
+      }
+    }
+  }
 
   blocking_vars <- intersect(vars_all, blocking)
 
@@ -429,6 +624,66 @@ bigexp_terms <- function(formula, data,
       levels_list[[v]] <- levels(fx)
       dat0[[v]] <- fx
     }
+  }
+
+  # ---- high-cardinality categorical guardrail (IDs / accidental strings) ----
+  for (v in vars_all) {
+    if (isTRUE(is_cat[[v]])) {
+      vals <- as.character(dat0[[v]])
+      nonmiss <- !is.na(vals) & nzchar(trimws(vals))
+      n <- sum(nonmiss)
+      if (n >= audit_min_n) {
+        u <- length(unique(vals[nonmiss]))
+        prop_unique <- u / n
+        if (prop_unique >= audit_unique_ratio) {
+          .emit(
+            "Categorical predictor '", v, "' has very high cardinality (",
+            u, " unique / ", n, " non-missing; ", sprintf("%.0f%%", 100 * prop_unique), ").\n",
+            "This often indicates an ID column or a numeric column imported as text, and can greatly expand the model matrix.\n",
+            "Consider excluding it, making it a blocking factor, or converting to numeric if appropriate."
+          )
+        }
+      }
+    }
+  }
+
+  ## Finalize discrete numeric levels (either provided or inferred from data)
+  if (length(discrete_numeric_vars)) {
+    for (v in discrete_numeric_vars) {
+      x <- dat0[[v]]
+
+      if (!is.numeric(x)) {
+        stop(
+          "discrete_numeric variable '", v, "' must be numeric in the training data."
+        )
+      }
+
+      lv_user <- NULL
+      if (length(discrete_numeric_levels) && !is.null(discrete_numeric_levels[[v]])) {
+        lv_user <- discrete_numeric_levels[[v]]
+      }
+
+      if (is.null(lv_user) || !length(lv_user)) {
+        lv <- sort(unique(as.numeric(x[is.finite(x)])))
+      } else {
+        lv <- sort(unique(as.numeric(lv_user)))
+      }
+
+      lv <- lv[is.finite(lv)]
+      if (!length(lv)) {
+        stop(
+          "Could not determine any finite discrete levels for '", v, "'. ",
+          "Provide finite numeric values in data or supply them via discrete_numeric."
+        )
+      }
+
+      discrete_numeric_levels[[v]] <- lv
+    }
+
+    # ensure list is named and limited to discrete_numeric_vars
+    discrete_numeric_levels <- discrete_numeric_levels[discrete_numeric_vars]
+  } else {
+    discrete_numeric_levels <- list()
   }
 
   ## Non-blocking predictors are eligible for factorial / polynomial terms
@@ -474,7 +729,7 @@ bigexp_terms <- function(formula, data,
   contrasts_used <- attr(mm_tmp, "contrasts")
   contrasts_opts <- getOption("contrasts")
 
-  structure(
+  spec <- structure(
     list(
       formula   = form_expanded,
       rhs       = rhs,
@@ -489,12 +744,20 @@ bigexp_terms <- function(formula, data,
         include_pc_3way    = include_pc_3way,
         intercept          = intercept,
         blocking           = blocking_vars,
+        discrete_numeric   = discrete_numeric_vars,
+        discrete_levels    = discrete_numeric_levels,
         contrasts          = contrasts_used,
         contrasts_options  = contrasts_opts
       )
     ),
     class = "bigexp_spec"
   )
+
+  if (isTRUE(report)) {
+    print(spec)
+  }
+
+  spec
 }
 
 
@@ -595,7 +858,9 @@ bigexp_prepare <- function(spec, data, unseen = c("warn_na", "error")) {
       }
       dat2[[v]] <- factor(vals, levels = lv)
     } else {
-      # Continuous variable expected; enforce numeric type in new data
+      # Continuous variable expected; enforce numeric type in new data.
+      # NOTE: "discrete_numeric" predictors (when recorded in spec$settings)
+      # remain numeric here as well; intermediate values are allowed.
       if (!is.numeric(dat2[[v]])) {
         stop(
           "Variable '", v,
@@ -881,6 +1146,14 @@ print.bigexp_spec <- function(x, ...) {
       sep = ""
     )
   }
+  if (!is.null(x$settings$discrete_numeric) && length(x$settings$discrete_numeric)) {
+    cat(
+      "  Discrete numeric (sampling levels recorded): ",
+      paste(x$settings$discrete_numeric, collapse = ", "),
+      "\n",
+      sep = ""
+    )
+  }
   if (!is.null(x$settings$contrasts_options)) {
     co <- x$settings$contrasts_options
     cat(
@@ -893,3 +1166,44 @@ print.bigexp_spec <- function(x, ...) {
   cat("  Formula:\n  ", deparse(x$formula), "\n", sep = "")
   invisible(x)
 }
+
+#' @keywords internal
+#' @noRd
+.bigexp_numeric_like_info <- function(x) {
+  vals <- as.character(x)
+  vals <- trimws(vals)
+
+  nonmiss <- !is.na(vals) & nzchar(vals)
+  if (!any(nonmiss)) {
+    return(list(rate = 0, kind = NA_character_, example = character(0)))
+  }
+
+  v <- vals[nonmiss]
+
+  # detect percent-style strings
+  has_pct <- grepl("%", v, fixed = TRUE)
+  pct_rate <- mean(has_pct)
+
+  # clean numeric-ish text
+  v_clean <- gsub("%", "", v, fixed = TRUE)
+  v_clean <- gsub(",", "", v_clean, fixed = TRUE)
+  v_clean <- trimws(v_clean)
+
+  num <- suppressWarnings(as.numeric(v_clean))
+
+  # if mostly percent strings, interpret as percent scale (0-1)
+  kind <- "number"
+  if (pct_rate >= 0.80) {
+    num <- num / 100
+    kind <- "percent"
+  }
+
+  rate <- mean(is.finite(num))
+
+  # examples for messaging
+  ex <- unique(v)
+  ex <- ex[seq_len(min(3L, length(ex)))]
+
+  list(rate = rate, kind = kind, example = ex)
+}
+

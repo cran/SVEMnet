@@ -90,9 +90,8 @@ are sampled inside \code{\link{svem_random_table_multi}}. One of:
 \item{wmt}{Optional object returned by \code{\link{svem_wmt_multi}}.
 When non-\code{NULL}, its \code{multipliers} (and \code{p_values}, if
 present) are aligned to \code{names(objects)} and used to define WMT
-weights, \code{wmt_score}, and the weighting of the uncertainty measure.
-When \code{NULL}, only user weights are used and no WMT reweighting is
-applied.}
+weights, \code{wmt_score}. When \code{NULL}, only
+user weights are used and no WMT reweighting is applied.}
 
 \item{verbose}{Logical; if \code{TRUE}, print a compact summary of the run
 (and any WMT diagnostics from upstream) to the console.}
@@ -149,6 +148,10 @@ desirability scores and (optionally) whole-model-test (WMT) reweighted
 scores, and attach a scalar uncertainty measure based on percentile CI
 widths. This function does \emph{not} choose candidates; see
 \code{\link{svem_select_from_score_table}} for selection and clustering.
+
+Predictions used inside this scorer are always generated with debiasing
+disabled (i.e., \code{debias = FALSE}) regardless of whether the underlying
+SVEM fits support calibration.
 
 When \code{specs} is supplied, the function also attempts to append
 mean-level "in spec" probabilities and related joint indicators using the
@@ -219,8 +222,9 @@ whole-model p-value. Final WMT weights are proportional to the product of
 the user weight and the multiplier, then renormalized to sum to one:
 \deqn{w_r^{(\mathrm{final})} \propto w_r^{(\mathrm{user})} \times m_r,}
 where \eqn{m_r} comes from \code{wmt$multipliers}. The user weights always
-define \code{score}; the WMT-adjusted weights define \code{wmt_score} and
-the uncertainty weighting when WMT is enabled.
+define \code{score}; the WMT-adjusted weights define \code{wmt_score}.
+The uncertainty measure is always weighted using the user weights, even
+when WMT is supplied.
 
 \strong{Binomial responses.} If any responses are fitted with
 \code{family = "binomial"}, supplying a non-\code{NULL} \code{wmt} object
@@ -252,10 +256,9 @@ The scalar \code{uncertainty_measure} is then
   \text{uncertainty}(x) = \sum_r w_r \, \tilde W_r(x),
 }
 where \eqn{w_r} are the user-normalized response weights derived from
-\code{goals[[resp]]$weight}, regardless of whether a WMT object is
-supplied. Larger values of \code{uncertainty_measure} indicate settings
-where the ensemble CI is relatively wide compared to the response's typical
-scale and are natural targets for exploration.
+\code{goals[[resp]]$weight}. Larger values of \code{uncertainty_measure}
+indicate settings where the ensemble CI is relatively wide compared to the
+response's typical scale and are natural targets for exploration.
 }
 
 \subsection{Spec-limit mean-level probabilities}{
@@ -448,6 +451,7 @@ scored_pos <- svem_score_random(
 names(scored_pos$score_table)
 
 }
+
 }
 \seealso{
 \code{\link{SVEMnet}},

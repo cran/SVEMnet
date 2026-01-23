@@ -7,6 +7,10 @@
 #' widths. This function does *not* choose candidates; see
 #' \code{\link{svem_select_from_score_table}} for selection and clustering.
 #'
+#' Predictions used inside this scorer are always generated with debiasing
+#' disabled (i.e., \code{debias = FALSE}) regardless of whether the underlying
+#' SVEM fits support calibration.
+#'
 #' When \code{specs} is supplied, the function also attempts to append
 #' mean-level "in spec" probabilities and related joint indicators using the
 #' SVEM bootstrap ensemble via \code{svem_append_design_space_cols}.
@@ -77,8 +81,9 @@
 #' the user weight and the multiplier, then renormalized to sum to one:
 #' \deqn{w_r^{(\mathrm{final})} \propto w_r^{(\mathrm{user})} \times m_r,}
 #' where \eqn{m_r} comes from \code{wmt$multipliers}. The user weights always
-#' define \code{score}; the WMT-adjusted weights define \code{wmt_score} and
-#' the uncertainty weighting when WMT is enabled.
+#' define \code{score}; the WMT-adjusted weights define \code{wmt_score}.
+#' The uncertainty measure is always weighted using the user weights, even
+#' when WMT is supplied.
 #'
 #' \strong{Binomial responses.} If any responses are fitted with
 #' \code{family = "binomial"}, supplying a non-\code{NULL} \code{wmt} object
@@ -110,10 +115,9 @@
 #'   \text{uncertainty}(x) = \sum_r w_r \, \tilde W_r(x),
 #' }
 #' where \eqn{w_r} are the user-normalized response weights derived from
-#' \code{goals[[resp]]$weight}, regardless of whether a WMT object is
-#' supplied. Larger values of \code{uncertainty_measure} indicate settings
-#' where the ensemble CI is relatively wide compared to the response's typical
-#' scale and are natural targets for exploration.
+#' \code{goals[[resp]]$weight}. Larger values of \code{uncertainty_measure}
+#' indicate settings where the ensemble CI is relatively wide compared to the
+#' response's typical scale and are natural targets for exploration.
 #' }
 #'
 #' \subsection{Spec-limit mean-level probabilities}{
@@ -210,9 +214,8 @@
 #' @param wmt Optional object returned by \code{\link{svem_wmt_multi}}.
 #'   When non-\code{NULL}, its \code{multipliers} (and \code{p_values}, if
 #'   present) are aligned to \code{names(objects)} and used to define WMT
-#'   weights, \code{wmt_score}, and the weighting of the uncertainty measure.
-#'   When \code{NULL}, only user weights are used and no WMT reweighting is
-#'   applied.
+#'   weights, \code{wmt_score}. When \code{NULL}, only
+#'   user weights are used and no WMT reweighting is applied.
 #' @param verbose Logical; if \code{TRUE}, print a compact summary of the run
 #'   (and any WMT diagnostics from upstream) to the console.
 #' @param specs Optional named list of specification objects, one per response
@@ -426,9 +429,8 @@
 #' names(scored_pos$score_table)
 #'
 #' }
-
+#'
 #' @export
-
 svem_score_random <- function(objects,
                               goals,
                               data = NULL,
@@ -442,7 +444,7 @@ svem_score_random <- function(objects,
                               specs   = NULL) {
 
   # ---- constants / defaults ----
-  debias_flag         <- FALSE
+  debias_flag         <- FALSE  # always off here by design
   geom_floor          <- 1e-6
   .q_lo               <- 0.02
   .q_hi               <- 0.98
@@ -452,17 +454,31 @@ svem_score_random <- function(objects,
   .ds_span_abs_floor  <- 1e-6
   .ds_span_rel_floor  <- 0.05
 
-
   combine         <- match.arg(combine)
   numeric_sampler <- match.arg(numeric_sampler)
 
   # ---- basic validation ----
+  if (inherits(objects, "svem_model")) objects <- list(objects)
+
   if (!is.list(objects) || !length(objects))
     stop("objects must be a nonempty list of svem_model objects.")
   if (!all(vapply(objects, inherits, logical(1), what = "svem_model")))
     stop("All elements of 'objects' must be svem_model objects.")
 
-  ## --- infer response names from model formulas ---
+  if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1) {
+    stop("'n' must be a single integer >= 1.")
+  }
+  n <- as.integer(n)
+
+  if (!is.numeric(level) || length(level) != 1L || !is.finite(level) || level <= 0 || level >= 1) {
+    stop("'level' must be a single number strictly between 0 and 1.")
+  }
+
+  if (!is.null(data) && !is.data.frame(data)) {
+    stop("'data' must be NULL or a data.frame.")
+  }
+
+  # ---- infer response names from model formulas ----
   lhs_names <- vapply(objects, function(o) {
     if (!is.null(o$formula) && inherits(o$formula, "formula")) {
       as.character(o$formula[[2L]])
@@ -471,44 +487,59 @@ svem_score_random <- function(objects,
     }
   }, character(1))
 
+  # ---- HARD CHECK: duplicate LHS names create ambiguous key mapping ----
+  valid_lhs <- !is.na(lhs_names) & nzchar(lhs_names)
+  if (anyDuplicated(lhs_names[valid_lhs])) {
+    dups <- unique(lhs_names[valid_lhs][duplicated(lhs_names[valid_lhs])])
+    stop(
+      "Duplicate model response (LHS) names detected: ",
+      paste(dups, collapse = ", "),
+      ". Please rename the response variables and/or name the objects list uniquely."
+    )
+  }
+
   obj_names <- names(objects)
   if (is.null(obj_names)) obj_names <- rep("", length(objects))
 
-  ## fill missing/empty object names from LHS if available
-  empty_idx <- which(!nzchar(obj_names) & nzchar(lhs_names))
-  if (length(empty_idx)) {
-    obj_names[empty_idx] <- lhs_names[empty_idx]
-  }
+  empty_idx <- which(!nzchar(obj_names) & valid_lhs)
+  if (length(empty_idx)) obj_names[empty_idx] <- lhs_names[empty_idx]
   names(objects) <- obj_names
 
-  ## warn if nonempty list names disagree with LHS
-  mismatch <- nzchar(obj_names) & nzchar(lhs_names) & obj_names != lhs_names
-  if (any(mismatch)) {
+  mismatch <- nzchar(obj_names) & valid_lhs & (obj_names != lhs_names)
+  if (any(mismatch, na.rm = TRUE)) {
     warning(
       "names(objects) differ from model response names for: ",
-      paste0(
-        obj_names[mismatch], " (lhs: ", lhs_names[mismatch], ")",
-        collapse = ", "
-      ),
-      ". You can refer to these responses in goals/specs by either the ",
-      "list name or the response name."
+      paste0(obj_names[mismatch], " (lhs: ", lhs_names[mismatch], ")", collapse = ", "),
+      ". You can refer to these responses in goals/specs by either the list name or the response name."
     )
   }
 
   resp_names <- names(objects)
   if (any(!nzchar(resp_names))) {
     stop(
-      "Could not infer response names for all models; please name the ",
-      "objects list or ensure each model has a formula with a left-hand side."
+      "Could not infer response names for all models; please name the objects list ",
+      "or ensure each model has a formula with a left-hand side."
     )
   }
 
-  ## --- goals: allow unnamed (positional) or named by object name or LHS ---
+  if (anyDuplicated(resp_names)) {
+    dups <- unique(resp_names[duplicated(resp_names)])
+    stop(
+      "Response identifiers must be unique. Duplicates: ",
+      paste(dups, collapse = ", "),
+      ". Please rename the 'objects' list entries to unique names."
+    )
+  }
+
+  # mapping: key -> canonical response name (list name)
+  key_to_resp <- setNames(resp_names, resp_names)
+  if (any(valid_lhs)) key_to_resp[lhs_names[valid_lhs]] <- resp_names[valid_lhs]
+
+  # ---- goals: allow unnamed (positional) or named by object name or LHS ----
   if (!is.list(goals) || !length(goals))
     stop("goals must be a list of per-response goal specifications.")
 
   if (is.null(names(goals)) || any(!nzchar(names(goals)))) {
-    ## unnamed goals -> match by position
     if (length(goals) != length(objects)) {
       stop(
         "When 'goals' is unnamed, it must have the same length as 'objects'.\n",
@@ -517,14 +548,7 @@ svem_score_random <- function(objects,
     }
     names(goals) <- resp_names
   } else {
-    ## named goals -> map either object-name or LHS name -> object-name
     gnames <- names(goals)
-
-    ## key -> canonical response name mapping
-    key_to_resp <- setNames(resp_names, resp_names)
-    valid_lhs   <- nzchar(lhs_names)
-    key_to_resp[lhs_names[valid_lhs]] <- resp_names[valid_lhs]
-
     remapped <- gnames
     for (i in seq_along(gnames)) {
       key <- gnames[i]
@@ -540,13 +564,11 @@ svem_score_random <- function(objects,
     stop(
       "Missing goals for responses: ",
       paste(miss_goals, collapse = ", "),
-      ". You can name goals by the objects list names or by the model ",
-      "response names."
+      ". You can name goals by the objects list names or by the model response names."
     )
   }
 
-
-  # detect families
+  # ---- detect families ----
   resp_family <- vapply(objects, function(o) {
     fam <- tryCatch(o$family, error = function(e) NA_character_)
     if (!is.character(fam) || !length(fam)) NA_character_ else fam[1]
@@ -554,7 +576,6 @@ svem_score_random <- function(objects,
   is_binomial_resp <- tolower(resp_family) %in% "binomial"
   names(is_binomial_resp) <- resp_names
 
-  # WMT not allowed with binomial responses
   if (!is.null(wmt) && any(is_binomial_resp, na.rm = TRUE)) {
     offending <- paste(resp_names[which(is_binomial_resp)], collapse = ", ")
     stop("Supplying `wmt` is not supported when any responses are binomial.\n",
@@ -567,6 +588,7 @@ svem_score_random <- function(objects,
                         weight   = NA_real_,
                         target   = NA_real_,
                         stringsAsFactors = FALSE)
+
   for (i in seq_along(resp_names)) {
     r  <- resp_names[i]
     gi <- goals[[r]]
@@ -606,19 +628,39 @@ svem_score_random <- function(objects,
            "or at least a list with a named numeric 'multipliers' component.")
     }
     mult_vec <- wmt$multipliers
-    if (is.null(names(mult_vec))) {
-      stop("`wmt$multipliers` must be a named numeric vector.")
+    if (is.null(names(mult_vec))) stop("`wmt$multipliers` must be a named numeric vector.")
+
+    # allow WMT names keyed by LHS
+    mult_names2 <- vapply(names(mult_vec), function(k) {
+      if (k %in% names(key_to_resp)) key_to_resp[[k]] else k
+    }, character(1))
+    if (anyDuplicated(mult_names2)) {
+      dups <- unique(mult_names2[duplicated(mult_names2)])
+      stop("wmt$multipliers names map to duplicate responses: ", paste(dups, collapse = ", "))
     }
+    names(mult_vec) <- mult_names2
 
     common <- intersect(names(mult_vec), resp_names)
     if (!length(common)) {
-      stop("No overlap between names(objects) and names(wmt$multipliers).")
+      stop("No overlap between response names and names(wmt$multipliers) after name alignment.")
     }
     wmt_mult[common] <- as.numeric(mult_vec[common])
+
+    if (any(!is.finite(wmt_mult)) || any(wmt_mult < 0)) {
+      stop("wmt multipliers must be finite and nonnegative after alignment.")
+    }
 
     if (!is.null(wmt$p_values)) {
       p_vec <- wmt$p_values
       if (!is.null(names(p_vec))) {
+        p_names2 <- vapply(names(p_vec), function(k) {
+          if (k %in% names(key_to_resp)) key_to_resp[[k]] else k
+        }, character(1))
+        if (anyDuplicated(p_names2)) {
+          dups <- unique(p_names2[duplicated(p_names2)])
+          stop("wmt$p_values names map to duplicate responses: ", paste(dups, collapse = ", "))
+        }
+        names(p_vec) <- p_names2
         common_p <- intersect(names(p_vec), resp_names)
         wmt_p_vals[common_p] <- as.numeric(p_vec[common_p])
       }
@@ -632,18 +674,30 @@ svem_score_random <- function(objects,
 
   reweight_flag <- !is.null(wmt)
 
-  # final weights
   weights_final_raw <- weights_user * wmt_mult
   sw2 <- sum(weights_final_raw)
   weights_final <- if (sw2 > 0 && is.finite(sw2)) weights_final_raw / sw2 else weights_user
 
-  wts_user  <- stats::setNames(weights_user, goal_df$response)
-  wts_final <- stats::setNames(weights_final, goal_df$response)
-  wts_rank  <- if (reweight_flag) wts_final else wts_user
-  wts_uncert <- wts_user  # always use user weights for uncertainty
+  wts_user   <- stats::setNames(weights_user,  goal_df$response)
+  wts_final  <- stats::setNames(weights_final, goal_df$response)
+  wts_rank   <- if (reweight_flag) wts_final else wts_user
+  wts_uncert <- wts_user  # ALWAYS user weights for uncertainty
 
+  # ---- warn once if any models cannot produce bootstrap intervals ----
+  has_coef_mat <- vapply(objects, function(o) {
+    !is.null(o$coef_matrix) && is.matrix(o$coef_matrix) && nrow(o$coef_matrix) > 0L
+  }, logical(1))
+  missing_ci_models <- names(objects)[!has_coef_mat]
+  if (length(missing_ci_models)) {
+    warning(
+      "Some models lack coef_matrix; CI and uncertainty columns will be NA for: ",
+      paste(missing_ci_models, collapse = ", ")
+    )
+  }
 
   # ---- sample & predict ----
+  # NOTE: svem_random_table_multi() auto-respects discrete numeric supports
+  # stored in sampling_schema; no discrete argument is passed here.
   sampled_raw <- svem_random_table_multi(
     objects         = objects,
     n               = n,
@@ -651,6 +705,7 @@ svem_score_random <- function(objects,
     debias          = debias_flag,
     numeric_sampler = numeric_sampler
   )
+
   if (!is.list(sampled_raw) || is.null(sampled_raw$data) || is.null(sampled_raw$pred)) {
     stop("svem_random_table_multi must return list(data, pred).")
   }
@@ -659,7 +714,6 @@ svem_score_random <- function(objects,
   pred_df <- as.data.frame(sampled_raw$pred, check.names = FALSE, optional = FALSE)
 
   # map response labels -> prediction columns in sampled_raw$pred
-  # and enforce <resp>_pred naming in the score_table
   resp_table_cols <- setNames(character(length(resp_names)), resp_names)
 
   for (resp in resp_names) {
@@ -667,38 +721,27 @@ svem_score_random <- function(objects,
 
     lhs <- NA_character_
     if (!is.null(obj$formula) && inherits(obj$formula, "formula")) {
-      lhs <- tryCatch(
-        as.character(obj$formula[[2L]]),
-        error = function(e) NA_character_
-      )
+      lhs <- tryCatch(as.character(obj$formula[[2L]]), error = function(e) NA_character_)
     }
 
     candidates <- character(0L)
-    if (!is.na(lhs) && nzchar(lhs)) {
-      candidates <- c(candidates, paste0(lhs, "_pred"))
-    }
+    if (!is.na(lhs) && nzchar(lhs)) candidates <- c(candidates, paste0(lhs, "_pred"))
     candidates <- unique(c(candidates, paste0(resp, "_pred")))
 
     found <- candidates[candidates %in% colnames(pred_df)]
-
     if (!length(found)) {
       stop(
         "Could not match response '", resp,
-        "' to prediction columns from svem_random_table_multi(). ",
-        "Expected to find one of: ",
+        "' to prediction columns from svem_random_table_multi(). Expected one of: ",
         paste(candidates, collapse = ", "),
         " in names(sampled_raw$pred)."
       )
     }
-
     resp_table_cols[resp] <- found[1L]
   }
 
-  # build prediction matrix with standardized <resp>_pred names
   pred_mat <- as.data.frame(
-    lapply(resp_names, function(r) {
-      as.numeric(pred_df[[resp_table_cols[[r]]]])
-    }),
+    lapply(resp_names, function(r) as.numeric(pred_df[[resp_table_cols[[r]]]])),
     check.names = FALSE,
     optional    = FALSE
   )
@@ -744,30 +787,22 @@ svem_score_random <- function(objects,
   for (r in resp_cols) {
     gi <- goals[[r]]
     g  <- goal_df$goal[goal_df$response == r]
-
-    # predictions used for DS are always <resp>_pred
     y  <- score_table[[resp_pred_cols[[r]]]]
 
-    # ---- validate Derringer–Suich shape parameters (if supplied) ----
     if (!is.null(gi$shape)) {
-      if (!is.numeric(gi$shape) || length(gi$shape) != 1L || gi$shape <= 0) {
+      if (!is.numeric(gi$shape) || length(gi$shape) != 1L || gi$shape <= 0)
         stop("For response '", r, "', DS 'shape' must be a single positive number.")
-      }
     }
     if (!is.null(gi$shape_left)) {
-      if (!is.numeric(gi$shape_left) || length(gi$shape_left) != 1L || gi$shape_left <= 0) {
+      if (!is.numeric(gi$shape_left) || length(gi$shape_left) != 1L || gi$shape_left <= 0)
         stop("For response '", r, "', DS 'shape_left' must be a single positive number.")
-      }
     }
     if (!is.null(gi$shape_right)) {
-      if (!is.numeric(gi$shape_right) || length(gi$shape_right) != 1L || gi$shape_right <= 0) {
+      if (!is.numeric(gi$shape_right) || length(gi$shape_right) != 1L || gi$shape_right <= 0)
         stop("For response '", r, "', DS 'shape_right' must be a single positive number.")
-      }
     }
 
-    if (isTRUE(is_binomial_resp[r])) {
-      y <- pmin(pmax(as.numeric(y), 0), 1)
-    }
+    if (isTRUE(is_binomial_resp[r])) y <- pmin(pmax(as.numeric(y), 0), 1)
 
     L_def <- .q(y, .q_lo)
     U_def <- .q(y, .q_hi)
@@ -776,22 +811,11 @@ svem_score_random <- function(objects,
 
     span_def <- U_def - L_def
     full_rng <- range(y, na.rm = TRUE)
-    if (!all(is.finite(full_rng))) {
-      full_span <- NA_real_
-    } else {
-      full_span <- full_rng[2L] - full_rng[1L]
-    }
+    full_span <- if (!all(is.finite(full_rng))) NA_real_ else full_rng[2L] - full_rng[1L]
 
     span_floor <- .ds_span_abs_floor
-    if (is.finite(full_span) && full_span > 0) {
-      span_floor <- max(span_floor, .ds_span_rel_floor * full_span)
-    }
-
-    if (!is.finite(span_def) || span_def <= 0) {
-      span_use <- span_floor
-    } else {
-      span_use <- max(span_def, span_floor)
-    }
+    if (is.finite(full_span) && full_span > 0) span_floor <- max(span_floor, .ds_span_rel_floor * full_span)
+    span_use <- if (!is.finite(span_def) || span_def <= 0) span_floor else max(span_def, span_floor)
 
     mid_def <- 0.5 * (L_def + U_def)
     L_def <- mid_def - 0.5 * span_use
@@ -832,50 +856,51 @@ svem_score_random <- function(objects,
       z <- .ds_target(y, T0, L, U, sL, sR)
       ds_params[[r]] <- list(type = "target", T0 = T0, L = L, U = U, sL = sL, sR = sR)
     }
+
     contrib_cols[[paste0(r, "_des")]] <- z
   }
 
-  for (nm in names(contrib_cols)) {
-    score_table[[nm]] <- contrib_cols[[nm]]
-  }
+  for (nm in names(contrib_cols)) score_table[[nm]] <- contrib_cols[[nm]]
 
   # ---- combine desirabilities into score + wmt_score ----
   if (combine == "mean") {
-    score_user <- Reduce(`+`, lapply(resp_cols, function(r) {
-      as.numeric(wts_user[r]) * contrib_cols[[paste0(r, "_des")]]
-    }))
-    score_rank <- score_user
-    wmt_score <- NULL
+    score_user <- Reduce(`+`, lapply(resp_cols, function(r) as.numeric(wts_user[r]) * contrib_cols[[paste0(r, "_des")]]))
+    score_table$score <- score_user
     if (reweight_flag) {
-      wmt_score <- Reduce(`+`, lapply(resp_cols, function(r) {
-        as.numeric(wts_final[r]) * contrib_cols[[paste0(r, "_des")]]
-      }))
-      score_rank <- wmt_score
+      score_table$wmt_score <- Reduce(`+`, lapply(resp_cols, function(r) as.numeric(wts_final[r]) * contrib_cols[[paste0(r, "_des")]]))
     }
-    score_table$score <- score_user
-    if (!is.null(wmt_score)) score_table$wmt_score <- wmt_score
-
-  } else {  # geometric
-    log_terms_user <- list()
-    log_terms_rank <- list()
-    for (r in resp_cols) {
-      z    <- contrib_cols[[paste0(r, "_des")]]
+  } else {
+    score_table$score <- exp(Reduce(`+`, lapply(resp_cols, function(r) {
+      z <- contrib_cols[[paste0(r, "_des")]]
       zadj <- (1 - geom_floor) * z + geom_floor
-      log_terms_user[[r]] <- as.numeric(wts_user[r]) * log(zadj)
-      log_terms_rank[[r]] <- as.numeric(wts_rank[r]) * log(zadj)
+      as.numeric(wts_user[r]) * log(zadj)
+    })))
+    if (reweight_flag) {
+      score_table$wmt_score <- exp(Reduce(`+`, lapply(resp_cols, function(r) {
+        z <- contrib_cols[[paste0(r, "_des")]]
+        zadj <- (1 - geom_floor) * z + geom_floor
+        as.numeric(wts_rank[r]) * log(zadj)
+      })))
     }
-    score_user <- exp(Reduce(`+`, log_terms_user))
-    score_rank <- exp(Reduce(`+`, log_terms_rank))
-    score_table$score <- score_user
-    if (reweight_flag) score_table$wmt_score <- score_rank
   }
 
   # ---- uncertainty_measure from CI widths + store per-response CIs ----
   .normalize01_robust <- function(x) {
-    a <- .q(x, .q_lo); b <- .q(x, .q_hi)
-    if (!is.finite(a) || !is.finite(b) || b <= a) return(rep(0.5, length(x)))
-    (pmin(pmax(x, a), b) - a) / (b - a)
+    a <- as.numeric(stats::quantile(x, probs = .q_lo, na.rm = TRUE, names = FALSE))
+    b <- as.numeric(stats::quantile(x, probs = .q_hi, na.rm = TRUE, names = FALSE))
+
+    # If we can't compute a spread (all NA, constant widths, etc.), use neutral 0.5
+    if (!is.finite(a) || !is.finite(b) || b <= a) {
+      return(rep(0.5, length(x)))
+    }
+
+    out <- (pmin(pmax(x, a), b) - a) / (b - a)
+
+    # Any NA/Inf -> neutral (this keeps uncertainty usable downstream)
+    out[!is.finite(out)] <- 0.5
+    out
   }
+
 
   ciw_w_cols  <- list()
   ci_lwr_cols <- list()
@@ -893,8 +918,7 @@ svem_score_random <- function(objects,
     )
 
     lwr <- upr <- rep(NA_real_, nrow(score_table))
-    if (!inherits(pr, "try-error") && is.list(pr) &&
-        !is.null(pr$lwr) && !is.null(pr$upr)) {
+    if (!inherits(pr, "try-error") && is.list(pr) && !is.null(pr$lwr) && !is.null(pr$upr)) {
       lwr <- as.numeric(pr$lwr)
       upr <- as.numeric(pr$upr)
     }
@@ -904,7 +928,6 @@ svem_score_random <- function(objects,
       upr <- pmin(pmax(upr, 0), 1)
     }
 
-    # store CI columns
     ci_lwr_cols[[paste0(r, "_lwr")]] <- lwr
     ci_upr_cols[[paste0(r, "_upr")]] <- upr
 
@@ -913,20 +936,23 @@ svem_score_random <- function(objects,
     ciw_w_cols[[paste0(r, "_ciw_w")]] <- as.numeric(wts_uncert[r]) * zc
   }
 
-  if (length(ciw_w_cols)) {
-    # attach CIs first, then weighted CI width contributors, then scalar measure
-    for (nm in names(ci_lwr_cols)) score_table[[nm]] <- ci_lwr_cols[[nm]]
-    for (nm in names(ci_upr_cols)) score_table[[nm]] <- ci_upr_cols[[nm]]
-    for (nm in names(ciw_w_cols))  score_table[[nm]] <- ciw_w_cols[[nm]]
-    score_table$uncertainty_measure <- Reduce(`+`, ciw_w_cols)
+  for (nm in names(ci_lwr_cols)) score_table[[nm]] <- ci_lwr_cols[[nm]]
+  for (nm in names(ci_upr_cols)) score_table[[nm]] <- ci_upr_cols[[nm]]
+  for (nm in names(ciw_w_cols))  score_table[[nm]] <- ciw_w_cols[[nm]]
+
+  ciw_mat <- as.data.frame(ciw_w_cols, check.names = FALSE)
+  if (ncol(ciw_mat)) {
+    score_table$uncertainty_measure <- rowSums(ciw_mat, na.rm = TRUE)
   } else {
-    score_table$uncertainty_measure <- NA_real_
+    score_table$uncertainty_measure <- rep(0.5, nrow(score_table))  # or NA_real_
   }
+
 
   # ---- score original data (optional) ----
   original_data_scored <- NULL
   if (!is.null(data) && is.data.frame(data)) {
-    pred_df <- data.frame(row_id = seq_len(nrow(data)))
+
+    pred_df0 <- data.frame(row_id = seq_len(nrow(data)))
     ci_lwr  <- list()
     ci_upr  <- list()
 
@@ -936,18 +962,16 @@ svem_score_random <- function(objects,
                 interval = TRUE, level = level),
         silent = TRUE
       )
+
       fit_col <- if (!inherits(pr, "try-error") && is.list(pr) && !is.null(pr$fit)) {
         as.numeric(pr$fit)
       } else {
-        as.numeric(try(
-          predict(objects[[r]], newdata = data, debias = debias_flag),
-          silent = TRUE
-        ))
+        tmp <- try(predict(objects[[r]], newdata = data, debias = debias_flag), silent = TRUE)
+        if (inherits(tmp, "try-error")) rep(NA_real_, nrow(data)) else as.numeric(tmp)
       }
-      if (isTRUE(is_binomial_resp[r])) {
-        fit_col <- pmin(pmax(fit_col, 0), 1)
-      }
-      pred_df[[r]] <- fit_col
+
+      if (isTRUE(is_binomial_resp[r])) fit_col <- pmin(pmax(fit_col, 0), 1)
+      pred_df0[[r]] <- fit_col
 
       if (!inherits(pr, "try-error") && is.list(pr) && !is.null(pr$lwr) && !is.null(pr$upr)) {
         lwr <- as.numeric(pr$lwr)
@@ -966,7 +990,7 @@ svem_score_random <- function(objects,
 
     des_cols <- list()
     for (r in resp_names) {
-      y <- pred_df[[r]]
+      y <- pred_df0[[r]]
       p <- ds_params[[r]]
       if (p$type == "max") {
         des_cols[[paste0(r, "_des")]] <- .ds_max(y, p$L, p$U, p$s)
@@ -977,59 +1001,37 @@ svem_score_random <- function(objects,
       }
     }
 
-    # scores
     if (combine == "mean") {
-      score_user <- Reduce(`+`, lapply(resp_names, function(r) {
-        as.numeric(wts_user[r]) * des_cols[[paste0(r, "_des")]]
-      }))
-      score_rank     <- score_user
-      wmt_score_vec  <- NULL
+      score_user <- Reduce(`+`, lapply(resp_names, function(r) as.numeric(wts_user[r]) * des_cols[[paste0(r, "_des")]]))
+      score_rank <- score_user
       if (reweight_flag) {
-        wmt_score_vec <- Reduce(`+`, lapply(resp_names, function(r) {
-          as.numeric(wts_final[r]) * des_cols[[paste0(r, "_des")]]
-        }))
-        score_rank <- wmt_score_vec
+        score_rank <- Reduce(`+`, lapply(resp_names, function(r) as.numeric(wts_final[r]) * des_cols[[paste0(r, "_des")]]))
       }
     } else {
-      logsum_user <- Reduce(`+`, lapply(resp_names, function(r) {
+      score_user <- exp(Reduce(`+`, lapply(resp_names, function(r) {
         z  <- des_cols[[paste0(r, "_des")]]
         zf <- (1 - geom_floor) * z + geom_floor
         as.numeric(wts_user[r]) * log(zf)
-      }))
-      score_user <- exp(logsum_user)
-
-      logsum_rank <- Reduce(`+`, lapply(resp_names, function(r) {
+      })))
+      score_rank <- exp(Reduce(`+`, lapply(resp_names, function(r) {
         z  <- des_cols[[paste0(r, "_des")]]
         zf <- (1 - geom_floor) * z + geom_floor
         as.numeric(wts_rank[r]) * log(zf)
-      }))
-      score_rank    <- exp(logsum_rank)
-      wmt_score_vec <- if (reweight_flag) score_rank else NULL
+      })))
     }
 
-    # uncertainty for original data + per-response CI width contributions
-    unc_w      <- list()
     ciw_w_orig <- list()
-
     for (r in resp_names) {
       width <- ci_upr[[r]] - ci_lwr[[r]]
-
-      a <- .q(width, .q_lo)
-      b <- .q(width, .q_hi)
-      zc <- if (!is.finite(a) || !is.finite(b) || b <= a) {
-        rep(0.5, length(width))
-      } else {
-        (pmin(pmax(width, a), b) - a) / (b - a)
-      }
-
-      unc_w[[r]]      <- as.numeric(wts_uncert[r]) * zc
-      ciw_w_orig[[r]] <- as.numeric(wts_uncert[r]) * zc
-
-
+      zc <- .normalize01_robust(width)
+      ciw_w_orig[[paste0(r, "_ciw_w")]] <- as.numeric(wts_uncert[r]) * zc
     }
-    unc_vec <- Reduce(`+`, unc_w)
 
-    pred_mat <- pred_df[resp_names]
+    ciw_mat0 <- as.data.frame(ciw_w_orig, check.names = FALSE)
+    unc_vec <- if (ncol(ciw_mat0)) rowSums(ciw_mat0, na.rm = TRUE) else rep(0.5, nrow(data))
+
+
+    pred_mat <- pred_df0[resp_names]
     colnames(pred_mat) <- paste0(resp_names, "_pred")
 
     original_data_scored <- cbind(
@@ -1038,40 +1040,22 @@ svem_score_random <- function(objects,
       as.data.frame(des_cols, stringsAsFactors = FALSE)
     )
 
-    # append CI bounds and CI width contributions for each response
     for (r in resp_names) {
       original_data_scored[[paste0(r, "_lwr")]]   <- ci_lwr[[r]]
       original_data_scored[[paste0(r, "_upr")]]   <- ci_upr[[r]]
-      original_data_scored[[paste0(r, "_ciw_w")]] <- ciw_w_orig[[r]]
+      original_data_scored[[paste0(r, "_ciw_w")]] <- ciw_mat0[[paste0(r, "_ciw_w")]]
     }
 
     original_data_scored$score <- score_user
-    if (reweight_flag && !is.null(wmt_score_vec)) {
-      original_data_scored$wmt_score <- score_rank
-    }
+    if (reweight_flag) original_data_scored$wmt_score <- score_rank
     original_data_scored$uncertainty_measure <- unc_vec
-    attr(original_data_scored, "svem_predictor_cols") <- colnames(data)
-    attr(original_data_scored, "svem_resp_cols")      <- resp_cols
   }
-
 
   # ---- optional spec-limit augmentation (safe) ----
   if (!is.null(specs)) {
 
-    ## allow specs to be named by objects list names OR by formula LHS
     if (!is.null(names(specs))) {
       s_names <- names(specs)
-
-      # mapping: key -> canonical response name
-      #   * resp_names (names(objects))
-      #   * lhs_names from model formulas, where available
-      key_to_resp <- setNames(resp_names, resp_names)
-
-      valid_lhs <- nzchar(lhs_names)
-      if (any(valid_lhs)) {
-        key_to_resp[lhs_names[valid_lhs]] <- resp_names[valid_lhs]
-      }
-
       remapped <- s_names
       for (i in seq_along(s_names)) {
         key <- s_names[i]
@@ -1082,20 +1066,12 @@ svem_score_random <- function(objects,
       names(specs) <- remapped
     }
 
-    # augment score_table
     score_table <- tryCatch(
-      {
-        svem_append_design_space_cols(
-          score_table = score_table,
-          objects     = objects,
-          specs       = specs
-        )
-      },
+      svem_append_design_space_cols(score_table = score_table, objects = objects, specs = specs),
       error = function(e) {
         if (isTRUE(verbose)) {
           message(
-            "svem_score_random(): spec-limit augmentation failed for score_table; ",
-            "returning score_table without spec columns. Error: ",
+            "svem_score_random(): spec-limit augmentation failed for score_table; returning without spec columns. Error: ",
             conditionMessage(e)
           )
         }
@@ -1103,21 +1079,13 @@ svem_score_random <- function(objects,
       }
     )
 
-    # augment original_data_scored, if present
     if (!is.null(original_data_scored) && is.data.frame(original_data_scored)) {
       original_data_scored <- tryCatch(
-        {
-          svem_append_design_space_cols(
-            score_table = original_data_scored,
-            objects     = objects,
-            specs       = specs
-          )
-        },
+        svem_append_design_space_cols(score_table = original_data_scored, objects = objects, specs = specs),
         error = function(e) {
           if (isTRUE(verbose)) {
             message(
-              "svem_score_random(): spec-limit augmentation failed for original_data_scored; ",
-              "returning original_data_scored without spec columns. Error: ",
+              "svem_score_random(): spec-limit augmentation failed for original_data_scored; returning without spec columns. Error: ",
               conditionMessage(e)
             )
           }
@@ -1127,16 +1095,12 @@ svem_score_random <- function(objects,
     }
   }
 
-
-  # store basic attributes for downstream helpers
+  # store attributes for downstream helpers
   attr(score_table, "svem_predictor_cols") <- predictor_cols
   attr(score_table, "svem_resp_cols")      <- resp_cols
-
   if (!is.null(original_data_scored) && is.data.frame(original_data_scored)) {
-    if (!is.null(data) && is.data.frame(data)) {
-      attr(original_data_scored, "svem_predictor_cols") <- colnames(data)
-    }
-    attr(original_data_scored, "svem_resp_cols") <- resp_cols
+    attr(original_data_scored, "svem_predictor_cols") <- if (is.null(data)) predictor_cols else colnames(data)
+    attr(original_data_scored, "svem_resp_cols")      <- resp_cols
   }
 
   list(

@@ -36,11 +36,13 @@
 #' Specifically:
 #' \itemize{
 #'   \item For blocking numeric variables, the function uses the midpoint of the
-#'         recorded numeric range, \code{(min + max) / 2}, for all rows.
+#'         recorded numeric range, \code{(min + max) / 2}, for all rows. If the
+#'         variable also has stored discrete support, the midpoint is snapped
+#'         deterministically to the nearest allowed discrete value.
 #'   \item For blocking categorical variables, the function uses a single
-#'   reference level equal to the most frequent observed level (mode) in the
-#'   training data, with ties broken deterministically; if the mode is
-#'   unavailable, it falls back to the first stored level.
+#'         reference level equal to the most frequent observed level (mode) in the
+#'         training data, with ties broken deterministically; if the mode is
+#'         unavailable, it falls back to the first stored level.
 #' }
 #'
 #' Blocking variables are not allowed to appear in \code{mixture_groups}. If
@@ -103,123 +105,29 @@
 #' }
 #' The function stops with an informative error message if any of these checks fail.
 #'
+#' \strong{Discrete numeric predictors (automatic).}
+#' If any supplied model stores discrete-numeric sampling information in its
+#' \code{$sampling_schema}, this function will automatically respect it (no
+#' separate user argument).
+#'
+#' In the updated \code{SVEMnet()} implementation this information is stored as:
+#' \itemize{
+#'   \item \code{$sampling_schema$discrete_numeric}: a character vector of discrete
+#'         numeric variable names; and
+#'   \item \code{$sampling_schema$discrete_levels}: a named list mapping those
+#'         names to allowed numeric values.
+#' }
+#' (Older objects may use \code{$sampling_schema$discrete_values} instead of
+#' \code{discrete_levels}; this function accepts both for backward compatibility.)
+#'
+#' Discrete numeric variables are sampled independently (uniform over allowed
+#' values) and are excluded from Latin hypercube sampling; LHS (when used) is
+#' applied only to the remaining continuous numeric predictors. Discrete numeric
+#' variables are not allowed to be mixture variables.
+#'
 #' Models may be Gaussian or binomial. For binomial fits, predictions are
 #' returned on the probability scale (that is, on the response scale) by default,
 #' consistent with the default behaviour of \code{predict.svem_model()}.
-#'
-#' @section Sampling strategy:
-#' Non-mixture numeric variables are sampled using the chosen \code{numeric_sampler}
-#' within the numeric ranges recorded in \code{$sampling_schema$num_ranges}:
-#' \itemize{
-#'   \item \code{"random"}: random Latin hypercube when \pkg{lhs} is available,
-#'         else independent uniforms on each range.
-#'   \item \code{"uniform"}: independent uniform draws within numeric ranges
-#'         (fastest; no \pkg{lhs} dependency).
-#' }
-#'
-#' Mixture variables (if any) are sampled jointly within each specified group using
-#' a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
-#' Categorical variables are sampled from cached factor levels. Blocking variables
-#' (if present) are held fixed (single level or single numeric value) and are not
-#' randomized.
-#'
-#' The same random predictor table is fed to each model so response columns are
-#' directly comparable.
-#'
-#' @section Notes on mixtures:
-#' Each mixture group should list only numeric-like variables. Bounds are interpreted
-#' on the original scale of those variables. If \code{total} equals the sum of lower
-#' bounds, the sampler returns the lower-bound corner for that group. Infeasible
-#' constraints (that is, \code{sum(lower) > total} or \code{sum(upper) < total})
-#' produce an error.
-#'
-#' Mixture variables are removed from the pool of "non-mixture" numeric variables
-#' before numeric sampling, so they are controlled entirely by the mixture
-#' constraints and not also sampled independently. Mixture variables are not
-#' allowed to be blocking variables.
-#'
-#' @seealso \code{\link{SVEMnet}}, \code{\link{predict.svem_model}},
-#'   \code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
-#'
-#' @examples
-#' \donttest{
-#' set.seed(1)
-#' n <- 60
-#' X1 <- runif(n); X2 <- runif(n)
-#' A <- runif(n); B <- runif(n); C <- pmax(0, 1 - A - B)
-#' F <- factor(sample(c("lo","hi"), n, TRUE))
-#'
-#' ## Gaussian responses
-#' y1 <- 1 + 2*X1 - X2 + 3*A + 1.5*B + 0.5*C + (F=="hi") + rnorm(n, 0, 0.3)
-#' y2 <- 0.5 + 0.8*X1 + 0.4*X2 + rnorm(n, 0, 0.2)
-#'
-#' ## Binomial response (probability via logistic link)
-#' eta  <- -0.5 + 1.2*X1 - 0.7*X2 + 0.8*(F=="hi") + 0.6*A
-#' p    <- 1 / (1 + exp(-eta))
-#' yb   <- rbinom(n, size = 1, prob = p)
-#'
-#' d  <- data.frame(y1, y2, yb, X1, X2, A, B, C, F)
-#'
-#' fit1 <- SVEMnet(y1 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
-#' fit2 <- SVEMnet(y2 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
-#' fitb <- SVEMnet(yb ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "binomial")
-#'
-#' # Mixture constraint for A, B, C that sum to 1
-#' mix <- list(list(vars  = c("A","B","C"),
-#'                  lower = c(0,0,0),
-#'                  upper = c(1,1,1),
-#'                  total = 1))
-#'
-#' # Fast random sampler (shared predictor table; predictions bound as columns)
-#' tab_fast <- svem_random_table_multi(
-#'   objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
-#'   n               = 2000,
-#'   mixture_groups  = mix,
-#'   debias          = FALSE,
-#'   numeric_sampler = "random"
-#' )
-#' head(tab_fast$all)
-#'
-#' # Check that the binomial predictions are on [0,1]
-#' range(tab_fast$pred$yb_pred)
-#'
-#' # Uniform sampler (fastest)
-#' tab_uni <- svem_random_table_multi(
-#'   objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
-#'   n               = 2000,
-#'   debias          = FALSE,
-#'   numeric_sampler = "uniform"
-#' )
-#' head(tab_uni$all)
-#'
-#' ## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
-#' set.seed(2)
-#' df_block <- data.frame(
-#'   y1         = rnorm(40),
-#'   y2         = rnorm(40),
-#'   X1         = runif(40),
-#'   X2         = runif(40),
-#'   Operator   = factor(sample(paste0("Op", 1:3), 40, TRUE)),
-#'   AmbientTmp = rnorm(40, mean = 22, sd = 2)
-#' )
-#'
-#' spec_block <- bigexp_terms(
-#'   y1 ~ X1 + X2,
-#'   data             = df_block,
-#'   factorial_order  = 2,
-#'   polynomial_order = 2,
-#'   blocking         = c("Operator", "AmbientTmp")
-#' )
-#'
-#' fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
-#' fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
-#'
-#' tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
-#'
-#' ## Operator and AmbientTmp are held fixed across rows:
-#' length(unique(tab_block$data$Operator))
-#' range(tab_block$data$AmbientTmp)
-#' }
 #'
 #' @importFrom lhs randomLHS
 #' @importFrom stats rgamma
@@ -237,6 +145,15 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     stop("All elements of 'objects' must be 'svem_model' objects.")
   if (!all(vapply(objects, function(o) is.list(o$sampling_schema), logical(1))))
     stop("Each 'svem_model' must contain a valid $sampling_schema. Refit with updated SVEMnet().")
+
+  if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1) {
+    stop("'n' must be a single integer >= 1.")
+  }
+  n <- as.integer(n)
+
+  if (!is.numeric(range_tol) || length(range_tol) != 1L || !is.finite(range_tol) || range_tol < 0) {
+    stop("'range_tol' must be a single finite nonnegative number.")
+  }
 
   # Reference schema from first object
   ref <- objects[[1L]]$sampling_schema
@@ -263,6 +180,61 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     all(abs(diff) <= tol)
   }
 
+  # ---- helper: extract + normalize discrete numeric map from a sampling_schema ----
+  .norm_discrete_map <- function(x) {
+    if (is.null(x) || !is.list(x) || !length(x)) return(list())
+    nm <- names(x)
+    if (is.null(nm) || any(!nzchar(nm))) return(list())
+    out <- vector("list", length(x))
+    names(out) <- nm
+    for (v in nm) {
+      vals <- sort(unique(as.numeric(x[[v]])))
+      vals <- vals[is.finite(vals)]
+      out[[v]] <- vals
+    }
+    out <- out[vapply(out, length, integer(1)) > 0]
+    out
+  }
+
+  .extract_discrete_map <- function(ss) {
+    if (is.null(ss) || !is.list(ss)) return(list())
+
+    dn <- ss$discrete_numeric
+    # New name (SVEMnet stores this)
+    dl <- ss$discrete_levels
+    # Backward-compatible alias (older objects)
+    dv <- ss$discrete_values
+
+    # If both exist, prefer discrete_levels
+    if (is.null(dl) && !is.null(dv)) dl <- dv
+
+    # Case 1: discrete_numeric is a named list of supports (accept)
+    if (is.list(dn) && !is.null(names(dn)) && all(nzchar(names(dn)))) {
+      return(.norm_discrete_map(dn))
+    }
+
+    # Case 2: discrete_levels/discrete_values is a named list -> treat as discrete
+    if (is.list(dl) && length(dl) && !is.null(names(dl)) && all(nzchar(names(dl)))) {
+      # If dn is a character vector, subset to those names (if provided)
+      if (is.character(dn) && length(dn)) {
+        keep <- intersect(unique(as.character(dn)), names(dl))
+        return(.norm_discrete_map(dl[keep]))
+      }
+      return(.norm_discrete_map(dl))
+    }
+
+    # Case 3: discrete_numeric is a character vector but no levels list -> error
+    if (is.character(dn) && length(dn)) {
+      stop(
+        "sampling_schema$discrete_numeric is present (character vector) but ",
+        "sampling_schema$discrete_levels (or legacy $discrete_values) is missing; ",
+        "cannot resolve discrete supports."
+      )
+    }
+
+    list()
+  }
+
   # Check all schemas match reference (predictors, classes, levels, ranges, blocking)
   for (k in seq_along(objects)) {
     s   <- objects[[k]]$sampling_schema
@@ -275,7 +247,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       stop(msg, "var_classes do not match the reference.")
 
     s_levels <- s$factor_levels
-    if (!identical(names(s_levels), names(ref_fac_levels)))
+    # names order shouldn't matter; compare as sets then compare by name
+    if (!setequal(names(s_levels), names(ref_fac_levels)))
       stop(msg, "factor_levels names differ from the reference.")
     for (nm in names(ref_fac_levels)) {
       if (!identical(s_levels[[nm]], ref_fac_levels[[nm]]))
@@ -303,7 +276,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       ref_modes <- ref$block_cat_modes
       s_modes   <- s$block_cat_modes
 
-      # If the other model has no modes stored, just warn and continue
       if (is.null(s_modes) || !length(s_modes)) {
         warning(
           msg,
@@ -318,7 +290,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
           warning(
             msg,
             "block_cat_modes names differ from the reference; ",
-            "using reference modes for blocking variables."
+            "using reference modes for blocking variables. This is a low-priority note indicating which reference level is used for the blocking factor and can be ignored."
           )
         } else {
           for (nm in ref_names) {
@@ -326,7 +298,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
               warning(
                 msg,
                 "block_cat_modes for '", nm,
-                "' differ from the reference; using reference modes."
+                "' differ from the reference; using reference modes. This is a low-priority note indicating which reference level is used for the blocking factor and can be ignored."
               )
               break
             }
@@ -336,7 +308,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     }
   }
 
-
   # Aliases
   predictor_vars <- ref_vars
   var_classes    <- ref_classes
@@ -345,7 +316,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   blocking       <- ref_blocking
 
   numeric_like <- c("numeric", "double", "integer", "integer64")
-
   all_num <- names(var_classes)[var_classes %in% numeric_like]
 
   # ---- REQUIRE num_ranges for all numeric predictors ----
@@ -360,6 +330,71 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     if (length(missing_rng)) {
       stop("Missing numeric ranges in sampling_schema$num_ranges for predictors: ",
            paste(missing_rng, collapse = ", "))
+    }
+  }
+
+  # ---- AUTO discrete numeric map (from ANY supplied object) ----
+  disc_maps <- lapply(objects, function(o) .extract_discrete_map(o$sampling_schema))
+  has_disc  <- vapply(disc_maps, function(m) is.list(m) && length(m) > 0, logical(1))
+
+  discrete_map <- list()
+  if (any(has_disc)) {
+    idx_ref <- which(has_disc)[1L]
+    discrete_map <- disc_maps[[idx_ref]]
+
+    # Validate consistency across models that also specify discrete info
+    for (k in which(has_disc)) {
+      mk <- disc_maps[[k]]
+      if (!identical(sort(names(mk)), sort(names(discrete_map)))) {
+        stop(
+          "Discrete numeric specifications differ across models (variable sets differ). ",
+          "Please refit models with a consistent sampling_schema."
+        )
+      }
+      for (nm in names(discrete_map)) {
+        a <- sort(unique(as.numeric(discrete_map[[nm]]))); a <- a[is.finite(a)]
+        b <- sort(unique(as.numeric(mk[[nm]])));           b <- b[is.finite(b)]
+        if (!identical(a, b)) {
+          stop(
+            "Discrete numeric specifications differ across models for variable '", nm, "'. ",
+            "Please refit models with a consistent sampling_schema."
+          )
+        }
+      }
+    }
+
+    bad_not_pred <- setdiff(names(discrete_map), predictor_vars)
+    if (length(bad_not_pred)) {
+      stop(
+        "sampling_schema discrete numeric variables not found in predictors: ",
+        paste(bad_not_pred, collapse = ", ")
+      )
+    }
+    bad_not_num <- setdiff(names(discrete_map), all_num)
+    if (length(bad_not_num)) {
+      stop(
+        "sampling_schema discrete numeric variables are not numeric-like: ",
+        paste(bad_not_num, collapse = ", ")
+      )
+    }
+
+    for (v in names(discrete_map)) {
+      vals <- sort(unique(as.numeric(discrete_map[[v]])))
+      vals <- vals[is.finite(vals)]
+      if (!length(vals)) {
+        stop("Discrete support for '", v, "' is empty or non-finite in sampling_schema.")
+      }
+      r <- num_ranges[, v]
+      lo <- as.numeric(r["min"]); hi <- as.numeric(r["max"])
+      if (all(is.finite(c(lo, hi)))) {
+        if (any(vals < lo - 1e-12 | vals > hi + 1e-12)) {
+          stop(
+            "Discrete values for '", v, "' fall outside the recorded numeric range [",
+            lo, ", ", hi, "] in sampling_schema$num_ranges."
+          )
+        }
+      }
+      discrete_map[[v]] <- vals
     }
   }
 
@@ -386,7 +421,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
         stop("Mixture variables must be numeric-like. Non-numeric mixture vars: ",
              paste(bad_mix, collapse = ", "))
       }
-      # Mixture variables cannot be blocking variables
       if (length(intersect(grp$vars, blocking))) {
         stop("Mixture variables cannot be blocking variables. Offending vars: ",
              paste(intersect(grp$vars, blocking), collapse = ", "))
@@ -397,6 +431,17 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       dups <- unique(mixture_vars[duplicated(mixture_vars)])
       stop("Mixture variables appear in multiple groups: ",
            paste(dups, collapse = ", "))
+    }
+  }
+
+  # Discrete numeric variables cannot be mixture variables
+  if (length(discrete_map)) {
+    overlap_disc_mix <- intersect(names(discrete_map), mixture_vars)
+    if (length(overlap_disc_mix)) {
+      stop(
+        "Discrete numeric variables are not allowed to be mixture variables. Offending vars: ",
+        paste(overlap_disc_mix, collapse = ", ")
+      )
     }
   }
 
@@ -440,39 +485,61 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
 
   # ---- sample non-mixture numerics (excluding blocking) ----
   nonmix_num <- setdiff(is_num, mixture_vars)
-  T_num <- NULL
-  if (length(nonmix_num)) {
-    rng <- vapply(nonmix_num, function(v) {
+
+  disc_num <- character(0L)
+  if (length(discrete_map)) {
+    disc_num <- intersect(nonmix_num, names(discrete_map))
+  }
+  cont_num <- setdiff(nonmix_num, disc_num)
+
+  # continuous numeric block (LHS/uniform)
+  T_num_cont <- NULL
+  if (length(cont_num)) {
+    rng <- vapply(cont_num, function(v) {
       r <- num_ranges[, v]
-      if (!all(is.finite(r))) {
-        stop("Numeric range for predictor '", v, "' must be finite.")
-      }
-      if (r[1] > r[2]) {
-        stop("Numeric range for predictor '", v,
-             "' must have min <= max. Check sampling_schema$num_ranges.")
-      }
+      if (!all(is.finite(r))) stop("Numeric range for predictor '", v, "' must be finite.")
+      if (r[1] > r[2]) stop("Numeric range for predictor '", v, "' must have min <= max.")
       as.numeric(r)
     }, numeric(2))
     rownames(rng) <- c("min", "max")
     lo    <- rng["min", ]
     hi    <- rng["max", ]
     width <- hi - lo
-    q     <- length(nonmix_num)
+    q     <- length(cont_num)
 
     use_lhs <- function() isTRUE(requireNamespace("lhs", quietly = TRUE))
     U <- switch(numeric_sampler,
                 "random" = {
-                  if (use_lhs()) lhs::randomLHS(n, q)
-                  else matrix(stats::runif(n * q), nrow = n, ncol = q)
+                  if (q == 0) matrix(numeric(0), nrow = n, ncol = 0) else
+                    if (use_lhs()) lhs::randomLHS(n, q) else matrix(stats::runif(n * q), nrow = n, ncol = q)
                 },
                 "uniform" = {
-                  matrix(stats::runif(n * q), nrow = n, ncol = q)
+                  if (q == 0) matrix(numeric(0), nrow = n, ncol = 0) else
+                    matrix(stats::runif(n * q), nrow = n, ncol = q)
                 }
     )
-    T_num <- sweep(U, 2, width, `*`)
-    T_num <- sweep(T_num, 2, lo, `+`)
-    colnames(T_num) <- nonmix_num
-    T_num <- as.data.frame(T_num)
+
+    if (q > 0) {
+      T_num_cont <- sweep(U, 2, width, `*`)
+      T_num_cont <- sweep(T_num_cont, 2, lo, `+`)
+      colnames(T_num_cont) <- cont_num
+      T_num_cont <- as.data.frame(T_num_cont)
+    }
+  }
+
+  # discrete numeric block
+  T_num_disc <- NULL
+  if (length(disc_num)) {
+    T_num_disc <- vector("list", length(disc_num))
+    names(T_num_disc) <- disc_num
+    for (v in disc_num) {
+      vals <- discrete_map[[v]]
+      vals <- sort(unique(as.numeric(vals)))
+      vals <- vals[is.finite(vals)]
+      if (!length(vals)) stop("Discrete support for '", v, "' is empty or non-finite.")
+      T_num_disc[[v]] <- sample(vals, n, replace = TRUE)
+    }
+    T_num_disc <- as.data.frame(T_num_disc, stringsAsFactors = FALSE)
   }
 
   # ---- sample mixture groups ----
@@ -488,8 +555,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       upper <- if (!is.null(grp$upper)) grp$upper else rep(1, k)
       total <- if (!is.null(grp$total)) grp$total else 1
       if (length(lower) != k || length(upper) != k)
-        stop("lower/upper must each have length equal to mixture vars: ",
-             paste(vars, collapse = ", "))
+        stop("lower/upper must each have length equal to mixture vars: ", paste(vars, collapse = ", "))
       vals <- .sample_trunc_dirichlet(n, lower, upper, total)
       colnames(vals) <- vars
       T_mix[, vars] <- vals
@@ -512,54 +578,68 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   }
 
   # ---- assemble predictors for non-blocking vars ----
-  parts <- list(T_num, T_mix, T_cat)
+  parts <- list(T_num_cont, T_num_disc, T_mix, T_cat)
   parts <- parts[!vapply(parts, is.null, logical(1))]
   if (!length(parts) && !length(blocking))
     stop("No predictors could be sampled from the schema.")
-  T_data <- if (length(parts)) do.call(cbind, parts) else data.frame()
+
+  # Robust init when only blocking (or only missing_pred fill) will populate columns
+  T_data <- if (length(parts)) do.call(cbind, parts) else data.frame(.row = seq_len(n))
+  if (".row" %in% names(T_data)) {
+    # keep only as a scaffold; it will be dropped by final subsetting anyway
+  }
 
   # ---- ensure all predictors present; handle blocking specially ----
   missing_pred <- setdiff(predictor_vars, colnames(T_data))
   if (length(missing_pred)) {
     for (v in missing_pred) {
-      is_block <- v %in% blocking
+      is_block    <- v %in% blocking
       is_num_like <- v %in% all_num
 
       if (is_block && is_num_like) {
-        # Blocking numeric: use mid-point of recorded range
         r <- num_ranges[, v]
-        val <- (r["min"] + r["max"]) / 2
+        mid <- (r["min"] + r["max"]) / 2
+        val <- as.numeric(mid)
+
+        if (!is.null(discrete_map[[v]])) {
+          vals <- sort(unique(as.numeric(discrete_map[[v]])))
+          vals <- vals[is.finite(vals)]
+          if (length(vals)) {
+            val <- vals[which.min(abs(vals - val))]
+          }
+        }
         T_data[[v]] <- rep(as.numeric(val), n)
+
       } else if (is_block && !is_num_like) {
-        # Blocking categorical: use mode if available, else first level
         lev <- factor_levels[[v]]
         if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
         if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
 
-        # Prefer stored mode from sampling_schema
         mode_val <- NULL
         if (!is.null(ref$block_cat_modes) &&
             length(ref$block_cat_modes) &&
             !is.null(ref$block_cat_modes[[v]])) {
           mode_val <- as.character(ref$block_cat_modes[[v]])
         }
-
         if (is.null(mode_val) || is.na(mode_val) || !(mode_val %in% lev)) {
           mode_val <- lev[1L]
         }
-
         T_data[[v]] <- factor(rep(mode_val, n), levels = lev)
 
       } else if (!is_block && is_num_like) {
-        # Non-blocking numeric fallback: mid-point of range
-        r <- num_ranges[, v]
-        if (!all(is.finite(r))) {
-          stop("Numeric range for predictor '", v, "' must be finite.")
+        if (!is.null(discrete_map[[v]])) {
+          vals <- sort(unique(as.numeric(discrete_map[[v]])))
+          vals <- vals[is.finite(vals)]
+          if (!length(vals)) stop("Discrete support for '", v, "' is empty or non-finite.")
+          T_data[[v]] <- sample(vals, n, replace = TRUE)
+        } else {
+          r <- num_ranges[, v]
+          if (!all(is.finite(r))) stop("Numeric range for predictor '", v, "' must be finite.")
+          val <- (r["min"] + r["max"]) / 2
+          T_data[[v]] <- rep(as.numeric(val), n)
         }
-        val <- (r["min"] + r["max"]) / 2
-        T_data[[v]] <- rep(as.numeric(val), n)
+
       } else {
-        # Non-blocking categorical fallback: random sample
         lev <- factor_levels[[v]]
         if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
         if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
@@ -581,16 +661,13 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     preds <- predict(obj, newdata = data_df, debias = debias)
     if (is.list(preds) && !is.null(preds$fit)) preds <- preds$fit
 
-    # Response name (LHS of formula), with fallback
     resp <- tryCatch(
       as.character(obj$formula[[2L]]),
       error = function(e) paste0("resp", i)
     )
 
-    # Always use "<response>_pred" as the prediction column name
     base_colname <- paste0(resp, "_pred")
 
-    # If this would collide with a predictor, stop and ask user to rename
     if (base_colname %in% colnames(data_df)) {
       stop(
         "Prediction column name '", base_colname,
@@ -598,8 +675,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
         "Please rename the response or the predictor to avoid using the '_pred' suffix."
       )
     }
-
-    # If this would collide with an existing prediction column, stop
     if (base_colname %in% colnames(pred_df)) {
       stop(
         "Prediction column name '", base_colname,

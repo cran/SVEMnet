@@ -81,6 +81,26 @@ continuous predictors.
 }
 The function stops with an informative error message if any of these checks fail.
 
+\strong{Discrete numeric predictors (automatic).}
+If any supplied model stores discrete-numeric sampling information in its
+\code{$sampling_schema}, this function will automatically respect it (no
+separate user argument).
+
+In the updated \code{SVEMnet()} implementation this information is stored as:
+\itemize{
+\item \code{$sampling_schema$discrete_numeric}: a character vector of discrete
+numeric variable names; and
+\item \code{$sampling_schema$discrete_levels}: a named list mapping those
+names to allowed numeric values.
+}
+(Older objects may use \code{$sampling_schema$discrete_values} instead of
+\code{discrete_levels}; this function accepts both for backward compatibility.)
+
+Discrete numeric variables are sampled independently (uniform over allowed
+values) and are excluded from Latin hypercube sampling; LHS (when used) is
+applied only to the remaining continuous numeric predictors. Discrete numeric
+variables are not allowed to be mixture variables.
+
 Models may be Gaussian or binomial. For binomial fits, predictions are
 returned on the probability scale (that is, on the response scale) by default,
 consistent with the default behaviour of \code{predict.svem_model()}.
@@ -115,7 +135,9 @@ variables (for example \code{blocking = c("Operator", "Plate_ID")}) and
 Specifically:
 \itemize{
 \item For blocking numeric variables, the function uses the midpoint of the
-recorded numeric range, \code{(min + max) / 2}, for all rows.
+recorded numeric range, \code{(min + max) / 2}, for all rows. If the
+variable also has stored discrete support, the midpoint is snapped
+deterministically to the nearest allowed discrete value.
 \item For blocking categorical variables, the function uses a single
 reference level equal to the most frequent observed level (mode) in the
 training data, with ties broken deterministically; if the mode is
@@ -132,123 +154,3 @@ the behavior is unchanged from earlier versions: all predictors are sampled
 according to the rules described under "Sampling strategy".
 }
 
-\section{Sampling strategy}{
-
-Non-mixture numeric variables are sampled using the chosen \code{numeric_sampler}
-within the numeric ranges recorded in \code{$sampling_schema$num_ranges}:
-\itemize{
-\item \code{"random"}: random Latin hypercube when \pkg{lhs} is available,
-else independent uniforms on each range.
-\item \code{"uniform"}: independent uniform draws within numeric ranges
-(fastest; no \pkg{lhs} dependency).
-}
-
-Mixture variables (if any) are sampled jointly within each specified group using
-a truncated Dirichlet so that elementwise bounds and the total sum are satisfied.
-Categorical variables are sampled from cached factor levels. Blocking variables
-(if present) are held fixed (single level or single numeric value) and are not
-randomized.
-
-The same random predictor table is fed to each model so response columns are
-directly comparable.
-}
-
-\section{Notes on mixtures}{
-
-Each mixture group should list only numeric-like variables. Bounds are interpreted
-on the original scale of those variables. If \code{total} equals the sum of lower
-bounds, the sampler returns the lower-bound corner for that group. Infeasible
-constraints (that is, \code{sum(lower) > total} or \code{sum(upper) < total})
-produce an error.
-
-Mixture variables are removed from the pool of "non-mixture" numeric variables
-before numeric sampling, so they are controlled entirely by the mixture
-constraints and not also sampled independently. Mixture variables are not
-allowed to be blocking variables.
-}
-
-\examples{
-\donttest{
-set.seed(1)
-n <- 60
-X1 <- runif(n); X2 <- runif(n)
-A <- runif(n); B <- runif(n); C <- pmax(0, 1 - A - B)
-F <- factor(sample(c("lo","hi"), n, TRUE))
-
-## Gaussian responses
-y1 <- 1 + 2*X1 - X2 + 3*A + 1.5*B + 0.5*C + (F=="hi") + rnorm(n, 0, 0.3)
-y2 <- 0.5 + 0.8*X1 + 0.4*X2 + rnorm(n, 0, 0.2)
-
-## Binomial response (probability via logistic link)
-eta  <- -0.5 + 1.2*X1 - 0.7*X2 + 0.8*(F=="hi") + 0.6*A
-p    <- 1 / (1 + exp(-eta))
-yb   <- rbinom(n, size = 1, prob = p)
-
-d  <- data.frame(y1, y2, yb, X1, X2, A, B, C, F)
-
-fit1 <- SVEMnet(y1 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
-fit2 <- SVEMnet(y2 ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "gaussian")
-fitb <- SVEMnet(yb ~ X1 + X2 + A + B + C + F, d, nBoot = 40, family = "binomial")
-
-# Mixture constraint for A, B, C that sum to 1
-mix <- list(list(vars  = c("A","B","C"),
-                 lower = c(0,0,0),
-                 upper = c(1,1,1),
-                 total = 1))
-
-# Fast random sampler (shared predictor table; predictions bound as columns)
-tab_fast <- svem_random_table_multi(
-  objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
-  n               = 2000,
-  mixture_groups  = mix,
-  debias          = FALSE,
-  numeric_sampler = "random"
-)
-head(tab_fast$all)
-
-# Check that the binomial predictions are on [0,1]
-range(tab_fast$pred$yb_pred)
-
-# Uniform sampler (fastest)
-tab_uni <- svem_random_table_multi(
-  objects         = list(y1 = fit1, y2 = fit2, yb = fitb),
-  n               = 2000,
-  debias          = FALSE,
-  numeric_sampler = "uniform"
-)
-head(tab_uni$all)
-
-## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
-set.seed(2)
-df_block <- data.frame(
-  y1         = rnorm(40),
-  y2         = rnorm(40),
-  X1         = runif(40),
-  X2         = runif(40),
-  Operator   = factor(sample(paste0("Op", 1:3), 40, TRUE)),
-  AmbientTmp = rnorm(40, mean = 22, sd = 2)
-)
-
-spec_block <- bigexp_terms(
-  y1 ~ X1 + X2,
-  data             = df_block,
-  factorial_order  = 2,
-  polynomial_order = 2,
-  blocking         = c("Operator", "AmbientTmp")
-)
-
-fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
-fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
-
-tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
-
-## Operator and AmbientTmp are held fixed across rows:
-length(unique(tab_block$data$Operator))
-range(tab_block$data$AmbientTmp)
-}
-
-}
-\seealso{
-\code{\link{SVEMnet}}, \code{\link{predict.svem_model}},
-\code{\link{bigexp_terms}}, \code{\link{bigexp_formula}}
-}

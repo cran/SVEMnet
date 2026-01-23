@@ -12,7 +12,13 @@ bigexp_terms(
   include_pc_2way = TRUE,
   include_pc_3way = FALSE,
   intercept = TRUE,
-  blocking = NULL
+  blocking = NULL,
+  discrete_numeric = NULL,
+  audit = c("warn", "error", "none"),
+  audit_numeric_rate = 0.9,
+  audit_unique_ratio = 0.8,
+  audit_min_n = 12L,
+  report = TRUE
 )
 }
 \arguments{
@@ -50,8 +56,49 @@ expansion; if \code{FALSE}, the generated RHS drops the intercept.}
 treat as blocking factors. These variables are included in the spec and
 typed like other predictors (categorical vs continuous), but they enter the
 model only as additive main effects and never appear in interactions,
-polynomials, or partial-cubic terms. Blocking variables must not also
-appear on the right-hand side of \code{formula}.}
+polynomials, or partial-cubic terms.
+\strong{Important:} when using \code{y ~ .}, blocking variables are
+automatically excluded from the "non-blocking" predictor set so they do not
+trigger a conflict error.
+When using an explicit RHS (for example \code{y ~ X1 + X2}), blocking
+variables must not also be explicitly listed on the right-hand side.}
+
+\item{discrete_numeric}{Optional specification of "discrete numeric" predictors
+for downstream sampling (for example in \code{svem_random_table_multi()}).
+These predictors are still treated as numeric for modeling and expansion
+(that is, they remain continuous in the design matrix and may participate
+in polynomial and interaction terms). This option only records a finite set
+of preferred numeric levels to be used when randomly generating recipes.
+Supply either:
+\itemize{
+\item a character vector of predictor names, in which case the allowed
+levels are inferred as the sorted unique finite values observed in
+\code{data}; or
+\item a named list mapping predictor names to numeric vectors of allowed
+levels. If an entry is \code{NULL} or length zero, levels are
+inferred from \code{data} for that predictor.
+}}
+
+\item{audit}{How to handle suspicious typing / high-cardinality issues when
+building the spec. One of \code{"warn"} (default), \code{"error"}, or
+\code{"none"}. Audits cover numeric-like character/factor columns (including
+percent strings like \code{"25\%"}), and very high-cardinality categorical
+predictors that are likely IDs or mis-typed numerics.}
+
+\item{audit_numeric_rate}{Numeric in (0,1). If at least this fraction of
+non-missing values parse as numeric (after stripping commas and an optional
+trailing \code{\%}), the column is flagged as numeric-like when stored as
+character/factor.}
+
+\item{audit_unique_ratio}{Numeric in (0, 1). For categorical predictors, warn/error
+if \code{unique(non-missing) / n_nonmissing >= audit_unique_ratio}.}
+
+\item{audit_min_n}{Integer >= 1. Minimum number of non-missing values required
+before audits are applied.}
+
+\item{report}{Logical. If \code{TRUE} (default), print a compact summary of the
+inferred predictor types and settings (via \code{print.bigexp_spec}) when
+\code{bigexp_terms()} returns.}
 }
 \value{
 An object of class \code{"bigexp_spec"} with components:
@@ -186,6 +233,47 @@ spec_block <- bigexp_terms(
 print(spec_block)
 spec_block$rhs
 
+## Example 4: discrete numeric predictors (finite numeric support)
+## A common case is a numeric process setting that only takes a small set
+## of allowed values (e.g., 0.5, 1, 2, 4). Use `discrete_numeric` in
+## bigexp_terms() so downstream sampling respects those levels automatically.
+\donttest{
+set.seed(3)
+D_allowed <- c(0.5, 1, 2, 4)
+df_disc <- data.frame(
+  y  = rnorm(60),
+  D  = sample(D_allowed, 60, replace = TRUE),   # numeric with discrete support
+  X1 = rnorm(60),
+  G  = factor(sample(c("A", "B"), 60, replace = TRUE))
+)
+
+# Record that D should be treated as "discrete numeric" for downstream sampling.
+# Levels are inferred automatically from the training data.
+spec_disc <- bigexp_terms(
+  y ~ D + X1 + G,
+  data             = df_disc,
+  factorial_order  = 2,
+  polynomial_order = 2,
+  discrete_numeric = "D"
+)
+
+
+# Fit. The discrete support is expected to propagate into fit$sampling_schema
+# (assuming the updated SVEMnet implementation that stores sampling_schema).
+fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 20)
+
+# Score random candidates; sampled D values stay in D_allowed
+scored <- svem_score_random(
+  objects         = list(y = fit_disc),
+  goals           = list(y = list(goal = "max", weight = 1)),
+  n               = 2000,
+  numeric_sampler = "random",
+  verbose         = FALSE
+)
+
+table(scored$score_table$D)
+stopifnot(all(scored$score_table$D \%in\% D_allowed))
+}
 }
 \seealso{
 \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},

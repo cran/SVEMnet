@@ -16,14 +16,19 @@
 #' null distribution, the reported \eqn{p}-values are approximate and are
 #' intended as a diagnostic measure of global factor signal, not as exact
 #' hypothesis tests.
-
 #'
 #' All SVEM refits (for the original and permuted responses) are run in
-#' parallel using \code{foreach} + \code{doParallel}. Random draws (including
-#' permutations and evaluation-grid sampling) are made reproducible across
-#' workers using \code{doRNG} together with
-#' \code{RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")} when a
-#' \code{seed} is supplied.
+#' parallel using \code{foreach} + \code{doParallel}.
+#'
+#' Reproducible parallel RNG (Windows/macOS/Linux): when \code{seed} is supplied,
+#' the function sets the master RNG to \code{RNGkind("L'Ecuyer-CMRG",
+#' sample.kind = "Rounding")} (falling back to \code{"L'Ecuyer-CMRG"} on older R),
+#' and generates a deterministic, per-iteration seed schedule on the master.
+#' Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
+#' assigned seed before performing any random draws (including permutations and
+#' the bootstrap randomness inside \code{SVEMnet()}).
+#' This makes results reproducible regardless of worker scheduling (including
+#' \code{preschedule = FALSE}) and independent of the number of cores.
 #'
 #' The function can optionally reuse a deterministic, locked expansion built
 #' with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -75,11 +80,13 @@
 #'   (default \code{TRUE}).
 #' @param nCore Number of CPU cores for parallel processing. Default is
 #'   \code{parallel::detectCores() - 2}, with a floor of \code{1}.
-#' @param seed Optional integer seed for reproducible parallel RNG (default
-#'   \code{NULL}). When supplied, the master RNG kind is set to
-#'   \code{"L'Ecuyer-CMRG"} with \code{sample.kind = "Rounding"}, and
-#'   \code{doRNG::registerDoRNG()} is used so that the \code{\%dorng\%} loops are
-#'   reproducible regardless of scheduling.
+#' @param seed Optional integer seed for reproducible RNG (default \code{NULL}).
+#'   When supplied, the master RNG kind is set to \code{"L'Ecuyer-CMRG"} (with
+#'   \code{sample.kind = "Rounding"} when supported), and deterministic
+#'   per-iteration seeds are generated on the master and applied inside each
+#'   parallel \code{\%dopar\%} iteration via \code{set.seed()}.
+#'   This yields reproducibility regardless of parallel scheduling and core
+#'   count.
 #' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
 #'   If provided, the test reuses its locked expansion. The working formula
 #'   becomes \code{bigexp_formula(spec, response_name)}, where
@@ -87,6 +94,10 @@
 #'   from the left-hand side of \code{formula}. Categorical sampling uses
 #'   \code{spec$levels}, and numeric sampling prefers \code{spec$num_range}
 #'   when available.
+#'   Discrete numeric predictors recorded by \code{bigexp_terms()}
+#'   (\code{spec$settings$discrete_numeric} + \code{spec$settings$discrete_levels})
+#'   are sampled only from their recorded allowed levels when building the
+#'   evaluation grid.
 #' @param response Optional character name for the response variable to use when
 #'   \code{spec} is supplied. If omitted, the response is taken from the
 #'   left-hand side of \code{formula}.
@@ -123,9 +134,8 @@
 #' @importFrom gamlss.dist SHASHo pSHASHo
 #' @importFrom stats model.frame model.response model.matrix delete.response terms
 #' @importFrom stats median complete.cases rgamma coef predict sd
-#' @importFrom foreach foreach
+#' @importFrom foreach foreach %dopar%
 #' @importFrom doParallel registerDoParallel
-#' @importFrom doRNG %dorng% registerDoRNG
 #' @importFrom parallel makeCluster stopCluster detectCores clusterCall
 #'
 #' @examples
@@ -228,11 +238,43 @@ svem_significance_test_parallel <- function(
     use_spec_contrasts = TRUE,
     ...
 ) {
+  # internal helper
+  `%||%` <- function(a, b) if (!is.null(a)) a else b
+
+  .set_lecuyer <- function() {
+    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+    invisible(NULL)
+  }
+
+  .seed_add <- function(s, add) {
+    # safe integer arithmetic without overflow
+    if (is.null(s)) return(NULL)
+    s <- as.double(s)
+    out <- (s + as.double(add)) %% as.double(.Machine$integer.max)
+    out <- as.integer(ifelse(out <= 0, 1, out))
+    out
+  }
+
+  .make_iter_seeds <- function(n, base_seed = NULL) {
+    if (!is.null(base_seed)) {
+      .set_lecuyer()
+      set.seed(as.integer(base_seed))
+    }
+    sample.int(.Machine$integer.max, n)
+  }
+
   # --- basic choices ---
   objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
   data <- as.data.frame(data)
-  if (objective == "auto") (objective == "AIC")
+
+  # FIX: "auto" objective must assign a real objective
+  if (identical(objective, "auto")) {
+    objective <- "wAIC"
+    if (isTRUE(verbose)) message("objective='auto' -> using 'wAIC'.")
+  }
+
   # Determine response and working formula (optionally from spec)
   if (!is.null(spec)) {
     resp_name <- if (!is.null(response)) {
@@ -263,37 +305,40 @@ svem_significance_test_parallel <- function(
       RNGkind(kind = oldKinds[1L], normal.kind = oldKinds[2L], sample.kind = oldKinds[3L])
     }, add = TRUE)
 
-    # For R >= 3.6, sample.kind="Rounding" avoids deprecation warnings
-    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-    set.seed(seed)
+    .set_lecuyer()
+    set.seed(as.integer(seed))
   }
 
   # --- enforce single-threaded BLAS/OpenMP BEFORE spawning workers -------------
-  Sys.setenv(
-    OMP_NUM_THREADS        = "1",
-    MKL_NUM_THREADS        = "1",
-    OPENBLAS_NUM_THREADS   = "1",
-    VECLIB_MAXIMUM_THREADS = "1",
-    NUMEXPR_NUM_THREADS    = "1"
+  thread_vars <- c(
+    "OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS"
   )
+  old_thread_env <- Sys.getenv(thread_vars, unset = NA_character_)
+  on.exit({
+    for (v in thread_vars) {
+      oldv <- old_thread_env[[v]]
+      if (is.na(oldv) || !nzchar(oldv)) {
+        Sys.unsetenv(v)
+      } else {
+        do.call(Sys.setenv, setNames(list(oldv), v))
+      }
+    }
+  }, add = TRUE)
+
+  do.call(Sys.setenv, as.list(setNames(rep("1", length(thread_vars)), thread_vars)))
 
   # --- cluster setup -----------------------------------------------------------
   nCore <- max(1L, as.integer(`%||%`(nCore, parallel::detectCores())))
   cl <- parallel::makeCluster(nCore)
-  doParallel::registerDoParallel(cl)
-  if (!is.null(seed)) {
-    parallel::clusterCall(cl, function() {
-      ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-      if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-      NULL
-    })
-  }
-
   on.exit(parallel::stopCluster(cl), add = TRUE)
+  doParallel::registerDoParallel(cl)
 
-  # Enforce single-threaded BLAS/OpenMP on workers too (belt & suspenders)
+  # Set RNG kind and threads on workers (worker sessions are separate; safe on all OS)
   parallel::clusterCall(cl, function() {
+    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+
     if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
       RhpcBLASctl::blas_set_num_threads(1)
       RhpcBLASctl::omp_set_num_threads(1)
@@ -312,9 +357,6 @@ svem_significance_test_parallel <- function(
   # Set contrasts options on workers
   parallel::clusterCall(cl, function(opts) { options(contrasts = opts); NULL }, contrasts_opts)
 
-  # Register doRNG to make foreach iterations reproducible, independent of scheduling
-  if (!is.null(seed)) doRNG::registerDoRNG(seed)
-
   # Sanitize ... so explicit 'relaxed' here cannot be overridden
   dots <- list(...)
 
@@ -323,11 +365,11 @@ svem_significance_test_parallel <- function(
     fam <- dots$family
     fam_name <- tryCatch({
       if (inherits(fam, "family")) {
-        fam$family                 # e.g. binomial() object
+        fam$family
       } else if (is.function(fam)) {
-        fam()$family               # e.g. family = binomial
+        fam()$family
       } else {
-        as.character(fam)[1L]      # e.g. "binomial"
+        as.character(fam)[1L]
       }
     }, error = function(e) NA_character_)
 
@@ -342,21 +384,42 @@ svem_significance_test_parallel <- function(
     dots$relaxed <- NULL
   }
 
-  # Training design pieces
-  mf <- stats::model.frame(f_use, data)
+  # ---------------------------------------------------------------------------
+  # Training design pieces (ROBUST TO NA IN RESPONSE/PREDICTORS):
+  # - build model.frame with na.pass so we can explicitly filter
+  # - fit/permutation data are restricted to complete cases for the model
+  # ---------------------------------------------------------------------------
+  mf0 <- stats::model.frame(f_use, data, na.action = stats::na.pass)
+
+  keep <- stats::complete.cases(mf0)
+  n_drop <- sum(!keep)
+
+  if (n_drop > 0L && isTRUE(verbose)) {
+    message("Dropping ", n_drop, " row(s) with NA in model variables before fitting/permuting.")
+  }
+  if (all(!keep)) stop("No complete cases available after removing NA rows in model variables.")
+
+  data_fit <- data[keep, , drop = FALSE]
+  mf <- mf0[keep, , drop = FALSE]
   y  <- stats::model.response(mf)
+
+  if (length(y) < 2L) stop("Not enough complete cases to run the significance test.")
 
   # For sampling, decide which raw columns are categorical vs continuous
   if (!is.null(spec)) {
-    predictor_vars   <- spec$vars
-    is_cat           <- spec$is_cat
-    categorical_vars <- names(is_cat)[is_cat]
-    continuous_vars  <- names(is_cat)[!is_cat]
+    predictor_vars    <- spec$vars
+    is_cat            <- spec$is_cat
+    categorical_vars  <- names(is_cat)[is_cat]
+    continuous_vars   <- names(is_cat)[!is_cat]
+    disc_vars         <- spec$settings$discrete_numeric %||% character(0L)
+    disc_levels       <- spec$settings$discrete_levels  %||% list()
   } else {
-    predictor_vars  <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data)))
-    predictor_types <- sapply(data[predictor_vars], function(z) class(z)[1L])
+    predictor_vars   <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data_fit)))
+    predictor_types  <- sapply(data_fit[predictor_vars], function(z) class(z)[1L])
     categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character", "logical")]
     continuous_vars  <- setdiff(predictor_vars, categorical_vars)
+    disc_vars        <- character(0L)
+    disc_levels      <- list()
   }
 
   # Mixture bookkeeping
@@ -368,34 +431,74 @@ svem_significance_test_parallel <- function(
       stop("Mixture variables appear in multiple groups: ", paste(dups, collapse = ", "))
     }
   }
+
+  # Disallow discrete numeric predictors as mixture variables (matches scoring behavior)
+  if (length(disc_vars) && length(intersect(mixture_vars, disc_vars))) {
+    stop(
+      "Discrete numeric predictors cannot be used as mixture variables. Offenders: ",
+      paste(intersect(mixture_vars, disc_vars), collapse = ", ")
+    )
+  }
+
   nonmix_continuous_vars <- setdiff(continuous_vars, mixture_vars)
 
-  # Non-mixture continuous via maximin LHS over ranges (prefer spec$num_range)
+  # Non-mixture continuous via maximin LHS over ranges; but respect discrete numeric support
+  T_continuous <- NULL
   if (length(nonmix_continuous_vars) > 0) {
-    if (!is.null(spec) && !is.null(spec$num_range) && ncol(spec$num_range) > 0) {
-      rng_mat <- spec$num_range[, colnames(spec$num_range) %in% nonmix_continuous_vars, drop = FALSE]
-      missing <- setdiff(nonmix_continuous_vars, colnames(rng_mat))
-      if (length(missing)) {
-        add <- sapply(data[missing], function(col) range(col, na.rm = TRUE))
-        rownames(add) <- c("min","max")
-        rng_mat <- cbind(rng_mat, add)
+    disc_nonmix <- intersect(nonmix_continuous_vars, disc_vars)
+    cont_nonmix <- setdiff(nonmix_continuous_vars, disc_nonmix)
+
+    parts_cont <- list()
+
+    # 1) Truly-continuous vars: LHS over ranges (prefer spec$num_range)
+    if (length(cont_nonmix) > 0) {
+      if (!is.null(spec) && !is.null(spec$num_range) && ncol(spec$num_range) > 0) {
+        rng_mat <- spec$num_range[, colnames(spec$num_range) %in% cont_nonmix, drop = FALSE]
+        missing <- setdiff(cont_nonmix, colnames(rng_mat))
+        if (length(missing)) {
+          add <- sapply(data_fit[missing], function(col) range(col, na.rm = TRUE))
+          rownames(add) <- c("min","max")
+          rng_mat <- cbind(rng_mat, add)
+        }
+        rng_mat <- rng_mat[, cont_nonmix, drop = FALSE]
+      } else {
+        rng_mat <- sapply(data_fit[cont_nonmix], function(col) range(col, na.rm = TRUE))
+        rownames(rng_mat) <- c("min","max")
       }
-      rng_mat <- rng_mat[, nonmix_continuous_vars, drop = FALSE]
-    } else {
-      rng_mat <- sapply(data[nonmix_continuous_vars], function(col) range(col, na.rm = TRUE))
-      rownames(rng_mat) <- c("min","max")
+
+      T_continuous_raw <- as.matrix(lhs::maximinLHS(nPoint, length(cont_nonmix)))
+      T_cont <- matrix(NA_real_, nrow = nPoint, ncol = length(cont_nonmix))
+      colnames(T_cont) <- cont_nonmix
+      for (i in seq_along(cont_nonmix)) {
+        lo <- rng_mat["min", i]; hi <- rng_mat["max", i]
+        T_cont[, i] <- T_continuous_raw[, i] * (hi - lo) + lo
+      }
+      parts_cont[[length(parts_cont) + 1L]] <- as.data.frame(T_cont)
     }
 
-    T_continuous_raw <- as.matrix(lhs::maximinLHS(nPoint, length(nonmix_continuous_vars)))
-    T_continuous <- matrix(NA_real_, nrow = nPoint, ncol = length(nonmix_continuous_vars))
-    colnames(T_continuous) <- nonmix_continuous_vars
-    for (i in seq_along(nonmix_continuous_vars)) {
-      lo <- rng_mat["min", i]; hi <- rng_mat["max", i]
-      T_continuous[, i] <- T_continuous_raw[, i] * (hi - lo) + lo
+    # 2) Discrete numeric vars: sample from allowed levels
+    if (length(disc_nonmix) > 0) {
+      Td <- lapply(disc_nonmix, function(v) {
+        lv <- disc_levels[[v]]
+        if (is.null(lv) || !length(lv)) {
+          # fallback: infer from data_fit if spec didn't record levels for some reason
+          x <- as.numeric(data_fit[[v]])
+          lv <- sort(unique(x[is.finite(x)]))
+        }
+        lv <- as.numeric(lv)
+        lv <- lv[is.finite(lv)]
+        if (length(lv) < 1L) stop("No finite discrete levels available for '", v, "'.")
+        sample(lv, nPoint, replace = TRUE)
+      })
+      Td <- as.data.frame(Td, check.names = FALSE, optional = FALSE)
+      names(Td) <- disc_nonmix
+      parts_cont[[length(parts_cont) + 1L]] <- Td
     }
+
+    T_continuous <- do.call(cbind, parts_cont)
     T_continuous <- as.data.frame(T_continuous)
-  } else {
-    T_continuous <- NULL
+    # enforce the original column order
+    T_continuous <- T_continuous[, nonmix_continuous_vars, drop = FALSE]
   }
 
   # Truncated Dirichlet sampler for mixture groups
@@ -474,10 +577,10 @@ svem_significance_test_parallel <- function(
     for (v in categorical_vars) {
       if (!is.null(spec)) {
         lv <- spec$levels[[v]]
-        if (is.null(lv)) lv <- sort(unique(as.character(data[[v]])))
+        if (is.null(lv)) lv <- sort(unique(as.character(data_fit[[v]])))
         T_categorical[[v]] <- factor(sample(lv, nPoint, replace = TRUE), levels = lv)
       } else {
-        x <- data[[v]]
+        x <- data_fit[[v]]
         if (is.factor(x)) {
           obs_lev <- levels(base::droplevels(x))
           T_categorical[[v]] <- factor(
@@ -502,19 +605,32 @@ svem_significance_test_parallel <- function(
   if (length(parts) == 0) stop("No predictors provided.")
   T_data <- do.call(cbind, parts)
 
-  y_mean <- mean(y)
+  y_mean <- mean(y, na.rm = TRUE)
 
-  # --- Originals: parallel SVEM fits (reproducible with %dorng%) ---------------
+  # --- Per-iteration seeds (schedule-independent reproducibility) --------------
+  # Use separate namespaces so permutations don't change when nSVEM changes.
+  seed_Y_base   <- .seed_add(seed, 1000001L)
+  seed_piY_base <- .seed_add(seed, 2000001L)
+
+  iter_seeds_Y   <- .make_iter_seeds(nSVEM, base_seed = seed_Y_base)
+  iter_seeds_piY <- .make_iter_seeds(nPerm, base_seed = seed_piY_base)
+
+  # --- Originals: parallel SVEM fits (reproducible via per-iteration seeds) ---
   if (isTRUE(verbose)) message("Fitting SVEM models to original data (parallel)...")
   M_Y <- foreach::foreach(
     i = 1:nSVEM,
     .combine = rbind,
     .packages = c("SVEMnet", "glmnet", "stats"),
     .options.snow = list(preschedule = FALSE)
-  ) %dorng% {
+  ) %dopar% {
+    # ensure deterministic RNG per iteration, independent of scheduling/cores
+    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+    set.seed(iter_seeds_Y[i])
+
     svem_model <- tryCatch({
       do.call(SVEMnet::SVEMnet, c(list(
-        formula = f_use, data = data, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
+        formula = f_use, data = data_fit, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
         weight_scheme = weight_scheme, objective = objective,
         relaxed = relaxed
       ), dots))
@@ -531,7 +647,7 @@ svem_significance_test_parallel <- function(
     (f_hat_Y_T - y_mean) / s_hat_Y_T
   }
 
-  # --- Permutations: parallel SVEM fits (reproducible with %dorng%) ------------
+  # --- Permutations: parallel SVEM fits (reproducible via per-iteration seeds) -
   if (isTRUE(verbose)) message("Starting permutation testing (parallel)...")
   start_time_perm <- Sys.time()
   M_pi_Y <- foreach::foreach(
@@ -539,9 +655,13 @@ svem_significance_test_parallel <- function(
     .combine = rbind,
     .packages = c("SVEMnet", "glmnet", "stats"),
     .options.snow = list(preschedule = FALSE)
-  ) %dorng% {
+  ) %dopar% {
+    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
+    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
+    set.seed(iter_seeds_piY[jloop])
+
     y_perm <- sample(y, replace = FALSE)
-    data_perm <- data
+    data_perm <- data_fit
     data_perm[[resp_name]] <- y_perm
 
     svem_model_perm <- tryCatch({
@@ -682,6 +802,3 @@ svem_significance_test_parallel <- function(
   class(results_list) <- "svem_significance_test"
   results_list
 }
-
-# internal helper
-`%||%` <- function(a, b) if (!is.null(a)) a else b

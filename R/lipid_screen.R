@@ -79,7 +79,8 @@
 #'   polynomial_order = 3,   # include up to cubic terms I(X^2), I(X^3)
 #'   include_pc_2way  = TRUE,  # partial-cubic two-way terms Z:I(X^2)
 #'   include_pc_3way  = FALSE,  # no partial-cubic three-way terms I(X^2):Z:W
-#'    blocking         = "Operator"
+#'   blocking         = "Operator",
+#'   discrete_numeric = c("N_P_ratio","flow_rate")
 #' )
 #'
 #' # 3) Reuse the same locked expansion for other responses
