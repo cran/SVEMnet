@@ -2,8 +2,8 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.2.0
-Date: 2026-01-21
+Version: 3.2.1
+Date: 2026-06-02
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
@@ -19,13 +19,13 @@ Suggests: covr, knitr, rmarkdown, testthat (>= 3.0.0), withr, vdiffr,
         RhpcBLASctl
 License: GPL-2 | GPL-3
 Encoding: UTF-8
-RoxygenNote: 7.3.3
 Config/testthat/edition: 3
 LazyData: true
+Config/roxygen2/version: 8.0.0
 NeedsCompilation: no
-Packaged: 2026-01-22 20:20:02 UTC; andre
+Packaged: 2026-06-02 22:07:21 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2026-01-23 09:40:28 UTC
+Date/Publication: 2026-06-02 22:20:02 UTC

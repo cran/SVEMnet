@@ -76,7 +76,9 @@
 #'   \code{offset}, or \code{standardize.response}. Any user-supplied
 #'   \code{weights} are ignored (SVEMnet supplies its own bootstrap weights).
 #'   Any user-supplied \code{standardize} is ignored; SVEMnet always calls
-#'   \code{glmnet} with \code{standardize = TRUE}.
+#'   \code{glmnet} with \code{standardize = TRUE}. Glmnet algorithm-control
+#'   values supplied directly or through \code{control = list(...)} are routed
+#'   in a version-compatible way when possible.
 #'
 #' @return An object of class \code{"svem_model"} (and \code{"svem_binomial"}
 #'   when \code{family = "binomial"}) with components:
@@ -296,8 +298,7 @@
 #'
 #' @template ref-svem
 #'
-#' @importFrom stats runif lm predict coef var model.frame model.matrix
-#'   model.response delete.response IQR median
+#' @importFrom stats runif lm predict coef var model.frame model.matrix model.response delete.response IQR median
 #' @importFrom glmnet glmnet
 #'
 #' @examples
@@ -838,6 +839,17 @@ SVEMnet <- function(formula, data,
     dots <- dots[setdiff(names(dots), protected)]
   }
 
+  glmnet_base_args <- .glmnet_prepare_call_args(
+    c(list(intercept = TRUE,
+           standardize = TRUE,
+           nlambda = 500,
+           relax = isTRUE(relax_flag),
+           family = fam_name),
+      dots),
+    glmnet::glmnet,
+    default_control = list(maxit = 1e6)
+  )
+
   .support_size_one <- function(beta_col,
                                 base_tol        = 1e-7,
                                 count_intercept = TRUE) {
@@ -902,14 +914,8 @@ SVEMnet <- function(formula, data,
           do.call(glmnet::glmnet,
                   c(list(x = X, y = y_vec,
                          alpha = alpha,
-                         weights = w_train,
-                         intercept = TRUE,
-                         standardize = TRUE,
-                         nlambda = 500,
-                         maxit = 1e6,
-                         relax = isTRUE(relax_flag),
-                         family = fam_name),
-                    dots))
+                         weights = w_train),
+                    glmnet_base_args))
         }, warning = function(w) base::invokeRestart("muffleWarning"))
       }, error = function(e) NULL)
       if (is.null(fit) || !length(fit$lambda)) next

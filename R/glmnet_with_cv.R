@@ -63,9 +63,13 @@
 #'   links are not supported.
 #' @param ... Additional arguments forwarded to both \code{cv.glmnet()} and
 #'   \code{glmnet()}, for example: \code{weights}, \code{parallel},
-#'   \code{type.measure}, \code{intercept}, \code{maxit},
+#'   \code{type.measure}, \code{intercept},
 #'   \code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-#'   \code{offset}, \code{standardize.response}, \code{keep}, and so on. If
+#'   \code{offset}, \code{standardize.response}, \code{keep}, and so on.
+#'   Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
+#'   \code{dfmax}, and \code{pmax} may be supplied directly for compatibility
+#'   or via \code{control = list(...)} with glmnet versions that support it;
+#'   they are routed in a version-compatible way when possible. If
 #'   \code{family} is supplied here, it is ignored in favor of the explicit
 #'   \code{family} argument.
 #'
@@ -560,11 +564,17 @@ glmnet_with_cv <- function(formula, data,
     standardize  = standardize,
     family       = fam,
     type.measure = if (identical(fam, "binomial")) "deviance" else "mse",
-    maxit        = 1e6,
     relax        = isTRUE(relaxed)
   )
   if (isTRUE(relaxed) && !is.null(relax_gamma)) base_cv_args$gamma <- relax_gamma
   cv_base_args <- utils::modifyList(base_cv_args, dots, keep.null = TRUE)
+  cv_base_args <- .glmnet_prepare_call_args(
+    cv_base_args,
+    glmnet::cv.glmnet,
+    default_control = list(maxit = 1e6),
+    direct_control = c("thresh", "maxit", "dfmax", "pmax"),
+    old_control = .glmnet_direct_control_args()
+  )
 
   glmnet_formals <- names(formals(glmnet::glmnet))
   base_glmnet_args <- list(
@@ -572,11 +582,15 @@ glmnet_with_cv <- function(formula, data,
     family      = fam,
     intercept   = TRUE,
     exclude     = exclude,
-    maxit       = 1e6,
     relax       = isTRUE(relaxed)
   )
   if (isTRUE(relaxed) && !is.null(relax_gamma)) base_glmnet_args$gamma <- relax_gamma
   glmnet_fit_args_full <- utils::modifyList(base_glmnet_args, dots, keep.null = TRUE)
+  glmnet_fit_args_full <- .glmnet_prepare_call_args(
+    glmnet_fit_args_full,
+    glmnet::glmnet,
+    default_control = list(maxit = 1e6)
+  )
   glmnet_fit_args <- glmnet_fit_args_full[intersect(names(glmnet_fit_args_full), glmnet_formals)]
   glmnet_fit_args <- glmnet_fit_args[setdiff(names(glmnet_fit_args), c("x","y","alpha","lambda"))]
 
@@ -697,8 +711,13 @@ glmnet_with_cv <- function(formula, data,
       SE_combined <- sqrt(SE_within / pmax(1L, k_se))
       SE_combined[!is.finite(SE_combined)] <- 0
     } else {
-      SE_between  <- sd_cvm^2
-      SE_combined <- sqrt( (SE_within / pmax(1L, k_se)) + (SE_between / pmax(1L, k_mean)) )
+      var_total <- sd_cvm^2                       # Var(m_r) across repeats (includes within noise)
+      tau2      <- pmax(0, var_total - SE_within) # estimate between-repeat variance only
+
+      SE_combined <- sqrt(
+        (SE_within / pmax(1L, k_se)) +
+          (tau2      / pmax(1L, k_mean))
+      )
       SE_combined[!is.finite(SE_combined)] <- 0
     }
 

@@ -204,5 +204,10 @@ Useful links:
 \author{
 \strong{Maintainer}: Andrew T. Karl \email{akarl@asu.edu} (\href{https://orcid.org/0000-0002-5933-8706}{ORCID})
 
+Authors:
+\itemize{
+  \item Andrew T. Karl \email{akarl@asu.edu} (\href{https://orcid.org/0000-0002-5933-8706}{ORCID})
+}
+
 }
 \keyword{package}

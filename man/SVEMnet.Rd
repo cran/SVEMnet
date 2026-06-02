@@ -88,7 +88,9 @@ level is treated as 1).}
 \code{offset}, or \code{standardize.response}. Any user-supplied
 \code{weights} are ignored (SVEMnet supplies its own bootstrap weights).
 Any user-supplied \code{standardize} is ignored; SVEMnet always calls
-\code{glmnet} with \code{standardize = TRUE}.}
+\code{glmnet} with \code{standardize = TRUE}. Glmnet algorithm-control
+values supplied directly or through \code{control = list(...)} are routed
+in a version-compatible way when possible.}
 }
 \value{
 An object of class \code{"svem_model"} (and \code{"svem_binomial"}

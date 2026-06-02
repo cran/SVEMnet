@@ -1,5 +1,10 @@
 # NEWS for SVEMnet
 
+[3.2.1]
+- Maintenance release for compatibility with glmnet 5.0 while preserving compatibility with glmnet 4.1-10.
+- Route glmnet algorithm-control values through per-call control lists when supported by the installed glmnet version, with legacy argument handling for older glmnet versions.
+- No intentional changes to SVEM weighting, model selection, prediction, or fitted object structure.
+
 [3.1.9]
 - No longer use doRNG package in svem_significance_test_parallel.
 - Added discrete numeric argument to bigexp_terms()

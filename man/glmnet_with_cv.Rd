@@ -77,9 +77,13 @@ links are not supported.}
 
 \item{...}{Additional arguments forwarded to both \code{cv.glmnet()} and
 \code{glmnet()}, for example: \code{weights}, \code{parallel},
-\code{type.measure}, \code{intercept}, \code{maxit},
+\code{type.measure}, \code{intercept},
 \code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-\code{offset}, \code{standardize.response}, \code{keep}, and so on. If
+\code{offset}, \code{standardize.response}, \code{keep}, and so on.
+Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
+\code{dfmax}, and \code{pmax} may be supplied directly for compatibility
+or via \code{control = list(...)} with glmnet versions that support it;
+they are routed in a version-compatible way when possible. If
 \code{family} is supplied here, it is ignored in favor of the explicit
 \code{family} argument.}
 }
