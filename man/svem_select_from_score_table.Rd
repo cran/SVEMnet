@@ -27,7 +27,13 @@ full \code{scored} list, a helpful error is thrown reminding you to use
 
 \item{target}{Character scalar naming the column in \code{score_table}
 to optimize (e.g. \code{"score"}, \code{"wmt_score"},
-\code{"uncertainty_measure"}).}
+\code{"uncertainty_measure"}, or a response-specific column such as
+\code{"Y_pred"}). The robust bounded columns created by
+\code{\link{svem_score_random}} may contain ties at 0 or 1 because of
+percentile clipping. For a single largest predicted response, use
+\code{<response>_pred}; for a single widest interval, create a raw width
+column such as \code{<response>_ciw = <response>_upr - <response>_lwr} and
+use that as \code{target}.}
 
 \item{direction}{Either \code{"max"} or \code{"min"} indicating whether
 larger or smaller values of \code{target} are preferred.}
@@ -72,6 +78,9 @@ in \code{score_table} (e.g. \code{*_lwr} / \code{*_upr}).}
 empty or \code{NULL}) drawn from the top \code{top} of the ranking
 on \code{target}, with all columns carried through from
 \code{score_table}.}
+\item{label}{The \code{label} value supplied to this call (or
+\code{NULL}); used by \code{\link{svem_export_candidates_csv}} for the
+\code{selection_label} column.}
 \item{call}{The matched call, including all arguments used to
 create this selection object.}
 }
@@ -88,6 +97,17 @@ Optionally, a string \code{label} can be supplied to annotate the returned
 \code{"Notes_from_SVEMnet"} column. If \code{"Notes_from_SVEMnet"} is missing, it is created. If it
 exists and is nonempty, the label is appended with \code{"; "} as a
 separator.
+}
+\details{
+\code{svem_score_random()} returns both response prediction columns
+(for example, \code{Y_pred}) and robust bounded summaries such as
+\code{score}, per-response desirabilities, per-response weighted CI-width
+summaries, and \code{uncertainty_measure}. The bounded summaries are useful
+for defining high-desirability or high-uncertainty regions for medoid
+selection, but they may not identify a unique single best row when several
+rows are clipped to 1. In that case, select on a raw column such as
+\code{Y_pred}, or add a raw CI-width column such as
+\code{Y_ciw = Y_upr - Y_lwr}, before calling this function.
 }
 \seealso{
 \code{\link{svem_score_random}},

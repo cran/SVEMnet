@@ -60,8 +60,10 @@ surfaces (default \code{90}).}
 \item{glmnet_alpha}{Numeric vector of \code{glmnet} alpha values
 (default \code{c(1)}).}
 
-\item{weight_scheme}{Weighting scheme for SVEM (default \code{"SVEM"}).
-Passed to \code{SVEMnet()}.}
+\item{weight_scheme}{Weighting scheme for the inner SVEM fits. Only
+\code{"SVEM"} is accepted: the whole-model test in Karl (2024) is defined
+for the anti-correlated fractional-random-weight scheme, so the other
+\code{SVEMnet()} weighting schemes are intentionally not offered here.}
 
 \item{objective}{Objective used inside \code{SVEMnet()} to pick the bootstrap
 path solution. One of \code{"wAIC"}, \code{"wBIC"}, or
@@ -110,11 +112,14 @@ supplied and \code{use_spec_contrasts = TRUE}, the function replays
 deterministic factor coding.}
 
 \item{...}{Additional arguments passed to \code{SVEMnet()} and then to
-\code{glmnet()} (for example: \code{penalty.factor}, \code{offset},
+\code{glmnet()} (for example: \code{penalty.factor},
 \code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
 The \code{relaxed} setting is controlled by the \code{relaxed} argument of
 this function and any \code{relaxed} value passed via \code{...} is ignored
-with a warning.}
+with a warning. User \code{weights} and \code{offset} are not supported
+(SVEM controls its own weighting). Argument names that neither
+\code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
+with a warning (misspelling protection).}
 }
 \value{
 An object of class \code{"svem_significance_test"}, a list with
@@ -160,8 +165,8 @@ and generates a deterministic, per-iteration seed schedule on the master.
 Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
 assigned seed before performing any random draws (including permutations and
 the bootstrap randomness inside \code{SVEMnet()}).
-This makes results reproducible regardless of worker scheduling (including
-\code{preschedule = FALSE}) and independent of the number of cores.
+This makes results reproducible regardless of worker scheduling and
+independent of the number of cores.
 
 The function can optionally reuse a deterministic, locked expansion built
 with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -176,7 +181,7 @@ in that setting.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview through GPT-5 Pro) were
+OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -266,6 +271,8 @@ content was reviewed and finalized by the author.
 }
 }
 \references{
+Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}
+
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}

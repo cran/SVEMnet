@@ -42,8 +42,8 @@ produces a quick \pkg{ggplot2} summary and/or prints a compact table.
 }
 \details{
 This function expects \code{object$coef_matrix} to contain the per-bootstrap
-coefficients (including an intercept column), typically created by
-\code{\link{SVEMnet}} when \code{save_boot = TRUE} (or similar) is enabled.
+coefficients (including an intercept column), which \code{\link{SVEMnet}}
+always stores in its fitted objects.
 Rows correspond to bootstrap fits; columns correspond to coefficients.
 
 Internally, \code{svem_nonzero()}:

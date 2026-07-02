@@ -15,6 +15,7 @@ SVEMnet(
   response = NULL,
   unseen = c("warn_na", "error"),
   family = c("gaussian", "binomial"),
+  complexity = c("support", "edf"),
   ...
 )
 }
@@ -83,14 +84,52 @@ binomial it uses the canonical logit link. The binomial response must be
 numeric 0/1, logical, or a factor with exactly two levels (the second
 level is treated as 1).}
 
+\item{complexity}{Character. Complexity measure used in the wAIC/wBIC
+penalty term. One of:
+\itemize{
+\item \code{"support"} (default): the number of nonzero coefficients
+(including the intercept), as described in the package references.
+This is the classical unbiased degrees-of-freedom estimator for the
+lasso (Zou, Hastie, and Tibshirani 2007).
+\item \code{"edf"} (experimental, provided for further study): a
+gamma-blended effective degrees of freedom. For an elastic-net path
+point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
+parameter \eqn{\alpha < 1}, the penalized fit's effective df is the
+ridge-type trace
+\eqn{\sum_j e_j / (e_j + n\lambda(1-\alpha))}, where \eqn{e_j} are
+the eigenvalues of the weighted, standardized Gram matrix of the
+active columns; the relaxed refit's df is the rank of the active
+design. The blended complexity for relaxed mixing parameter
+\eqn{\gamma} is
+\eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
+For \eqn{\alpha = 1} (lasso) this reduces exactly to the support
+count, so \code{"edf"} differs from \code{"support"} only for
+\eqn{\alpha < 1} path points, whose support count overstates their
+effective complexity. Implemented for \code{family = "gaussian"}
+only; binomial fits fall back to \code{"support"} with a warning.
+}
+The admissibility guardrail (path points with more than
+\eqn{n_{eff,adm}} nonzero non-intercept coefficients are excluded) and
+the reported model-size diagnostics always use the support count,
+regardless of this setting. \code{"edf"} changes only the complexity
+value inserted into the wAIC/wBIC penalty and is intended for simulation
+study of the alpha/gamma comparison; the published SVEM results use
+\code{"support"}.}
+
 \item{...}{Additional arguments passed to \code{glmnet()}, such as
-\code{penalty.factor}, \code{lower.limits}, \code{upper.limits},
-\code{offset}, or \code{standardize.response}. Any user-supplied
-\code{weights} are ignored (SVEMnet supplies its own bootstrap weights).
-Any user-supplied \code{standardize} is ignored; SVEMnet always calls
+\code{penalty.factor}, \code{lower.limits}, \code{upper.limits}, or
+\code{standardize.response}. Any user-supplied \code{weights} are ignored
+(SVEM supplies its own fractional random weights), any user-supplied
+\code{offset} is ignored (SVEMnet does not support offsets), and any
+user-supplied \code{standardize} is ignored; SVEMnet always calls
 \code{glmnet} with \code{standardize = TRUE}. Glmnet algorithm-control
-values supplied directly or through \code{control = list(...)} are routed
-in a version-compatible way when possible.}
+values (for example \code{maxit} or \code{thresh}) supplied directly or
+through \code{control = list(...)} are routed in a version-compatible way
+when possible. The arguments \code{nlambda}, \code{lambda}, and
+\code{lambda.min.ratio} are reserved and managed by SVEMnet
+(\code{nlambda} is fixed at 500); user-supplied values are ignored with
+a warning. Argument names that the installed \code{glmnet} does not
+recognize are also ignored with a warning (misspelling protection).}
 }
 \value{
 An object of class \code{"svem_model"} (and \code{"svem_binomial"}
@@ -110,6 +149,11 @@ model \code{lm(y ~ y_pred)}; otherwise \code{NULL}.
 \item \code{best_lambdas}: Per-bootstrap lambda selected by the criterion.
 \item \code{best_relax_gammas}: Per-bootstrap relaxed gamma selected when
 \code{relaxed = TRUE}; \code{NA} otherwise.
+\item \code{complexity}: The complexity measure actually used
+(\code{"support"} or \code{"edf"}).
+\item \code{best_edfs}: Per-bootstrap blended effective df of the
+selected path point when \code{complexity = "edf"}; \code{NA}
+otherwise.
 \item \code{weight_scheme}: The weighting scheme that was used.
 \item \code{relaxed}: Logical flag indicating whether relaxed paths were
 used.
@@ -329,7 +373,7 @@ factor levels for use in random candidate generation for optimization.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview through GPT-5 Pro) were
+OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -443,7 +487,7 @@ out_b <- predict(
 )
 str(out_b)
 
-#' ## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
+## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
 set.seed(2)
 df_block <- data.frame(
   y1         = rnorm(40),
@@ -469,6 +513,8 @@ tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
 }
 }
 \references{
+Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}
+
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
@@ -501,4 +547,8 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Zou, H., Hastie, T., & Tibshirani, R. (2007). On the "degrees of freedom"
+of the lasso. \emph{The Annals of Statistics}, 35(5), 2173–2192.
+\doi{10.1214/009053607000000127}
 }

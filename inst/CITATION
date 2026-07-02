@@ -2,13 +2,25 @@
 
 citHeader("If you use the SVEMnet package, please cite the following works:")
 
+# Package Paper Citation
+citation_paper <- bibentry(
+  bibtype = "Article",
+  title = "SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments",
+  author = person("Andrew T.", "Karl"),
+  journal = "Chemometrics and Intelligent Laboratory Systems",
+  year = "2026",
+  volume = "271",
+  pages = "105660",
+  doi = "10.1016/j.chemolab.2026.105660"
+)
+
 # Package Manual Citation
 citation_package <- bibentry(
   bibtype = "Manual",
-  title = "SVEMnet: Self-Validated Ensemble Models with Elastic Net Regression",
+  title = "SVEMnet: Self-Validated Ensemble Models with Lasso and Relaxed Elastic Net Regression",
   author = person("Andrew T.", "Karl"),
-  year = "2024",
-  note = "R package version 1.0.1",
+  year = "2026",
+  note = "R package version 3.2.3",
 )
 
 # First Article Citation
@@ -60,4 +72,4 @@ citation3 <- bibentry(
 )
 
 # Combine all citations into a list
-citation <- list(citation_package, citation1, citation2, citation3)
+citation <- list(citation_paper, citation_package, citation1, citation2, citation3)

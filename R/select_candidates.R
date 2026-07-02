@@ -141,8 +141,10 @@ svem_select_candidates <- function(table,
     stop("Column `", by, "` has no finite values; cannot rank candidates.")
   }
 
-  # Determine how many top rows to keep
-  m_top <- max(1L, min(n, ceiling(top_frac * n)))
+  # Determine how many top rows to keep; the small epsilon prevents
+  # floating-point noise (e.g. 0.2 * 50 = 10.000000000000002) from
+  # inflating the count by one
+  m_top <- max(1L, min(n, ceiling(top_frac * n - 1e-9)))
 
   # Order by score according to direction; NA go to the end
   ord <- order(

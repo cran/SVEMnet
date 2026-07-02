@@ -185,6 +185,14 @@ ensemble (process-mean assurance).
 \item pick a small, diverse set of medoid candidates for optimality or
 exploration (e.g. high \code{uncertainty_measure}).
 }
+The robust bounded summaries \code{score}, per-response desirabilities,
+per-response weighted CI-width summaries, and
+\code{uncertainty_measure} may contain ties at 0 or 1 because of the
+percentile clipping described below. If the intended single "best" row is
+the largest raw predicted response, select on the corresponding
+\code{<response>_pred} column. If the intended single exploration row is
+the widest interval, create and select on a raw width column such as
+\code{<response>_ciw = <response>_upr - <response>_lwr}.
 \item Run selected candidates, append the new data, refit the SVEM models,
 and repeat as needed.
 }
@@ -201,7 +209,11 @@ Each response is mapped to a Derringer–Suich desirability
 Per-response anchors (acceptable lower/upper limits or target-band
 tolerances) can be supplied in \code{goals}; when not provided, robust
 defaults are inferred from the sampled responses using the q0.02–q0.98
-span.
+span. As a result, the largest few percent of predictions may share
+desirability 1 (and the smallest few percent may share desirability 0) when
+default anchors are used. This is intentional for robust desirability
+scoring. Use \code{<response>_pred} directly when selecting the single
+largest or smallest predicted response.
 
 Per-response desirabilities are combined into a single scalar \code{score}
 using either:
@@ -240,8 +252,10 @@ percentile CI widths across responses. For each response, we compute the
 bootstrap percentile CI width
 \eqn{\mathrm{CIwidth}_r(x) = u_r(x) - \ell_r(x)} and then map it to the
 unit interval using an affine rescaling based on the empirical q0.02 and
-q0.98 quantiles of the CI widths for that response (computed from the
-table being scored):
+q0.98 quantiles of the CI widths for that response. The quantile anchors
+are computed once from the sampled \code{score_table} and reused when
+scoring \code{data}, so \code{uncertainty_measure} in
+\code{original_data_scored} is on the same scale as in \code{score_table}:
 \deqn{
   \tilde W_r(x) =
   \frac{
@@ -258,7 +272,12 @@ The scalar \code{uncertainty_measure} is then
 where \eqn{w_r} are the user-normalized response weights derived from
 \code{goals[[resp]]$weight}. Larger values of \code{uncertainty_measure}
 indicate settings where the ensemble CI is relatively wide compared to the
-response's typical scale and are natural targets for exploration.
+response's typical scale and are natural targets for exploration. Because
+the normalization clips at empirical q0.02 and q0.98, the widest few percent
+of intervals may share \code{uncertainty_measure = 1}. Use a raw interval
+width column such as
+\code{<response>_ciw = <response>_upr - <response>_lwr} when selecting the
+single widest interval.
 }
 
 \subsection{Spec-limit mean-level probabilities}{

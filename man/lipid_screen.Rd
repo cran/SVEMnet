@@ -67,7 +67,7 @@ process-mean specifications via the \code{specs} argument of
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview through GPT-5 Pro) were
+OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -288,6 +288,8 @@ best_existing <- svem_select_from_score_table(
 }
 }
 \references{
+Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}
+
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}

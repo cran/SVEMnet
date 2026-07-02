@@ -4,9 +4,12 @@
 #' combined 1-SE rule across repeats. Preserves fields expected by
 #' \code{predict.svem_model()} and internal prediction helpers. Optionally uses
 #' \code{glmnet}'s built-in relaxed elastic net for both the warm-start path and
-#' each CV fit. When \code{relaxed = TRUE}, the final coefficients are taken
-#' from a \code{cv.glmnet()} object at the chosen lambda so that the returned
-#' model reflects the relaxed solution (including its chosen gamma).
+#' each CV fit. When \code{relaxed = TRUE}, lambda is tuned by the repeated
+#' cross-validation described below and the final coefficients are then taken
+#' from a \code{cv.glmnet(relax = TRUE)} object at that lambda, with the
+#' relaxed mixing parameter gamma selected by the rule matching
+#' \code{choose_rule} (\code{"gamma.min"} for \code{"min"}, \code{"gamma.1se"}
+#' for \code{"1se"}).
 #'
 #' This function is a convenience wrapper around \code{glmnet()} and
 #' \code{cv.glmnet()} that returns an object in the same structural format as
@@ -48,10 +51,15 @@
 #'   inside each training fold (requires \code{glmnet} >= 4.1-2).
 #' @param relaxed Logical; if \code{TRUE}, call \code{glmnet()} and
 #'   \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
-#'   \code{gamma} path (default \code{FALSE}). If
-#'   \code{cv.glmnet(relax = TRUE)} fails for a particular repeat/alpha, the
-#'   function retries that fit without relaxation; the number of such
-#'   fallbacks is recorded in \code{meta$relax_cv_fallbacks}.
+#'   \code{gamma} path (default \code{FALSE}). Lambda is tuned by the
+#'   repeated cross-validation on the standard (gamma = 1) path statistics;
+#'   the relaxed gamma is then selected within the final
+#'   \code{cv.glmnet(relax = TRUE)} call using \code{"gamma.min"} when
+#'   \code{choose_rule = "min"} and \code{"gamma.1se"} when
+#'   \code{choose_rule = "1se"}. If \code{cv.glmnet(relax = TRUE)} fails for
+#'   a particular repeat/alpha, the function retries that fit without
+#'   relaxation; the number of such fallbacks is recorded in
+#'   \code{meta$relax_cv_fallbacks}.
 #' @param relax_gamma Optional numeric vector passed as \code{gamma=} to
 #'   \code{glmnet()} and \code{cv.glmnet()} when \code{relaxed = TRUE}. If
 #'   \code{NULL}, glmnet's internal default gamma grid is used.
@@ -62,16 +70,21 @@
 #'   with exactly 2 levels (the second level is treated as 1). Non-canonical
 #'   links are not supported.
 #' @param ... Additional arguments forwarded to both \code{cv.glmnet()} and
-#'   \code{glmnet()}, for example: \code{weights}, \code{parallel},
-#'   \code{type.measure}, \code{intercept},
-#'   \code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-#'   \code{offset}, \code{standardize.response}, \code{keep}, and so on.
+#'   \code{glmnet()}, for example: \code{parallel}, \code{type.measure},
+#'   \code{intercept}, \code{lower.limits}, \code{upper.limits},
+#'   \code{penalty.factor}, \code{standardize.response}, \code{keep}, and so
+#'   on. Any user-supplied \code{weights} or \code{offset} are ignored with a
+#'   warning: \code{glmnet_with_cv()} returns objects meant for side-by-side
+#'   comparison with \code{SVEMnet()} fits, whose weighting is controlled by
+#'   the SVEM scheme, and downstream prediction helpers do not carry
+#'   observation weights or offsets.
 #'   Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
 #'   \code{dfmax}, and \code{pmax} may be supplied directly for compatibility
 #'   or via \code{control = list(...)} with glmnet versions that support it;
 #'   they are routed in a version-compatible way when possible. If
 #'   \code{family} is supplied here, it is ignored in favor of the explicit
-#'   \code{family} argument.
+#'   \code{family} argument. Argument names that the installed \code{glmnet}
+#'   does not recognize are ignored with a warning (misspelling protection).
 #'
 #' @details
 #' The basic workflow is:
@@ -291,28 +304,34 @@ glmnet_with_cv <- function(formula, data,
   if (length(intercept_col)) X <- X[, -intercept_col, drop = FALSE]
   n <- nrow(X); p <- ncol(X)
 
-  # --- Collect dots & align weights/offset to rows kept by na.omit ---
+  # --- Collect and sanitize dots ---
   dots <- list(...)
-  omit <- attr(mf, "na.action")
 
   # drop any family accidentally passed via ...
   if ("family" %in% names(dots)) {
     dots$family <- NULL
   }
 
-  w_all_input <- if ("weights" %in% names(dots)) as.numeric(dots$weights) else NULL
-  w <- NULL
-  if (!is.null(w_all_input)) {
-    w <- if (is.null(omit)) w_all_input else w_all_input[-omit]
-    if (length(w) != n) w <- NULL
+  # User weights and offsets are not supported: the returned object is meant
+  # for side-by-side comparison with SVEMnet() fits (whose weighting is
+  # controlled by the SVEM scheme), and the prediction helpers do not carry
+  # observation weights or offsets.
+  if ("weights" %in% names(dots)) {
+    warning("Ignoring user 'weights'; glmnet_with_cv() does not support observation weights.")
+    dots$weights <- NULL
+  }
+  if ("offset" %in% names(dots)) {
+    warning("Ignoring user 'offset'; glmnet_with_cv() does not support offsets.")
+    dots$offset <- NULL
   }
 
-  off_all_input <- if ("offset" %in% names(dots)) as.numeric(dots$offset) else NULL
-  off <- NULL
-  if (!is.null(off_all_input)) {
-    off <- if (is.null(omit)) off_all_input else off_all_input[-omit]
-    if (length(off) != n) off <- NULL
-  }
+  # glmnet()/cv.glmnet() silently swallow unknown arguments; catch misspellings
+  unknown <- .svem_unknown_glmnet_args(
+    dots,
+    funs = list(glmnet::glmnet, glmnet::cv.glmnet),
+    context = "glmnet via glmnet_with_cv"
+  )
+  if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]
 
   # --- Family handling: restrict to gaussian / binomial with canonical links ---
   .coerce_binomial_01 <- function(y) {
@@ -371,15 +390,15 @@ glmnet_with_cv <- function(formula, data,
   # --- Helper for intercept-only returns (used in both places) ---
   .cv_return_intercept_only <- function(
     fam, y_glm, X, mf, glmnet_alpha, choose_rule,
-    drop_msg, nfolds_val, repeats_val, relaxed, w, note_extra = NULL
+    drop_msg, nfolds_val, repeats_val, relaxed, note_extra = NULL
   ) {
     n_local <- nrow(X)
 
     if (identical(fam, "gaussian")) {
-      intercept <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
+      intercept <- mean(y_glm)
       y_pred <- rep(intercept, n_local)
     } else {  # binomial: intercept on logit scale, y_pred as probabilities
-      p_hat <- if (!is.null(w)) sum(w * y_glm) / sum(w) else mean(y_glm)
+      p_hat <- mean(y_glm)
       p_hat <- pmin(pmax(p_hat, 1e-6), 1 - 1e-6)
       intercept <- stats::qlogis(p_hat)
       y_pred <- rep(p_hat, n_local)
@@ -475,7 +494,6 @@ glmnet_with_cv <- function(formula, data,
       nfolds_val  = NA_integer_,
       repeats_val = NA_integer_,
       relaxed     = relaxed,
-      w           = w,
       note_extra  = NULL
     ))
   }
@@ -512,7 +530,6 @@ glmnet_with_cv <- function(formula, data,
         nfolds_val   = nfolds_eff_tmp,
         repeats_val  = repeats_tmp,
         relaxed      = relaxed,
-        w            = w,
         note_extra   = "binomial_one_class_intercept_only"
       ))
     }
@@ -542,7 +559,6 @@ glmnet_with_cv <- function(formula, data,
         nfolds_val   = nfolds_eff,
         repeats_val  = repeats,
         relaxed      = relaxed,
-        w            = w,
         note_extra   = "binomial_min_class_lt2_intercept_only"
       ))
     }
@@ -593,21 +609,6 @@ glmnet_with_cv <- function(formula, data,
   )
   glmnet_fit_args <- glmnet_fit_args_full[intersect(names(glmnet_fit_args_full), glmnet_formals)]
   glmnet_fit_args <- glmnet_fit_args[setdiff(names(glmnet_fit_args), c("x","y","alpha","lambda"))]
-
-  if (!is.null(w)) {
-    cv_base_args$weights <- w
-    glmnet_fit_args$weights <- w
-  } else {
-    cv_base_args$weights <- NULL
-    glmnet_fit_args$weights <- NULL
-  }
-  if (!is.null(off)) {
-    cv_base_args$offset <- off
-    glmnet_fit_args$offset <- off
-  } else {
-    cv_base_args$offset <- NULL
-    glmnet_fit_args$offset <- NULL
-  }
 
   # Helper to drop reserved names from arg lists before do.call
   drop_reserved <- function(lst, reserved) {
@@ -724,7 +725,9 @@ glmnet_with_cv <- function(formula, data,
     idx_min <- which.min(mean_cvm)
     se_tol  <- if (is.finite(SE_combined[idx_min])) SE_combined[idx_min] else 0
     cand <- which(mean_cvm <= mean_cvm[idx_min] + se_tol)
-    idx_1se <- if (length(cand)) max(cand) else idx_min
+    # lambda paths from glmnet are in decreasing order, so the largest lambda
+    # within the 1-SE band is the smallest index among the candidates
+    idx_1se <- if (length(cand)) min(cand) else idx_min
 
     list(lambda = lam_ref,
          mean_cvm = mean_cvm,
@@ -756,7 +759,6 @@ glmnet_with_cv <- function(formula, data,
       nfolds_val  = nfolds_eff,
       repeats_val = repeats,
       relaxed     = relaxed,
-      w           = w,
       note_extra  = "ridge_fallback_bypassed"
     ))
   }
@@ -783,8 +785,6 @@ glmnet_with_cv <- function(formula, data,
         glmnet_fit_args_fold <- glmnet_fit_args
         glmnet_fit_args_fold$relax <- FALSE
         glmnet_fit_args_fold$gamma <- NULL
-        if (!is.null(w)) glmnet_fit_args_fold$weights <- w[tr_idx]
-        if (!is.null(off)) glmnet_fit_args_fold$offset <- off[tr_idx]
 
         y_tr_fit <- if (is.matrix(y_fit)) y_fit[tr_idx, , drop = FALSE] else y_fit[tr_idx]
         fit_j <- tryCatch(
@@ -796,31 +796,23 @@ glmnet_with_cv <- function(formula, data,
           error = function(e) NULL
         )
         if (is.null(fit_j)) next
-        preds_te <- drop(stats::predict(fit_j, newx = X[te_idx, , drop = FALSE],
-                                        s = lam, type = "response"))
+        preds_te <- tryCatch(
+          drop(stats::predict(fit_j, newx = X[te_idx, , drop = FALSE],
+                              s = lam, type = "response")),
+          error = function(e) NULL
+        )
+        if (is.null(preds_te)) next
 
         if (is_gaussian) {
           # Gaussian: MSE criterion
-          if (is.null(w)) {
-            crit_num[j] <- crit_num[j] + sum((preds_te - y_glm[te_idx])^2)
-            crit_den[j] <- crit_den[j] + length(te_idx)
-          } else {
-            w_te <- w[te_idx]
-            crit_num[j] <- crit_num[j] + sum(w_te * (preds_te - y_glm[te_idx])^2)
-            crit_den[j] <- crit_den[j] + sum(w_te)
-          }
+          crit_num[j] <- crit_num[j] + sum((preds_te - y_glm[te_idx])^2)
+          crit_den[j] <- crit_den[j] + length(te_idx)
         } else {
           # Binomial: negative log-likelihood / deviance-like criterion
           p_hat <- pmin(pmax(preds_te, 1e-8), 1 - 1e-8)
           yy <- y_glm[te_idx]
-          if (is.null(w)) {
-            crit_num[j] <- crit_num[j] - sum(yy * log(p_hat) + (1 - yy) * log(1 - p_hat))
-            crit_den[j] <- crit_den[j] + length(te_idx)
-          } else {
-            w_te <- w[te_idx]
-            crit_num[j] <- crit_num[j] - sum(w_te * (yy * log(p_hat) + (1 - yy) * log(1 - p_hat)))
-            crit_den[j] <- crit_den[j] + sum(w_te)
-          }
+          crit_num[j] <- crit_num[j] - sum(yy * log(p_hat) + (1 - yy) * log(1 - p_hat))
+          crit_den[j] <- crit_den[j] + length(te_idx)
         }
       }
     }
@@ -837,7 +829,6 @@ glmnet_with_cv <- function(formula, data,
         nfolds_val   = nfolds_eff,
         repeats_val  = repeats,
         relaxed      = relaxed,
-        w            = w,
         note_extra   = "ridge_fallback_failed"
       ))
     }
@@ -864,7 +855,6 @@ glmnet_with_cv <- function(formula, data,
         nfolds_val   = nfolds_eff,
         repeats_val  = repeats,
         relaxed      = relaxed,
-        w            = w,
         note_extra   = "ridge_final_fit_failed"
       ))
     }
@@ -983,7 +973,14 @@ glmnet_with_cv <- function(formula, data,
       note_relax <- "final relaxed CV failed; coefs from glmnet (non-relaxed)"
       cv_obj_to_keep <- NULL
     } else {
-      coef_mat   <- as.matrix(stats::coef(cv_one, s = best_lambda))
+      # Choose the relaxed mixing parameter gamma with the same rule used for
+      # lambda, so that choose_rule governs both tuning parameters.
+      gamma_rule <- if (identical(choose_rule, "min")) "gamma.min" else "gamma.1se"
+      coef_mat <- if (inherits(cv_one, "cv.relaxed")) {
+        as.matrix(stats::coef(cv_one, s = best_lambda, gamma = gamma_rule))
+      } else {
+        as.matrix(stats::coef(cv_one, s = best_lambda))
+      }
       best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
       mm <- cbind("(Intercept)" = 1, X)
       y_pred <- as.numeric(mm %*% best_coefs[match(colnames(mm), names(best_coefs))])
@@ -991,7 +988,7 @@ glmnet_with_cv <- function(formula, data,
         # transform to probability scale for consistency with type = "response"
         y_pred <- 1 / (1 + exp(-y_pred))
       }
-      note_relax <- "coefs from cv.glmnet (relaxed)"
+      note_relax <- paste0("coefs from cv.glmnet (relaxed, ", gamma_rule, ")")
       if (isTRUE(is.null(dots$keep)) || isTRUE(dots$keep)) cv_obj_to_keep <- cv_one
     }
   } else {

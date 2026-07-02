@@ -71,14 +71,51 @@
 #'   binomial it uses the canonical logit link. The binomial response must be
 #'   numeric 0/1, logical, or a factor with exactly two levels (the second
 #'   level is treated as 1).
+#' @param complexity Character. Complexity measure used in the wAIC/wBIC
+#'   penalty term. One of:
+#'   \itemize{
+#'     \item \code{"support"} (default): the number of nonzero coefficients
+#'       (including the intercept), as described in the package references.
+#'       This is the classical unbiased degrees-of-freedom estimator for the
+#'       lasso (Zou, Hastie, and Tibshirani 2007).
+#'     \item \code{"edf"} (experimental, provided for further study): a
+#'       gamma-blended effective degrees of freedom. For an elastic-net path
+#'       point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
+#'       parameter \eqn{\alpha < 1}, the penalized fit's effective df is the
+#'       ridge-type trace
+#'       \eqn{\sum_j e_j / (e_j + n\lambda(1-\alpha))}, where \eqn{e_j} are
+#'       the eigenvalues of the weighted, standardized Gram matrix of the
+#'       active columns; the relaxed refit's df is the rank of the active
+#'       design. The blended complexity for relaxed mixing parameter
+#'       \eqn{\gamma} is
+#'       \eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
+#'       For \eqn{\alpha = 1} (lasso) this reduces exactly to the support
+#'       count, so \code{"edf"} differs from \code{"support"} only for
+#'       \eqn{\alpha < 1} path points, whose support count overstates their
+#'       effective complexity. Implemented for \code{family = "gaussian"}
+#'       only; binomial fits fall back to \code{"support"} with a warning.
+#'   }
+#'   The admissibility guardrail (path points with more than
+#'   \eqn{n_{eff,adm}} nonzero non-intercept coefficients are excluded) and
+#'   the reported model-size diagnostics always use the support count,
+#'   regardless of this setting. \code{"edf"} changes only the complexity
+#'   value inserted into the wAIC/wBIC penalty and is intended for simulation
+#'   study of the alpha/gamma comparison; the published SVEM results use
+#'   \code{"support"}.
 #' @param ... Additional arguments passed to \code{glmnet()}, such as
-#'   \code{penalty.factor}, \code{lower.limits}, \code{upper.limits},
-#'   \code{offset}, or \code{standardize.response}. Any user-supplied
-#'   \code{weights} are ignored (SVEMnet supplies its own bootstrap weights).
-#'   Any user-supplied \code{standardize} is ignored; SVEMnet always calls
+#'   \code{penalty.factor}, \code{lower.limits}, \code{upper.limits}, or
+#'   \code{standardize.response}. Any user-supplied \code{weights} are ignored
+#'   (SVEM supplies its own fractional random weights), any user-supplied
+#'   \code{offset} is ignored (SVEMnet does not support offsets), and any
+#'   user-supplied \code{standardize} is ignored; SVEMnet always calls
 #'   \code{glmnet} with \code{standardize = TRUE}. Glmnet algorithm-control
-#'   values supplied directly or through \code{control = list(...)} are routed
-#'   in a version-compatible way when possible.
+#'   values (for example \code{maxit} or \code{thresh}) supplied directly or
+#'   through \code{control = list(...)} are routed in a version-compatible way
+#'   when possible. The arguments \code{nlambda}, \code{lambda}, and
+#'   \code{lambda.min.ratio} are reserved and managed by SVEMnet
+#'   (\code{nlambda} is fixed at 500); user-supplied values are ignored with
+#'   a warning. Argument names that the installed \code{glmnet} does not
+#'   recognize are also ignored with a warning (misspelling protection).
 #'
 #' @return An object of class \code{"svem_model"} (and \code{"svem_binomial"}
 #'   when \code{family = "binomial"}) with components:
@@ -97,6 +134,11 @@
 #'   \item \code{best_lambdas}: Per-bootstrap lambda selected by the criterion.
 #'   \item \code{best_relax_gammas}: Per-bootstrap relaxed gamma selected when
 #'     \code{relaxed = TRUE}; \code{NA} otherwise.
+#'   \item \code{complexity}: The complexity measure actually used
+#'     (\code{"support"} or \code{"edf"}).
+#'   \item \code{best_edfs}: Per-bootstrap blended effective df of the
+#'     selected path point when \code{complexity = "edf"}; \code{NA}
+#'     otherwise.
 #'   \item \code{weight_scheme}: The weighting scheme that was used.
 #'   \item \code{relaxed}: Logical flag indicating whether relaxed paths were
 #'     used.
@@ -298,6 +340,11 @@
 #'
 #' @template ref-svem
 #'
+#' @references
+#' Zou, H., Hastie, T., & Tibshirani, R. (2007). On the "degrees of freedom"
+#' of the lasso. \emph{The Annals of Statistics}, 35(5), 2173–2192.
+#' \doi{10.1214/009053607000000127}
+#'
 #' @importFrom stats runif lm predict coef var model.frame model.matrix model.response delete.response IQR median
 #' @importFrom glmnet glmnet
 #'
@@ -410,7 +457,7 @@
 #' )
 #' str(out_b)
 #'
-#' #' ## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
+#' ## Example with blocking (requires SVEMnet to store sampling_schema$blocking)
 #' set.seed(2)
 #' df_block <- data.frame(
 #'   y1         = rnorm(40),
@@ -444,6 +491,7 @@ SVEMnet <- function(formula, data,
                     response = NULL,
                     unseen = c("warn_na","error"),
                     family = c("gaussian", "binomial"),
+                    complexity = c("support", "edf"),
                     ...) {
 
   ## ----------------- family handling -----------------
@@ -466,6 +514,14 @@ SVEMnet <- function(formula, data,
   objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
   unseen        <- match.arg(unseen)
+  complexity    <- match.arg(complexity)
+
+  if (identical(complexity, "edf") && fam_name == "binomial") {
+    warning("complexity = 'edf' is implemented for family = 'gaussian' only; ",
+            "using complexity = 'support'.")
+    complexity <- "support"
+  }
+  use_edf <- identical(complexity, "edf")
 
   ## ---- relaxed handling (supports logical or "auto") ----
   relaxed_input <- relaxed
@@ -820,6 +876,7 @@ SVEMnet <- function(formula, data,
   best_lambdas      <- rep(NA_real_, nBoot)
   best_relax_gammas <- rep(NA_real_, nBoot)
   k_sel_vec         <- rep(NA_integer_, nBoot)
+  edf_sel_vec       <- rep(NA_real_, nBoot)
   fallbacks         <- integer(nBoot)
   n_eff_keep        <- numeric(nBoot)
 
@@ -834,9 +891,23 @@ SVEMnet <- function(formula, data,
       warning("Ignoring user 'standardize'; SVEMnet always standardizes.")
       dots$standardize <- NULL
     }
+    if ("offset" %in% names(dots)) {
+      warning("Ignoring user 'offset'; SVEMnet does not support offsets.")
+      dots$offset <- NULL
+    }
     protected <- c("x","y","alpha","intercept","relax","standardize",
-                   "nlambda","maxit","lambda.min.ratio","lambda","family")
+                   "nlambda","lambda.min.ratio","lambda","family")
+    dropped_reserved <- intersect(names(dots), protected)
+    if (length(dropped_reserved)) {
+      warning("Ignoring reserved glmnet argument(s) managed by SVEMnet: ",
+              paste(dropped_reserved, collapse = ", "), ".")
+    }
     dots <- dots[setdiff(names(dots), protected)]
+
+    # glmnet() silently swallows unknown arguments; catch misspellings here
+    unknown <- .svem_unknown_glmnet_args(dots, funs = list(glmnet::glmnet),
+                                         context = "glmnet via SVEMnet")
+    if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]
   }
 
   glmnet_base_args <- .glmnet_prepare_call_args(
@@ -894,11 +965,26 @@ SVEMnet <- function(formula, data,
     w_train <- w_train * (n / sum(w_train))
     w_valid <- w_valid * (n / sum(w_valid))
 
+    ## complexity = "edf": per-replicate weighted standardized design and a
+    ## per-replicate eigenvalue cache keyed by active set. The Gram-matrix
+    ## eigenvalues depend only on the active set (not on lambda, alpha, or
+    ## gamma, which all enter the df formula analytically), so each unique
+    ## active set along the paths is decomposed once per replicate.
+    if (use_edf) {
+      mw  <- colSums(X * w_train) / n
+      Xc  <- sweep(X, 2, mw, "-")
+      vw  <- colSums(Xc^2 * w_train) / n
+      sdw <- sqrt(pmax(vw, .Machine$double.eps))
+      Xs_edf    <- sweep(Xc, 2, sdw, "/") * sqrt(w_train)
+      edf_cache <- new.env(parent = emptyenv())
+    }
+
     best_val_score <- Inf
     best_alpha     <- NA_real_
     best_lambda    <- NA_real_
     best_beta_hat  <- rep(NA_real_, p + 1L)
     best_k         <- NA_integer_
+    best_kpen      <- NA_real_
     best_relax_g   <- if (isTRUE(relax_flag)) NA_real_ else 1
 
     sumw  <- sum(w_valid); sumw2 <- sum(w_valid^2)
@@ -963,6 +1049,37 @@ SVEMnet <- function(formula, data,
         k_eff   <- 1L + k_slope
         logN_pen <- log(n_eff_adm)
 
+        ## complexity penalty values: identical to k_eff for "support" and
+        ## for lasso (alpha = 1) paths, where the support count is already
+        ## the classical lasso df (Zou, Hastie, and Tibshirani 2007).
+        ## For "edf" with alpha < 1, replace the count with the
+        ## gamma-blended effective df at each admissible path point.
+        k_pen <- k_eff
+        if (use_edf && alpha < 1 && length(fit$lambda) == L) {
+          k_pen <- as.numeric(k_eff)
+          lam2  <- n * fit$lambda * (1 - alpha)
+          adm   <- which(k_slope < n_eff_adm & k_slope > 0L)
+          for (jj in adm) {
+            slope <- coef_path[-1L, jj]
+            okf   <- is.finite(slope)
+            ms    <- if (any(okf)) max(abs(slope[okf])) else 0
+            tolj  <- max(1e-7 * max(1, ms), 1e-7)
+            act   <- which(okf & abs(slope) > tolj)
+            if (!length(act)) next
+            key <- paste(act, collapse = ",")
+            ev  <- edf_cache[[key]]
+            if (is.null(ev)) {
+              G  <- crossprod(Xs_edf[, act, drop = FALSE])
+              ev <- eigen(G, symmetric = TRUE, only.values = TRUE)$values
+              ev <- pmax(ev, 0)
+              edf_cache[[key]] <- ev
+            }
+            df_pen <- sum(ev / (ev + lam2[jj]))
+            r_act  <- sum(ev > ev[1L] * 1e-10)
+            k_pen[jj] <- 1 + relax_g * df_pen + (1 - relax_g) * r_act
+          }
+        }
+
         if (fam_name == "gaussian") {
           n_like <- sumw
           mse_w  <- adj_val_core / n_like
@@ -971,14 +1088,14 @@ SVEMnet <- function(formula, data,
                            "wAIC" = {
                              out <- rep(Inf, L)
                              mask <- (k_slope < n_eff_adm)
-                             out[mask] <- n_like * log(mse_w[mask]) + 2 * k_eff[mask]
+                             out[mask] <- n_like * log(mse_w[mask]) + 2 * k_pen[mask]
                              out
                            },
                            "wBIC" = {
                              out <- rep(Inf, L)
                              mask <- (k_slope < n_eff_adm)
                              out[mask] <- n_like * log(mse_w[mask]) +
-                               logN_pen * k_eff[mask]
+                               logN_pen * k_pen[mask]
                              out
                            },
                            stop("Unknown objective: ", objective_used))
@@ -1015,6 +1132,7 @@ SVEMnet <- function(formula, data,
           best_lambda    <- lambda_opt
           best_beta_hat  <- coef_path[, idx_min]
           best_k         <- k_raw[idx_min]
+          best_kpen      <- as.numeric(k_pen[idx_min])
           best_relax_g   <- relax_g
         }
       }
@@ -1032,6 +1150,7 @@ SVEMnet <- function(formula, data,
       best_alpha    <- NA_real_
       best_lambda   <- NA_real_
       best_k        <- 1L
+      best_kpen     <- 1
       best_relax_g  <- if (isTRUE(relax_flag)) NA_real_ else 1
     }
 
@@ -1040,6 +1159,7 @@ SVEMnet <- function(formula, data,
     best_lambdas[i]      <- best_lambda
     best_relax_gammas[i] <- best_relax_g
     k_sel_vec[i]         <- best_k
+    edf_sel_vec[i]       <- if (use_edf) best_kpen else NA_real_
   }
 
   ## ---- finalize ----
@@ -1050,6 +1170,7 @@ SVEMnet <- function(formula, data,
   best_lambdas      <- best_lambdas[valid_rows]
   best_relax_gammas <- best_relax_gammas[valid_rows]
   k_sel_vec         <- k_sel_vec[valid_rows]
+  edf_sel_vec       <- edf_sel_vec[valid_rows]
   fallbacks         <- fallbacks[valid_rows]
   n_eff_keep        <- n_eff_keep[valid_rows]
 
@@ -1175,6 +1296,8 @@ SVEMnet <- function(formula, data,
     best_relax_gammas = if (isTRUE(relax_flag)) best_relax_gammas else
       rep(NA_real_, length(best_alphas)),
     weight_scheme     = weight_scheme,
+    complexity        = complexity,
+    best_edfs         = edf_sel_vec,
     relaxed           = isTRUE(relax_flag),
     relaxed_input     = relaxed_input,
     dropped_alpha0_for_relaxed = dropped_alpha0_for_relaxed,

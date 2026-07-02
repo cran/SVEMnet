@@ -93,8 +93,8 @@ coef.svem_model <- function(object, debiased = FALSE, ...) {
 #' produces a quick \pkg{ggplot2} summary and/or prints a compact table.
 #'
 #' This function expects \code{object$coef_matrix} to contain the per-bootstrap
-#' coefficients (including an intercept column), typically created by
-#' \code{\link{SVEMnet}} when \code{save_boot = TRUE} (or similar) is enabled.
+#' coefficients (including an intercept column), which \code{\link{SVEMnet}}
+#' always stores in its fitted objects.
 #' Rows correspond to bootstrap fits; columns correspond to coefficients.
 #'
 #' @param object An object of class \code{svem_model} with a non-empty

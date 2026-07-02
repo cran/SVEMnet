@@ -1,5 +1,28 @@
 # NEWS for SVEMnet
 
+[3.2.3]
+- Maintenance release: edge-case hardening and documentation cleanup. No changes to default SVEMnet() fitting, prediction, whole-model testing, or scoring behavior.
+- User-supplied 'offset' is no longer accepted: SVEMnet() and glmnet_with_cv() ignore it with a warning (predictions and downstream scoring never carried offsets, so fitting with one produced inconsistent results). User-supplied 'weights' are likewise ignored with a warning in glmnet_with_cv(), matching SVEMnet(): the package controls its own weighting.
+- Misspelling protection: argument names in '...' that the installed glmnet does not recognize are now ignored with a warning in SVEMnet(), glmnet_with_cv(), and svem_significance_test_parallel() (glmnet itself silently swallows unknown arguments).
+- svem_significance_test_parallel() now validates mixture_groups against the model predictors (mirroring svem_random_table_multi()), so a misspelled mixture variable stops with an error instead of producing an off-simplex evaluation grid.
+- bigexp_terms() stops with a clear message when a categorical predictor has fewer than 2 levels in the training data.
+- svem_select_from_score_table() records the evaluated 'label' in its return value, and svem_export_candidates_csv() uses it for selection_label; top-set size reporting is now consistent with the PAM step.
+- New experimental option SVEMnet(complexity = "edf") for further study: uses a gamma-blended effective-degrees-of-freedom complexity in the wAIC/wBIC penalty (ridge-type trace for elastic-net path points, blended with the active-set rank by the relaxed gamma; Zou, Hastie, and Tibshirani 2007). Identical to the default "support" count for lasso (alpha = 1) paths; Gaussian only; not used by the whole-model test. The default complexity = "support" is unchanged and remains the published behavior.
+- DESCRIPTION and CITATION now reference the published package paper: Karl (2026), "SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments", Chemometrics and Intelligent Laboratory Systems, 271, 105660, doi:10.1016/j.chemolab.2026.105660.
+- glmnet_with_cv(): the non-default choose_rule = "1se" now follows the standard glmnet convention (largest lambda within one combined SE of the minimum). For relaxed fits, the relaxed mixing parameter gamma is now selected by the rule matching choose_rule ("gamma.min" for "min", "gamma.1se" for "1se"), and the relaxed lambda/gamma tuning flow is documented. Predictions in the final refit and ridge-fallback paths now pass newoffset when an offset is supplied.
+- Discrete-numeric sampling in svem_random_table_multi() and svem_significance_test_parallel() uses index-based sampling so single-value supports are preserved exactly.
+- bigexp_terms(): dot exclusions such as y ~ . - X1 are honored, and transformed right-hand-side terms (for example log(X1)) now stop upfront with a clear message.
+- svem_random_table_multi(): stops with an informative error when factor levels cannot be recovered from the model schema, instead of substituting placeholder levels.
+- svem_significance_test_parallel(): runs with nSVEM = 1 (or nPerm = 1); documented that weight_scheme is fixed to "SVEM" to match the whole-model test in Karl (2024).
+- svem_score_random(): the CI-width normalization anchors are computed from the sampled score_table and reused when scoring the original data, so uncertainty_measure is on a comparable scale in score_table and original_data_scored.
+- SVEMnet(): glmnet algorithm-control values such as maxit supplied directly are now routed in a version-compatible way (previously only control = list(...) was routed); reserved arguments (nlambda, lambda, lambda.min.ratio) are ignored with a warning.
+
+[3.2.2]
+- Documentation and example update clarifying candidate selection targets.
+- Clarify that `score`, per-response desirabilities, per-response weighted CI-width summaries, and `uncertainty_measure` are robust bounded summaries and may tie at 0 or 1 because of percentile clipping.
+- Update the example candidate-selection workflow to use raw prediction columns such as `<response>_pred` for single maximum-response selection, and a user-created raw CI-width column such as `<response>_ciw = <response>_upr - <response>_lwr` for widest-interval exploration.
+- No changes to SVEM fitting, scoring, prediction, or selection function behavior.
+
 [3.2.1]
 - Maintenance release for compatibility with glmnet 5.0 while preserving compatibility with glmnet 4.1-10.
 - Route glmnet algorithm-control values through per-call control lists when supported by the installed glmnet version, with legacy argument handling for older glmnet versions.

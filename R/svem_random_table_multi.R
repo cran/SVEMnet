@@ -127,7 +127,7 @@
 #'
 #' Models may be Gaussian or binomial. For binomial fits, predictions are
 #' returned on the probability scale (that is, on the response scale) by default,
-#' consistent with the default behaviour of \code{predict.svem_model()}.
+#' consistent with the default behavior of \code{predict.svem_model()}.
 #'
 #' @importFrom lhs randomLHS
 #' @importFrom stats rgamma
@@ -537,7 +537,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       vals <- sort(unique(as.numeric(vals)))
       vals <- vals[is.finite(vals)]
       if (!length(vals)) stop("Discrete support for '", v, "' is empty or non-finite.")
-      T_num_disc[[v]] <- sample(vals, n, replace = TRUE)
+      # index-based sampling avoids sample()'s 1:x behavior for length-one supports
+      T_num_disc[[v]] <- vals[sample.int(length(vals), n, replace = TRUE)]
     }
     T_num_disc <- as.data.frame(T_num_disc, stringsAsFactors = FALSE)
   }
@@ -571,7 +572,11 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     for (v in is_cat) {
       lev <- factor_levels[[v]]
       if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
-      if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
+      if (is.null(lev) || !length(lev)) {
+        stop("No recorded levels for categorical predictor '", v,
+             "' in sampling_schema or xlevels; cannot sample it. ",
+             "Refit the model with a version of SVEMnet() that records factor levels.")
+      }
       T_cat[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
     }
     T_cat <- as.data.frame(T_cat, stringsAsFactors = FALSE)
@@ -613,7 +618,11 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       } else if (is_block && !is_num_like) {
         lev <- factor_levels[[v]]
         if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
-        if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
+        if (is.null(lev) || !length(lev)) {
+          stop("No recorded levels for blocking variable '", v,
+               "' in sampling_schema or xlevels; cannot construct its reference level. ",
+               "Refit the model with a version of SVEMnet() that records factor levels.")
+        }
 
         mode_val <- NULL
         if (!is.null(ref$block_cat_modes) &&
@@ -631,7 +640,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
           vals <- sort(unique(as.numeric(discrete_map[[v]])))
           vals <- vals[is.finite(vals)]
           if (!length(vals)) stop("Discrete support for '", v, "' is empty or non-finite.")
-          T_data[[v]] <- sample(vals, n, replace = TRUE)
+          # index-based sampling avoids sample()'s 1:x behavior for length-one supports
+          T_data[[v]] <- vals[sample.int(length(vals), n, replace = TRUE)]
         } else {
           r <- num_ranges[, v]
           if (!all(is.finite(r))) stop("Numeric range for predictor '", v, "' must be finite.")
@@ -642,7 +652,11 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
       } else {
         lev <- factor_levels[[v]]
         if (is.null(lev) || !length(lev)) lev <- objects[[1]]$xlevels[[v]]
-        if (is.null(lev) || !length(lev)) lev <- c("L1", "L2")
+        if (is.null(lev) || !length(lev)) {
+          stop("No recorded levels for categorical predictor '", v,
+               "' in sampling_schema or xlevels; cannot sample it. ",
+               "Refit the model with a version of SVEMnet() that records factor levels.")
+        }
         T_data[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
       }
     }

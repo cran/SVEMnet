@@ -234,9 +234,14 @@ svem_export_candidates_csv <- function(...,
   idx       <- 0L
 
   for (sel in sels) {
-    # Extract a human-readable selection label from the call, if present
+    # Prefer the evaluated label stored in the selection object; fall back to
+    # deparsing the call for objects created by older SVEMnet versions (note
+    # that the deparse fallback yields the expression text, not its value,
+    # when a variable was passed as `label`).
     sel_label <- NA_character_
-    if (!is.null(sel$call) && is.language(sel$call)) {
+    if (!is.null(sel$label) && is.character(sel$label) && length(sel$label) == 1L) {
+      sel_label <- sel$label
+    } else if (!is.null(sel$call) && is.language(sel$call)) {
       call_obj <- sel$call
       if (!is.null(call_obj$label)) {
         lab_raw <- call_obj$label

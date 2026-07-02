@@ -44,6 +44,14 @@
 #'       \item pick a small, diverse set of medoid candidates for optimality or
 #'             exploration (e.g. high \code{uncertainty_measure}).
 #'     }
+#'     The robust bounded summaries \code{score}, per-response desirabilities,
+#'     per-response weighted CI-width summaries, and
+#'     \code{uncertainty_measure} may contain ties at 0 or 1 because of the
+#'     percentile clipping described below. If the intended single "best" row is
+#'     the largest raw predicted response, select on the corresponding
+#'     \code{<response>_pred} column. If the intended single exploration row is
+#'     the widest interval, create and select on a raw width column such as
+#'     \code{<response>_ciw = <response>_upr - <response>_lwr}.
 #'   \item Run selected candidates, append the new data, refit the SVEM models,
 #'         and repeat as needed.
 #' }
@@ -60,7 +68,11 @@
 #' Per-response anchors (acceptable lower/upper limits or target-band
 #' tolerances) can be supplied in \code{goals}; when not provided, robust
 #' defaults are inferred from the sampled responses using the q0.02–q0.98
-#' span.
+#' span. As a result, the largest few percent of predictions may share
+#' desirability 1 (and the smallest few percent may share desirability 0) when
+#' default anchors are used. This is intentional for robust desirability
+#' scoring. Use \code{<response>_pred} directly when selecting the single
+#' largest or smallest predicted response.
 #'
 #' Per-response desirabilities are combined into a single scalar \code{score}
 #' using either:
@@ -99,8 +111,10 @@
 #' bootstrap percentile CI width
 #' \eqn{\mathrm{CIwidth}_r(x) = u_r(x) - \ell_r(x)} and then map it to the
 #' unit interval using an affine rescaling based on the empirical q0.02 and
-#' q0.98 quantiles of the CI widths for that response (computed from the
-#' table being scored):
+#' q0.98 quantiles of the CI widths for that response. The quantile anchors
+#' are computed once from the sampled \code{score_table} and reused when
+#' scoring \code{data}, so \code{uncertainty_measure} in
+#' \code{original_data_scored} is on the same scale as in \code{score_table}:
 #' \deqn{
 #'   \tilde W_r(x) =
 #'   \frac{
@@ -117,7 +131,12 @@
 #' where \eqn{w_r} are the user-normalized response weights derived from
 #' \code{goals[[resp]]$weight}. Larger values of \code{uncertainty_measure}
 #' indicate settings where the ensemble CI is relatively wide compared to the
-#' response's typical scale and are natural targets for exploration.
+#' response's typical scale and are natural targets for exploration. Because
+#' the normalization clips at empirical q0.02 and q0.98, the widest few percent
+#' of intervals may share \code{uncertainty_measure = 1}. Use a raw interval
+#' width column such as
+#' \code{<response>_ciw = <response>_upr - <response>_lwr} when selecting the
+#' single widest interval.
 #' }
 #'
 #' \subsection{Spec-limit mean-level probabilities}{
@@ -885,14 +904,25 @@ svem_score_random <- function(objects,
   }
 
   # ---- uncertainty_measure from CI widths + store per-response CIs ----
-  .normalize01_robust <- function(x) {
+  # Anchors (q0.02/q0.98 of the CI widths) are computed once per response from
+  # the sampled score_table and reused when scoring 'data', so that
+  # uncertainty_measure in original_data_scored is on the same scale as in
+  # score_table (mirroring how ds_params are reused for desirabilities).
+  .ciw_anchors <- function(x) {
     a <- as.numeric(stats::quantile(x, probs = .q_lo, na.rm = TRUE, names = FALSE))
     b <- as.numeric(stats::quantile(x, probs = .q_hi, na.rm = TRUE, names = FALSE))
+    if (!is.finite(a) || !is.finite(b) || b <= a) return(NULL)
+    c(a, b)
+  }
+
+  .normalize01_robust <- function(x, anchors = NULL) {
+    if (is.null(anchors)) anchors <- .ciw_anchors(x)
 
     # If we can't compute a spread (all NA, constant widths, etc.), use neutral 0.5
-    if (!is.finite(a) || !is.finite(b) || b <= a) {
+    if (is.null(anchors)) {
       return(rep(0.5, length(x)))
     }
+    a <- anchors[1L]; b <- anchors[2L]
 
     out <- (pmin(pmax(x, a), b) - a) / (b - a)
 
@@ -901,6 +931,7 @@ svem_score_random <- function(objects,
     out
   }
 
+  ciw_anchors <- setNames(vector("list", length(resp_cols)), resp_cols)
 
   ciw_w_cols  <- list()
   ci_lwr_cols <- list()
@@ -932,7 +963,8 @@ svem_score_random <- function(objects,
     ci_upr_cols[[paste0(r, "_upr")]] <- upr
 
     width <- upr - lwr
-    zc    <- .normalize01_robust(width)
+    ciw_anchors[[r]] <- .ciw_anchors(width)
+    zc    <- .normalize01_robust(width, anchors = ciw_anchors[[r]])
     ciw_w_cols[[paste0(r, "_ciw_w")]] <- as.numeric(wts_uncert[r]) * zc
   }
 
@@ -1023,7 +1055,15 @@ svem_score_random <- function(objects,
     ciw_w_orig <- list()
     for (r in resp_names) {
       width <- ci_upr[[r]] - ci_lwr[[r]]
-      zc <- .normalize01_robust(width)
+      # reuse the anchors from the sampled score_table for comparability;
+      # if the score_table anchors were degenerate (all-NA/constant widths),
+      # the score_table values were neutral 0.5, so match that here rather
+      # than recomputing local anchors
+      zc <- if (is.null(ciw_anchors[[r]])) {
+        rep(0.5, length(width))
+      } else {
+        .normalize01_robust(width, anchors = ciw_anchors[[r]])
+      }
       ciw_w_orig[[paste0(r, "_ciw_w")]] <- as.numeric(wts_uncert[r]) * zc
     }
 

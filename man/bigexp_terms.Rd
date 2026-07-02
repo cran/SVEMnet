@@ -25,8 +25,13 @@ bigexp_terms(
 \item{formula}{Main-effects formula of the form \code{y ~ X1 + X2 + G} or
 \code{y ~ .}. The right-hand side should contain main effects only; do not
 include \code{:} (interactions), \code{^} (factorial shortcuts),
-\code{I()} powers, or inline polynomial expansions. The helper will
-generate interactions and polynomial terms automatically.}
+\code{I()} powers, transformed terms such as \code{log(X1)}, or inline
+polynomial expansions. The helper will generate interactions and
+polynomial terms automatically. Dot exclusions such as
+\code{y ~ . - X1} are honored. Note that with \code{y ~ .} every
+non-response column of \code{data} becomes a predictor, including any
+other response columns present in the data frame; list the main effects
+explicitly (or use exclusions) when the data holds several responses.}
 
 \item{data}{Data frame used to decide types and lock factor levels.}
 

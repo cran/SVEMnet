@@ -27,8 +27,8 @@
 #' Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
 #' assigned seed before performing any random draws (including permutations and
 #' the bootstrap randomness inside \code{SVEMnet()}).
-#' This makes results reproducible regardless of worker scheduling (including
-#' \code{preschedule = FALSE}) and independent of the number of cores.
+#' This makes results reproducible regardless of worker scheduling and
+#' independent of the number of cores.
 #'
 #' The function can optionally reuse a deterministic, locked expansion built
 #' with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -65,8 +65,10 @@
 #'   (default \code{100}).
 #' @param glmnet_alpha Numeric vector of \code{glmnet} alpha values
 #'   (default \code{c(1)}).
-#' @param weight_scheme Weighting scheme for SVEM (default \code{"SVEM"}).
-#'   Passed to \code{SVEMnet()}.
+#' @param weight_scheme Weighting scheme for the inner SVEM fits. Only
+#'   \code{"SVEM"} is accepted: the whole-model test in Karl (2024) is defined
+#'   for the anti-correlated fractional-random-weight scheme, so the other
+#'   \code{SVEMnet()} weighting schemes are intentionally not offered here.
 #' @param objective Objective used inside \code{SVEMnet()} to pick the bootstrap
 #'   path solution. One of \code{"wAIC"}, \code{"wBIC"}, or
 #'   \code{"wSSE"} (default \code{"wAIC"}).
@@ -106,11 +108,14 @@
 #'   \code{spec$settings$contrasts_options} on the parallel workers for
 #'   deterministic factor coding.
 #' @param ... Additional arguments passed to \code{SVEMnet()} and then to
-#'   \code{glmnet()} (for example: \code{penalty.factor}, \code{offset},
+#'   \code{glmnet()} (for example: \code{penalty.factor},
 #'   \code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
 #'   The \code{relaxed} setting is controlled by the \code{relaxed} argument of
 #'   this function and any \code{relaxed} value passed via \code{...} is ignored
-#'   with a warning.
+#'   with a warning. User \code{weights} and \code{offset} are not supported
+#'   (SVEM controls its own weighting). Argument names that neither
+#'   \code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
+#'   with a warning (misspelling protection).
 #'
 #' @return An object of class \code{"svem_significance_test"}, a list with
 #'   components:
@@ -384,6 +389,34 @@ svem_significance_test_parallel <- function(
     dots$relaxed <- NULL
   }
 
+  if ("complexity" %in% names(dots)) {
+    warning("Ignoring 'complexity' in '...'; the whole-model test always uses ",
+            "the support-count complexity measure of Karl (2024).")
+    dots$complexity <- NULL
+  }
+
+  # Warn here (on the master) about arguments SVEMnet() would drop on the
+  # workers, where warnings are invisible.
+  if ("weights" %in% names(dots)) {
+    warning("Ignoring user 'weights'; SVEM uses its own bootstrap weights.")
+    dots$weights <- NULL
+  }
+  if ("offset" %in% names(dots)) {
+    warning("Ignoring user 'offset'; SVEMnet does not support offsets.")
+    dots$offset <- NULL
+  }
+
+  # Validate remaining '...' names on the master before spawning workers:
+  # SVEMnet()/glmnet() warnings raised inside %dopar% iterations are not
+  # visible on the default PSOCK cluster, so a misspelled argument would
+  # otherwise vanish silently.
+  unknown <- .svem_unknown_glmnet_args(
+    dots,
+    funs = list(SVEMnet, glmnet::glmnet),
+    context = "SVEMnet/glmnet via svem_significance_test_parallel"
+  )
+  if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]
+
   # ---------------------------------------------------------------------------
   # Training design pieces (ROBUST TO NA IN RESPONSE/PREDICTORS):
   # - build model.frame with na.pass so we can explicitly filter
@@ -422,10 +455,27 @@ svem_significance_test_parallel <- function(
     disc_levels      <- list()
   }
 
-  # Mixture bookkeeping
+  # Mixture bookkeeping and validation (mirrors svem_random_table_multi):
+  # every mixture variable must be a continuous numeric predictor of the
+  # model, otherwise the evaluation grid silently leaves the simplex.
   mixture_vars <- character(0)
   if (!is.null(mixture_groups)) {
-    for (grp in mixture_groups) mixture_vars <- c(mixture_vars, grp$vars)
+    for (grp in mixture_groups) {
+      if (is.null(grp$vars) || !is.character(grp$vars) || !length(grp$vars)) {
+        stop("Each mixture group must contain a nonempty 'vars' character vector.")
+      }
+      missing_mix <- setdiff(grp$vars, predictor_vars)
+      if (length(missing_mix)) {
+        stop("Mixture variables not in model predictors: ",
+             paste(missing_mix, collapse = ", "))
+      }
+      bad_mix <- setdiff(grp$vars, continuous_vars)
+      if (length(bad_mix)) {
+        stop("Mixture variables must be continuous numeric predictors. ",
+             "Offending vars: ", paste(bad_mix, collapse = ", "))
+      }
+      mixture_vars <- c(mixture_vars, grp$vars)
+    }
     if (any(duplicated(mixture_vars))) {
       dups <- unique(mixture_vars[duplicated(mixture_vars)])
       stop("Mixture variables appear in multiple groups: ", paste(dups, collapse = ", "))
@@ -488,7 +538,8 @@ svem_significance_test_parallel <- function(
         lv <- as.numeric(lv)
         lv <- lv[is.finite(lv)]
         if (length(lv) < 1L) stop("No finite discrete levels available for '", v, "'.")
-        sample(lv, nPoint, replace = TRUE)
+        # index-based sampling avoids sample()'s 1:x behavior for length-one supports
+        lv[sample.int(length(lv), nPoint, replace = TRUE)]
       })
       Td <- as.data.frame(Td, check.names = FALSE, optional = FALSE)
       names(Td) <- disc_nonmix
@@ -620,8 +671,7 @@ svem_significance_test_parallel <- function(
   M_Y <- foreach::foreach(
     i = 1:nSVEM,
     .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats"),
-    .options.snow = list(preschedule = FALSE)
+    .packages = c("SVEMnet", "glmnet", "stats")
   ) %dopar% {
     # ensure deterministic RNG per iteration, independent of scheduling/cores
     ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
@@ -653,8 +703,7 @@ svem_significance_test_parallel <- function(
   M_pi_Y <- foreach::foreach(
     jloop = 1:nPerm,
     .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats"),
-    .options.snow = list(preschedule = FALSE)
+    .packages = c("SVEMnet", "glmnet", "stats")
   ) %dopar% {
     ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
     if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
@@ -701,6 +750,10 @@ svem_significance_test_parallel <- function(
   }
 
   # Gather and check
+  # foreach(.combine = rbind) returns a plain vector when there is a single
+  # iteration; coerce to a one-row matrix so the row filtering below works
+  if (!is.matrix(M_Y))    M_Y    <- matrix(M_Y, nrow = 1L)
+  if (!is.matrix(M_pi_Y)) M_pi_Y <- matrix(M_pi_Y, nrow = 1L)
   M_Y    <- M_Y[stats::complete.cases(M_Y), , drop = FALSE]
   M_pi_Y <- M_pi_Y[stats::complete.cases(M_pi_Y), , drop = FALSE]
   if (nrow(M_Y) == 0)    stop("All SVEM fits on the original data failed.")

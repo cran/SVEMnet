@@ -103,7 +103,7 @@ variables are not allowed to be mixture variables.
 
 Models may be Gaussian or binomial. For binomial fits, predictions are
 returned on the probability scale (that is, on the response scale) by default,
-consistent with the default behaviour of \code{predict.svem_model()}.
+consistent with the default behavior of \code{predict.svem_model()}.
 }
 \section{Typical workflow}{
 

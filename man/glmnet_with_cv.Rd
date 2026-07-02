@@ -59,10 +59,15 @@ inside each training fold (requires \code{glmnet} >= 4.1-2).}
 
 \item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet()} and
 \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
-\code{gamma} path (default \code{FALSE}). If
-\code{cv.glmnet(relax = TRUE)} fails for a particular repeat/alpha, the
-function retries that fit without relaxation; the number of such
-fallbacks is recorded in \code{meta$relax_cv_fallbacks}.}
+\code{gamma} path (default \code{FALSE}). Lambda is tuned by the
+repeated cross-validation on the standard (gamma = 1) path statistics;
+the relaxed gamma is then selected within the final
+\code{cv.glmnet(relax = TRUE)} call using \code{"gamma.min"} when
+\code{choose_rule = "min"} and \code{"gamma.1se"} when
+\code{choose_rule = "1se"}. If \code{cv.glmnet(relax = TRUE)} fails for
+a particular repeat/alpha, the function retries that fit without
+relaxation; the number of such fallbacks is recorded in
+\code{meta$relax_cv_fallbacks}.}
 
 \item{relax_gamma}{Optional numeric vector passed as \code{gamma=} to
 \code{glmnet()} and \code{cv.glmnet()} when \code{relaxed = TRUE}. If
@@ -76,16 +81,21 @@ with exactly 2 levels (the second level is treated as 1). Non-canonical
 links are not supported.}
 
 \item{...}{Additional arguments forwarded to both \code{cv.glmnet()} and
-\code{glmnet()}, for example: \code{weights}, \code{parallel},
-\code{type.measure}, \code{intercept},
-\code{lower.limits}, \code{upper.limits}, \code{penalty.factor},
-\code{offset}, \code{standardize.response}, \code{keep}, and so on.
+\code{glmnet()}, for example: \code{parallel}, \code{type.measure},
+\code{intercept}, \code{lower.limits}, \code{upper.limits},
+\code{penalty.factor}, \code{standardize.response}, \code{keep}, and so
+on. Any user-supplied \code{weights} or \code{offset} are ignored with a
+warning: \code{glmnet_with_cv()} returns objects meant for side-by-side
+comparison with \code{SVEMnet()} fits, whose weighting is controlled by
+the SVEM scheme, and downstream prediction helpers do not carry
+observation weights or offsets.
 Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
 \code{dfmax}, and \code{pmax} may be supplied directly for compatibility
 or via \code{control = list(...)} with glmnet versions that support it;
 they are routed in a version-compatible way when possible. If
 \code{family} is supplied here, it is ignored in favor of the explicit
-\code{family} argument.}
+\code{family} argument. Argument names that the installed \code{glmnet}
+does not recognize are ignored with a warning (misspelling protection).}
 }
 \value{
 A list of class \code{c("svem_cv","svem_model")} with elements:
@@ -144,9 +154,12 @@ Repeated K-fold cross-validation over a per-alpha lambda path, with a
 combined 1-SE rule across repeats. Preserves fields expected by
 \code{predict.svem_model()} and internal prediction helpers. Optionally uses
 \code{glmnet}'s built-in relaxed elastic net for both the warm-start path and
-each CV fit. When \code{relaxed = TRUE}, the final coefficients are taken
-from a \code{cv.glmnet()} object at the chosen lambda so that the returned
-model reflects the relaxed solution (including its chosen gamma).
+each CV fit. When \code{relaxed = TRUE}, lambda is tuned by the repeated
+cross-validation described below and the final coefficients are then taken
+from a \code{cv.glmnet(relax = TRUE)} object at that lambda, with the
+relaxed mixing parameter gamma selected by the rule matching
+\code{choose_rule} (\code{"gamma.min"} for \code{"min"}, \code{"gamma.1se"}
+for \code{"1se"}).
 }
 \details{
 This function is a convenience wrapper around \code{glmnet()} and
@@ -216,7 +229,7 @@ SVEM-style bootstrap weighting or ensembling.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (o1-preview through GPT-5 Pro) were
+OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
 used to assist with coding and roxygen documentation; all
 content was reviewed and finalized by the author.
 }
@@ -274,6 +287,8 @@ fit_bin <- glmnet_with_cv(
 
 }
 \references{
+Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}
+
 Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
 
 Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}

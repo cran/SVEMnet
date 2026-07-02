@@ -2,6 +2,46 @@
   c("thresh", "maxit", "dfmax", "pmax", "trace.it")
 }
 
+# Names accepted inside control = list(...): the legacy direct-control set plus
+# whatever the installed glmnet's glmnet.control() understands.
+.svem_known_control_keys <- function() {
+  ctl <- tryCatch(names(formals(glmnet::glmnet.control)),
+                  error = function(e) character(0))
+  unique(c(.glmnet_direct_control_args(), ctl))
+}
+
+# Warn about (and return) argument names that none of the target glmnet
+# functions understand. glmnet() itself silently swallows unknown arguments
+# through its '...', so misspelled arguments would otherwise vanish without
+# any feedback.
+.svem_unknown_glmnet_args <- function(dots,
+                                      funs = list(glmnet::glmnet),
+                                      extra_allowed = character(0),
+                                      context = "glmnet",
+                                      warn = TRUE) {
+  nms <- names(dots)
+  if (is.null(nms) || !length(nms)) return(character(0))
+  nms <- nms[nzchar(nms)]
+  if (!length(nms)) return(character(0))
+
+  allowed <- unique(c(
+    unlist(lapply(funs, function(f) names(formals(f)))),
+    "control",
+    .svem_known_control_keys(),
+    extra_allowed
+  ))
+  unknown <- setdiff(nms, allowed)
+  if (length(unknown) && isTRUE(warn)) {
+    warning(
+      "Ignoring unrecognized argument(s) passed to ", context, ": ",
+      paste(unknown, collapse = ", "),
+      ". Check for misspellings; glmnet silently ignores unknown arguments.",
+      call. = FALSE
+    )
+  }
+  unknown
+}
+
 .glmnet_supports_control <- function(fun) {
   "control" %in% names(formals(fun))
 }

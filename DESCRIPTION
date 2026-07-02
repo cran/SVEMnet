@@ -2,15 +2,15 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.2.1
-Date: 2026-06-02
+Version: 3.2.3
+Date: 2026-07-01
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
            email = "akarl@asu.edu",
            role = c("cre", "aut"),
            comment = c(ORCID = "0000-0002-5933-8706"))
-Description: Tools for fitting self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) in small-sample design-of-experiments and related workflows, using elastic net and relaxed elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Package code was drafted with assistance from generative AI tools.
+Description: Tools for fitting self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) in small-sample design-of-experiments and related workflows, using elastic net and relaxed elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). The package and its workflows are described in Karl (2026) <doi:10.1016/j.chemolab.2026.105660>. Package code was drafted with assistance from generative AI tools.
 URL: https://arxiv.org/abs/2511.20968
 Depends: R (>= 4.0.0)
 Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, lhs, foreach,
@@ -23,9 +23,9 @@ Config/testthat/edition: 3
 LazyData: true
 Config/roxygen2/version: 8.0.0
 NeedsCompilation: no
-Packaged: 2026-06-02 22:07:21 UTC; andre
+Packaged: 2026-07-02 02:13:27 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2026-06-02 22:20:02 UTC
+Date/Publication: 2026-07-02 05:50:02 UTC

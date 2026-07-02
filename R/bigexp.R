@@ -182,8 +182,13 @@
 #' @param formula Main-effects formula of the form \code{y ~ X1 + X2 + G} or
 #'   \code{y ~ .}. The right-hand side should contain main effects only; do not
 #'   include \code{:} (interactions), \code{^} (factorial shortcuts),
-#'   \code{I()} powers, or inline polynomial expansions. The helper will
-#'   generate interactions and polynomial terms automatically.
+#'   \code{I()} powers, transformed terms such as \code{log(X1)}, or inline
+#'   polynomial expansions. The helper will generate interactions and
+#'   polynomial terms automatically. Dot exclusions such as
+#'   \code{y ~ . - X1} are honored. Note that with \code{y ~ .} every
+#'   non-response column of \code{data} becomes a predictor, including any
+#'   other response columns present in the data frame; list the main effects
+#'   explicitly (or use exclusions) when the data holds several responses.
 #' @param data Data frame used to decide types and lock factor levels.
 #' @param factorial_order Integer >= 1. Maximum order of factorial interactions
 #'   among the non-blocking main effects. For example, 1 gives main effects
@@ -464,11 +469,17 @@ bigexp_terms <- function(formula, data,
   if (length(vars) && any(vars == ".")) {
     vars <- vars[vars != "."]
   }
-  if ((length(vars) == 0L && dot_rhs) || dot_rhs) {
-    # Use training-data columns, excluding the response.
-    # IMPORTANT: if blocking is supplied, exclude blocking variables from the
-    # non-blocking predictor set so they do not trigger a conflict.
-    vars <- setdiff(names(data), c(resp, blocking))
+  if (dot_rhs) {
+    # '.' was expanded by terms() against 'data', so term.labels already honor
+    # exclusions such as 'y ~ . - X1'. Blocking variables are excluded here
+    # because they are added separately via the 'blocking' argument.
+    if (length(vars)) {
+      vars <- setdiff(vars, blocking)
+    } else {
+      # Fallback when '.' did not expand: use training-data columns,
+      # excluding the response and blocking variables.
+      vars <- setdiff(names(data), c(resp, blocking))
+    }
   }
 
   if (!length(vars) && !length(blocking)) {
@@ -491,6 +502,20 @@ bigexp_terms <- function(formula, data,
 
   ## All predictors in the spec: union of RHS vars and blocking cols
   vars_all <- if (length(blocking)) unique(c(vars, blocking)) else vars
+
+  ## Every predictor must be an actual column of 'data'. Transformed RHS terms
+  ## such as log(X1) or poly(X1, 2) produce term labels that are not columns;
+  ## catch them here with a clear message instead of failing later in
+  ## bigexp_prepare() with a confusing "missing predictor" error.
+  missing_cols <- setdiff(vars_all, names(data))
+  if (length(missing_cols)) {
+    stop(
+      "Predictor(s) not found as columns in 'data': ",
+      paste(missing_cols, collapse = ", "),
+      ". bigexp_terms() supports only untransformed main effects on the RHS; ",
+      "apply any transformations to the data before calling bigexp_terms()."
+    )
+  }
 
   # ---- discrete-numeric parsing (record-only; modeling stays numeric) ----
   discrete_numeric_vars   <- character(0L)
@@ -623,6 +648,18 @@ bigexp_terms <- function(formula, data,
       fx <- factor(x)
       levels_list[[v]] <- levels(fx)
       dat0[[v]] <- fx
+    }
+  }
+
+  ## Categorical predictors need at least 2 observed levels; otherwise
+  ## model.matrix() fails later with an unhelpful base-R contrasts error.
+  for (v in vars_all) {
+    if (isTRUE(is_cat[[v]]) && length(levels_list[[v]]) < 2L) {
+      stop(
+        "Categorical predictor '", v, "' has fewer than 2 levels in the ",
+        "training data (it is constant or all-missing). Remove it from the ",
+        "formula/blocking, or supply data in which it varies."
+      )
     }
   }
 
