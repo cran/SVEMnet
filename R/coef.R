@@ -38,17 +38,16 @@
 #'   quick stability plot.
 #'
 #' @examples
-#' \donttest{
 #'   set.seed(1)
-#'   n  <- 200
+#'   n  <- 50
 #'   x1 <- rnorm(n)
 #'   x2 <- rnorm(n)
 #'   eps <- rnorm(n, sd = 0.3)
 #'   y_g <- 1 + 2*x1 - 0.5*x2 + eps
 #'   dat_g <- data.frame(y_g, x1, x2)
 #'
-#'   # Small nBoot to keep runtime light in examples
-#'   fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g, nBoot = 30, relaxed = TRUE)
+#'   fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g,
+#'                    nBoot = 10, glmnet_alpha = 1, relaxed = FALSE)
 #'
 #'   # Ensemble-averaged coefficients
 #'   cc <- coef(fit_g)
@@ -57,23 +56,6 @@
 #'   # Debiased (only if available for Gaussian fits)
 #'   ccd <- coef(fit_g, debiased = TRUE)
 #'   head(ccd)
-#'
-#'   # Binomial example (0/1 outcome)
-#'   set.seed(2)
-#'   n  <- 250
-#'   x1 <- rnorm(n)
-#'   x2 <- rnorm(n)
-#'   eta <- -0.4 + 1.1*x1 - 0.7*x2
-#'   p   <- 1/(1+exp(-eta))
-#'   y_b <- rbinom(n, 1, p)
-#'   dat_b <- data.frame(y_b, x1, x2)
-#'
-#'   fit_b <- SVEMnet(y_b ~ x1 + x2, data = dat_b,
-#'                    family = "binomial", nBoot = 30, relaxed = TRUE)
-#'
-#'   # Averaged coefficients (binomial; debiased is ignored)
-#'   coef(fit_b)
-#' }
 #'
 #' @export
 #' @method coef svem_model
@@ -139,10 +121,8 @@ coef.svem_model <- function(object, debiased = FALSE, ...) {
 #'   (optionally debiased) coefficients.
 #'
 #' @examples
-#' \donttest{
-#'   ## ---------- Gaussian demo ----------
 #'   set.seed(10)
-#'   n  <- 220
+#'   n  <- 60
 #'   x1 <- rnorm(n)
 #'   x2 <- rnorm(n)
 #'   x3 <- rnorm(n)
@@ -150,30 +130,11 @@ coef.svem_model <- function(object, debiased = FALSE, ...) {
 #'   y   <- 0.7 + 1.5*x1 - 0.8*x2 + 0.05*x3 + eps
 #'   dat <- data.frame(y, x1, x2, x3)
 #'
-#'   fit <- SVEMnet(y ~ (x1 + x2 + x3)^2, data = dat,
-#'                  nBoot = 40, relaxed = TRUE)
+#'   fit <- SVEMnet(y ~ x1 + x2 + x3, data = dat,
+#'                  nBoot = 10, glmnet_alpha = 1, relaxed = FALSE)
 #'
-#'   # Table + plot of bootstrap nonzero percentages
-#'   nz <- svem_nonzero(fit, tol = 1e-7, plot = TRUE, print_table = TRUE)
+#'   nz <- svem_nonzero(fit, tol = 1e-7, plot = FALSE, print_table = TRUE)
 #'   head(nz)
-#'
-#'   ## ---------- Binomial demo ----------
-#'   set.seed(11)
-#'   n  <- 260
-#'   x1 <- rnorm(n)
-#'   x2 <- rnorm(n)
-#'   x3 <- rnorm(n)
-#'   lp <- -0.3 + 0.9*x1 - 0.6*x2 + 0.2*x3
-#'   p  <- 1/(1+exp(-lp))
-#'   y  <- rbinom(n, 1, p)
-#'   dat_b <- data.frame(y, x1, x2, x3)
-#'
-#'   fit_b <- SVEMnet(y ~ x1 + x2 + x3, data = dat_b,
-#'                    family = "binomial", nBoot = 40, relaxed = TRUE)
-#'
-#'   # Still summarizes bootstrap selection frequencies for binomial fits
-#'   svem_nonzero(fit_b, plot = TRUE, print_table = TRUE)
-#' }
 #'
 #' @import ggplot2
 #' @export

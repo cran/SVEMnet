@@ -1,3 +1,275 @@
+.svem_wmt_set_rngkind <- function(sample_kind) {
+  suppressWarnings(RNGkind(kind = "L'Ecuyer-CMRG", sample.kind = sample_kind))
+  invisible(NULL)
+}
+
+.svem_wmt_seed_add <- function(seed, add) {
+  if (is.null(seed)) return(NULL)
+  out <- (as.double(seed) + as.double(add)) %% as.double(.Machine$integer.max)
+  as.integer(ifelse(out <= 0, 1, out))
+}
+
+.svem_wmt_make_iter_seeds <- function(n, base_seed = NULL,
+                                      sample_kind = "Rejection") {
+  .svem_wmt_set_rngkind(sample_kind)
+  if (!is.null(base_seed)) set.seed(as.integer(base_seed))
+  sample.int(.Machine$integer.max, n)
+}
+
+.svem_wmt_worker_setup <- function(contrasts_opts, sample_kind, normal_kind) {
+  suppressWarnings(
+    RNGkind(
+      kind = "L'Ecuyer-CMRG",
+      normal.kind = normal_kind,
+      sample.kind = sample_kind
+    )
+  )
+  options(contrasts = contrasts_opts)
+  if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
+    RhpcBLASctl::blas_set_num_threads(1)
+    RhpcBLASctl::omp_set_num_threads(1)
+  } else {
+    Sys.setenv(
+      OMP_NUM_THREADS = "1",
+      MKL_NUM_THREADS = "1",
+      OPENBLAS_NUM_THREADS = "1",
+      VECLIB_MAXIMUM_THREADS = "1",
+      NUMEXPR_NUM_THREADS = "1"
+    )
+  }
+  NULL
+}
+
+.svem_wmt_lapply <- function(tasks, fun, nCore, contrasts_opts, sample_kind,
+                             normal_kind = "Inversion", ...) {
+  if (nCore == 1L) {
+    old_contrasts <- getOption("contrasts")
+    on.exit(options(contrasts = old_contrasts), add = TRUE)
+    options(contrasts = contrasts_opts)
+    return(lapply(tasks, fun, ...))
+  }
+
+  cl <- parallel::makeCluster(nCore)
+  on.exit(parallel::stopCluster(cl), add = TRUE)
+  parallel::clusterCall(
+    cl, .svem_wmt_worker_setup,
+    contrasts_opts = contrasts_opts,
+    sample_kind = sample_kind,
+    normal_kind = normal_kind
+  )
+  parallel::parLapplyLB(cl, tasks, fun, ...)
+}
+
+.svem_wmt_fit_task <- function(task, f_use, data_fit, resp_name, nBoot,
+                               glmnet_alpha, weight_scheme, objective, relaxed,
+                               dots, T_data, y_mean, rng_sample_kind,
+                               rng_normal_kind = "Inversion",
+                               fit_fun = NULL, predict_fun = NULL) {
+  if (is.null(fit_fun)) fit_fun <- getExportedValue("SVEMnet", "SVEMnet")
+  if (is.null(predict_fun)) predict_fun <- stats::predict
+
+  suppressWarnings(
+    RNGkind(
+      kind = "L'Ecuyer-CMRG",
+      normal.kind = rng_normal_kind,
+      sample.kind = rng_sample_kind
+    )
+  )
+  set.seed(task$seed)
+
+  fit_data <- data_fit
+  if (identical(task$type, "permutation")) {
+    # Draw this once, before any fitting attempt, so retries hold the exact
+    # permutation fixed and alter only the inner SVEM random weights.
+    perm_idx <- sample.int(nrow(data_fit), replace = FALSE)
+    fit_data[[resp_name]] <- data_fit[[resp_name]][perm_idx]
+  }
+
+  failures <- character(0L)
+  for (attempt in seq_len(3L)) {
+    # Attempt one retains the historical per-slot stream. Retry streams are
+    # deterministic and schedule-independent.
+    if (attempt > 1L) {
+      retry_seed <- (
+        as.double(task$seed) + 3000001 + (attempt - 2L) * 104729
+      ) %% as.double(.Machine$integer.max)
+      set.seed(as.integer(ifelse(retry_seed <= 0, 1, retry_seed)))
+    }
+
+    fit <- tryCatch(
+      do.call(fit_fun, c(list(
+        formula = f_use,
+        data = fit_data,
+        nBoot = nBoot,
+        glmnet_alpha = glmnet_alpha,
+        weight_scheme = weight_scheme,
+        objective = objective,
+        relaxed = relaxed
+      ), dots)),
+      error = function(e) e
+    )
+    if (inherits(fit, "error")) {
+      failures <- c(failures, paste0("fit: ", conditionMessage(fit)))
+      next
+    }
+
+    pred <- tryCatch(
+      predict_fun(fit, newdata = T_data, debias = FALSE, se.fit = TRUE),
+      error = function(e) e
+    )
+    if (inherits(pred, "error")) {
+      failures <- c(failures, paste0("prediction: ", conditionMessage(pred)))
+      next
+    }
+
+    fit_values <- as.numeric(pred$fit)
+    member_sd <- as.numeric(pred$se.fit)
+    if (length(fit_values) != nrow(T_data) ||
+        length(member_sd) != nrow(T_data)) {
+      failures <- c(failures, "prediction: unexpected output length")
+      next
+    }
+    if (any(!is.finite(fit_values))) {
+      failures <- c(failures, "prediction: non-finite fitted values")
+      next
+    }
+    if (any(!is.finite(member_sd) | member_sd <= 0)) {
+      failures <- c(failures, "prediction: nonpositive or non-finite member SD")
+      next
+    }
+
+    surface <- (fit_values - y_mean) / member_sd
+    if (any(!is.finite(surface))) {
+      failures <- c(failures, "prediction: non-finite standardized surface")
+      next
+    }
+    return(list(
+      ok = TRUE,
+      surface = surface,
+      retries = attempt - 1L,
+      retry_failures = failures
+    ))
+  }
+
+  list(
+    ok = FALSE,
+    surface = NULL,
+    retries = 2L,
+    retry_failures = failures
+  )
+}
+
+.svem_wmt_abort_failed_slots <- function(results, label) {
+  ok <- vapply(results, `[[`, logical(1L), "ok")
+  if (all(ok)) return(invisible(NULL))
+
+  bad <- which(!ok)
+  reasons <- unlist(lapply(results[bad], `[[`, "retry_failures"),
+                    use.names = FALSE)
+  reason_table <- sort(table(reasons), decreasing = TRUE)
+  summary <- if (length(reason_table)) {
+    paste0(names(reason_table), " (", as.integer(reason_table), "x)",
+           collapse = "; ")
+  } else {
+    "unknown failure"
+  }
+  stop(
+    length(bad), " of ", length(results), " requested ", label,
+    " fit slot(s) failed after three attempts; no fits were dropped. ",
+    "Failure summary: ", summary,
+    call. = FALSE
+  )
+}
+
+.svem_wmt_component_count <- function(evalues, percent) {
+  cumulative <- cumsum(evalues) / sum(evalues) * 100
+  selected <- which(cumulative > percent)[1L]
+  if (is.na(selected)) length(evalues) else selected
+}
+
+.svem_wmt_reduce_surfaces <- function(M_Y, M_pi_Y, percent) {
+  M_Y <- as.matrix(M_Y)
+  M_pi_Y <- as.matrix(M_pi_Y)
+  if (!nrow(M_Y) || !nrow(M_pi_Y) || ncol(M_Y) != ncol(M_pi_Y)) {
+    stop("Original and permutation surface matrices have incompatible dimensions.",
+         call. = FALSE)
+  }
+  if (any(!is.finite(M_Y)) || any(!is.finite(M_pi_Y))) {
+    stop("WMT surface matrices must be finite.", call. = FALSE)
+  }
+
+  col_means <- colMeans(M_pi_Y)
+  col_sds <- apply(M_pi_Y, 2L, stats::sd)
+  keep <- is.finite(col_sds) & col_sds > 0
+  removed <- which(!keep)
+  if (length(removed)) {
+    warning(
+      "Removed ", length(removed), " zero-variance permutation-grid column(s): ",
+      paste(removed, collapse = ", "), ".",
+      call. = FALSE
+    )
+  }
+  if (!any(keep)) {
+    stop("All permutation-grid columns have zero or non-finite variance.",
+         call. = FALSE)
+  }
+
+  M_Y <- M_Y[, keep, drop = FALSE]
+  M_pi_Y <- M_pi_Y[, keep, drop = FALSE]
+  col_means <- col_means[keep]
+  col_sds <- col_sds[keep]
+  tilde_M_pi_Y <- sweep(sweep(M_pi_Y, 2L, col_means, "-"),
+                        2L, col_sds, "/")
+  tilde_M_Y <- sweep(sweep(M_Y, 2L, col_means, "-"),
+                     2L, col_sds, "/")
+
+  svd_res <- svd(tilde_M_pi_Y)
+  evalues_all <- (svd_res$d^2) / (nrow(tilde_M_pi_Y) - 1L)
+  ev_sum <- sum(evalues_all)
+  if (!length(evalues_all) || !is.finite(ev_sum) || ev_sum <= 0) {
+    stop("Permutation surfaces have no positive SVD variance.", call. = FALSE)
+  }
+
+  # Karl (2024) rescales the correlation-PCA eigenvalues to sum to the
+  # number of retained grid columns. This rescaling leaves the variance
+  # fractions unchanged but is part of the published distance convention.
+  p_cols <- ncol(tilde_M_pi_Y)
+  evalues_all <- evalues_all / ev_sum * p_cols
+  k_idx <- .svem_wmt_component_count(evalues_all, percent)
+  k_idx <- max(1L, min(k_idx, ncol(svd_res$v)))
+  evalues <- evalues_all[seq_len(k_idx)]
+  evectors <- svd_res$v[, seq_len(k_idx), drop = FALSE]
+  evalues[!is.finite(evalues) | evalues <= 0] <- 1e-12
+
+  Z_pi <- tilde_M_pi_Y %*% evectors
+  Z_Y <- tilde_M_Y %*% evectors
+  d_pi_Y <- sqrt(rowSums((Z_pi^2) /
+                           rep(evalues, each = nrow(Z_pi))))
+  d_Y <- sqrt(rowSums((Z_Y^2) /
+                        rep(evalues, each = nrow(Z_Y))))
+
+  list(
+    d_Y = d_Y,
+    d_pi_Y = d_pi_Y,
+    removed_grid_columns = removed,
+    retained_grid_columns = which(keep),
+    retained_components = k_idx,
+    eigenvalues = evalues
+  )
+}
+
+.svem_wmt_shasho_upper_tail <- function(q, mu, sigma, nu, tau) {
+  if (any(!is.finite(c(q, mu, sigma, nu, tau))) ||
+      any(sigma <= 0) || any(tau <= 0)) {
+    stop("SHASHo tail inputs must be finite with positive sigma and tau.",
+         call. = FALSE)
+  }
+  z <- (q - mu) / sigma
+  transformed <- suppressWarnings(sinh(tau * asinh(z) - nu))
+  p <- stats::pnorm(transformed, lower.tail = FALSE)
+  pmin(1, pmax(0, p))
+}
+
 #' SVEM whole-model significance test with mixture support (parallel)
 #'
 #' Perform a permutation-based whole-model significance test for a continuous
@@ -17,18 +289,25 @@
 #' intended as a diagnostic measure of global factor signal, not as exact
 #' hypothesis tests.
 #'
-#' All SVEM refits (for the original and permuted responses) are run in
-#' parallel using \code{foreach} + \code{doParallel}.
+#' With \code{nCore = 1}, SVEM refits run in-process. With more than one core,
+#' the function uses a private PSOCK cluster and \code{parallel::parLapplyLB()}.
+#' It does not register or change a \code{foreach} backend.
 #'
 #' Reproducible parallel RNG (Windows/macOS/Linux): when \code{seed} is supplied,
-#' the function sets the master RNG to \code{RNGkind("L'Ecuyer-CMRG",
-#' sample.kind = "Rounding")} (falling back to \code{"L'Ecuyer-CMRG"} on older R),
-#' and generates a deterministic, per-iteration seed schedule on the master.
-#' Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
-#' assigned seed before performing any random draws (including permutations and
-#' the bootstrap randomness inside \code{SVEMnet()}).
+#' the function sets its private computation stream to
+#' \code{RNGkind("L'Ecuyer-CMRG", sample.kind = rng_sample_kind)} and generates
+#' a deterministic, per-iteration seed schedule on the master. Each fit slot
+#' calls \code{set.seed()} with its assigned seed before performing random draws
+#' (including permutations and the bootstrap randomness inside \code{SVEMnet()}).
 #' This makes results reproducible regardless of worker scheduling and
-#' independent of the number of cores.
+#' independent of the number of cores. The caller's RNG kind and
+#' \code{.Random.seed} are restored on exit, including error exits.
+#' A failed fit slot is retried twice with deterministic sub-seeds while its
+#' response permutation remains fixed. If all three attempts fail, the test
+#' aborts with a failure summary rather than silently reducing \code{nSVEM} or
+#' \code{nPerm}.
+#' Likewise, a non-converged SHASHo null-distribution fit is reported as an
+#' error rather than being used to calculate a whole-model \eqn{p}-value.
 #'
 #' The function can optionally reuse a deterministic, locked expansion built
 #' with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -54,15 +333,18 @@
 #'   }
 #'   All mixture variables must appear in exactly one group. Defaults to \code{NULL}.
 #' @param nPoint Number of random evaluation points in the factor space
-#'   (default \code{2000}).
+#'   (default \code{2000}); must be a positive integer.
 #' @param nSVEM Number of SVEM fits on the original (unpermuted) data used to
-#'   summarize the observed surface (default \code{10}).
+#'   summarize the observed surface (default \code{10}); must be at least one.
 #' @param nPerm Number of SVEM fits on permuted responses used to build the null
-#'   reference distribution (default \code{150}).
+#'   reference distribution (default \code{150}); must be at least five.
+#'   Values below 20 are permitted for tests but trigger a warning because they
+#'   are too small for production inference.
 #' @param percent Percentage of variance to capture in the SVD of the permutation
-#'   surfaces (default \code{90}).
+#'   surfaces (default \code{90}); must lie strictly between zero and 100.
 #' @param nBoot Number of bootstrap iterations within each inner SVEM fit
-#'   (default \code{100}).
+#'   (default \code{100}); must be at least two because member standard
+#'   deviations are required.
 #' @param glmnet_alpha Numeric vector of \code{glmnet} alpha values
 #'   (default \code{c(1)}).
 #' @param weight_scheme Weighting scheme for the inner SVEM fits. Only
@@ -80,15 +362,16 @@
 #'   (\code{alpha = 0}) is dropped by \code{SVEMnet()} for relaxed fits.
 #' @param verbose Logical; if \code{TRUE}, display progress messages
 #'   (default \code{TRUE}).
-#' @param nCore Number of CPU cores for parallel processing. Default is
-#'   \code{parallel::detectCores() - 2}, with a floor of \code{1}.
+#' @param nCore Number of CPU cores for processing. Default is \code{1}, which
+#'   runs in-process and is suitable for CRAN and other shared systems. Values
+#'   greater than one use a private cluster local to this call.
 #' @param seed Optional integer seed for reproducible RNG (default \code{NULL}).
-#'   When supplied, the master RNG kind is set to \code{"L'Ecuyer-CMRG"} (with
-#'   \code{sample.kind = "Rounding"} when supported), and deterministic
-#'   per-iteration seeds are generated on the master and applied inside each
-#'   parallel \code{\%dopar\%} iteration via \code{set.seed()}.
-#'   This yields reproducibility regardless of parallel scheduling and core
-#'   count.
+#'   Deterministic per-fit seeds yield reproducibility regardless of parallel
+#'   scheduling and core count.
+#' @param rng_sample_kind Sampling algorithm used with the
+#'   \code{"L'Ecuyer-CMRG"} RNG. The default \code{"Rejection"} uses R's modern
+#'   unbiased discrete sampler. Use \code{"Rounding"} to reproduce legacy WMT
+#'   streams from SVEMnet 3.3.1 and earlier.
 #' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
 #'   If provided, the test reuses its locked expansion. The working formula
 #'   becomes \code{bigexp_formula(spec, response_name)}, where
@@ -100,6 +383,13 @@
 #'   (\code{spec$settings$discrete_numeric} + \code{spec$settings$discrete_levels})
 #'   are sampled only from their recorded allowed levels when building the
 #'   evaluation grid.
+#'   Blocking variables recorded in \code{spec$settings$blocking} are treated
+#'   as nuisance factors and held fixed at a single reference value across the
+#'   evaluation grid (numeric blocks at the range midpoint, snapped to the
+#'   discrete support when recorded; categorical blocks at the most frequent
+#'   training level), matching \code{svem_random_table_multi()}. They are
+#'   never swept, so between-block variation does not contribute to the
+#'   whole-model distances.
 #' @param response Optional character name for the response variable to use when
 #'   \code{spec} is supplied. If omitted, the response is taken from the
 #'   left-hand side of \code{formula}.
@@ -129,6 +419,9 @@
 #'     \item \code{distribution_fit}: fitted SHASHo distribution object.
 #'     \item \code{data_d}: data frame of distances and source labels
 #'       (original vs permutation), suitable for plotting.
+#'     \item \code{diagnostics}: RNG mode, deterministic retry counts and
+#'       reasons, SHASHo convergence information, removed/retained
+#'       evaluation-grid columns, and the retained SVD component count.
 #'   }
 #'
 #' @seealso \code{\link{SVEMnet}}, \code{\link{bigexp_terms}},
@@ -136,15 +429,15 @@
 #' @template ref-svem
 #' @importFrom lhs maximinLHS
 #' @importFrom gamlss gamlss gamlss.control
-#' @importFrom gamlss.dist SHASHo pSHASHo
+#' @importFrom gamlss.dist SHASHo
 #' @importFrom stats model.frame model.response model.matrix delete.response terms
 #' @importFrom stats median complete.cases rgamma coef predict sd
-#' @importFrom foreach foreach %dopar%
-#' @importFrom doParallel registerDoParallel
-#' @importFrom parallel makeCluster stopCluster detectCores clusterCall
+#' @importFrom parallel makeCluster stopCluster clusterCall parLapplyLB
 #'
 #' @examples
-#' \donttest{
+#' \dontrun{
+#'   ## Production WMT inference is intentionally not run in examples because
+#'   ## it requires repeated ensemble fits for many response permutations.
 #'   set.seed(1)
 #'
 #'   # Small toy data with a 3-component mixture A, B, C
@@ -191,7 +484,7 @@
 #'     weight_scheme  = "SVEM",
 #'     objective      = "auto",
 #'     relaxed        = FALSE,   # default, shown for clarity
-#'     nCore          = 2,
+#'     nCore          = 1,
 #'     seed           = 123,
 #'     verbose        = FALSE
 #'   )
@@ -217,7 +510,7 @@
 #'     weight_scheme      = "SVEM",
 #'     objective          = "auto",
 #'     relaxed            = FALSE,
-#'     nCore              = 2,
+#'     nCore              = 1,
 #'     seed               = 123,
 #'     spec               = spec,
 #'     response           = "y",
@@ -236,48 +529,65 @@ svem_significance_test_parallel <- function(
     objective = c("wAIC", "wBIC", "wSSE","auto"),
     relaxed = FALSE,
     verbose = TRUE,
-    nCore = parallel::detectCores()-2,
+    nCore = 1L,
     seed = NULL,
+    rng_sample_kind = c("Rejection", "Rounding"),
     spec = NULL,
     response = NULL,
     use_spec_contrasts = TRUE,
     ...
 ) {
-  # internal helper
   `%||%` <- function(a, b) if (!is.null(a)) a else b
-
-  .set_lecuyer <- function() {
-    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-    invisible(NULL)
-  }
-
-  .seed_add <- function(s, add) {
-    # safe integer arithmetic without overflow
-    if (is.null(s)) return(NULL)
-    s <- as.double(s)
-    out <- (s + as.double(add)) %% as.double(.Machine$integer.max)
-    out <- as.integer(ifelse(out <= 0, 1, out))
-    out
-  }
-
-  .make_iter_seeds <- function(n, base_seed = NULL) {
-    if (!is.null(base_seed)) {
-      .set_lecuyer()
-      set.seed(as.integer(base_seed))
-    }
-    sample.int(.Machine$integer.max, n)
-  }
 
   # --- basic choices ---
   objective     <- match.arg(objective)
   weight_scheme <- match.arg(weight_scheme)
+  rng_sample_kind <- match.arg(rng_sample_kind)
+  nPoint <- .svem_integer_scalar(nPoint, "nPoint", min = 1L)
+  nSVEM <- .svem_integer_scalar(nSVEM, "nSVEM", min = 1L)
+  nPerm <- .svem_integer_scalar(nPerm, "nPerm", min = 5L)
+  nBoot <- .svem_integer_scalar(nBoot, "nBoot", min = 2L)
+  nCore <- .svem_integer_scalar(nCore, "nCore", min = 1L)
+  seed <- .svem_integer_scalar(seed, "seed", min = 0L, allow_null = TRUE)
+  percent <- .svem_numeric_scalar(
+    percent, "percent", lower = 0, upper = 100,
+    lower_open = TRUE, upper_open = TRUE
+  )
+  relaxed <- .svem_logical_scalar(relaxed, "relaxed")
+  verbose <- .svem_logical_scalar(verbose, "verbose")
+  use_spec_contrasts <- .svem_logical_scalar(
+    use_spec_contrasts, "use_spec_contrasts"
+  )
+  if (nPerm < 20L) {
+    warning(
+      "`nPerm < 20` is intended only for tests; use the default of 150 ",
+      "for production WMT inference.",
+      call. = FALSE
+    )
+  }
   data <- as.data.frame(data)
 
   # FIX: "auto" objective must assign a real objective
   if (identical(objective, "auto")) {
     objective <- "wAIC"
     if (isTRUE(verbose)) message("objective='auto' -> using 'wAIC'.")
+  }
+
+  # Robust single-variable response name; as.character(formula[[2]]) is
+  # length > 1 for transformed responses such as log(y) and would crash
+  # scalar contexts below on R >= 4.2. The permutation scheme permutes the
+  # raw response column, so exactly one response variable is required.
+  .resp_var_from_formula <- function(f) {
+    rv <- .svem_response_vars(f)
+    if (length(rv) != 1L) {
+      stop(
+        "svem_significance_test_parallel() requires a formula whose ",
+        "left-hand side contains exactly one response variable (e.g. y ~ ... ",
+        "or log(y) ~ ...); found: ",
+        if (length(rv)) paste(rv, collapse = ", ") else "none", "."
+      )
+    }
+    rv
   }
 
   # Determine response and working formula (optionally from spec)
@@ -287,13 +597,23 @@ svem_significance_test_parallel <- function(
         stop("response must be a non-empty character scalar when provided.")
       response
     } else {
-      as.character(formula[[2]])
+      .resp_var_from_formula(formula)
     }
     if (!resp_name %in% names(data)) stop("Response '", resp_name, "' not found in 'data'.")
     f_use <- bigexp_formula(spec, resp_name)
   } else {
     f_use <- formula
-    resp_name <- as.character(formula[[2]])
+    resp_name <- .resp_var_from_formula(formula)
+  }
+
+  wmt_terms <- stats::terms(f_use, data = data)
+  if (!identical(attr(wmt_terms, "intercept"), 1L) ||
+      (!is.null(spec) && identical(spec$settings$intercept, FALSE))) {
+    stop(
+      "svem_significance_test_parallel() follows the published intercept convention; ",
+      "formulas using `~ 0`, `- 1`, or `bigexp_terms(intercept = FALSE)` are not supported.",
+      call. = FALSE
+    )
   }
 
   # Choose contrasts options (spec's, if requested)
@@ -303,16 +623,29 @@ svem_significance_test_parallel <- function(
     getOption("contrasts")
   }
 
-  # --- master RNG for serial prep (design, mixtures, factors) ---
-  if (!is.null(seed)) {
-    oldKinds <- RNGkind()
-    on.exit({
-      RNGkind(kind = oldKinds[1L], normal.kind = oldKinds[2L], sample.kind = oldKinds[3L])
-    }, add = TRUE)
-
-    .set_lecuyer()
-    set.seed(as.integer(seed))
+  # --- private master RNG for serial prep (design, mixtures, factors) ---
+  oldKinds <- RNGkind()
+  had_random_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  old_random_seed <- if (had_random_seed) {
+    get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+  } else {
+    NULL
   }
+  on.exit({
+    suppressWarnings(RNGkind(
+      kind = oldKinds[1L],
+      normal.kind = oldKinds[2L],
+      sample.kind = oldKinds[3L]
+    ))
+    if (had_random_seed) {
+      assign(".Random.seed", old_random_seed, envir = .GlobalEnv)
+    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+      rm(".Random.seed", envir = .GlobalEnv)
+    }
+  }, add = TRUE)
+  .svem_wmt_set_rngkind(rng_sample_kind)
+  rng_normal_kind <- RNGkind()[2L]
+  if (!is.null(seed)) set.seed(seed)
 
   # --- enforce single-threaded BLAS/OpenMP BEFORE spawning workers -------------
   thread_vars <- c(
@@ -332,35 +665,6 @@ svem_significance_test_parallel <- function(
   }, add = TRUE)
 
   do.call(Sys.setenv, as.list(setNames(rep("1", length(thread_vars)), thread_vars)))
-
-  # --- cluster setup -----------------------------------------------------------
-  nCore <- max(1L, as.integer(`%||%`(nCore, parallel::detectCores())))
-  cl <- parallel::makeCluster(nCore)
-  on.exit(parallel::stopCluster(cl), add = TRUE)
-  doParallel::registerDoParallel(cl)
-
-  # Set RNG kind and threads on workers (worker sessions are separate; safe on all OS)
-  parallel::clusterCall(cl, function() {
-    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-
-    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-      RhpcBLASctl::blas_set_num_threads(1)
-      RhpcBLASctl::omp_set_num_threads(1)
-    } else {
-      Sys.setenv(
-        OMP_NUM_THREADS        = "1",
-        MKL_NUM_THREADS        = "1",
-        OPENBLAS_NUM_THREADS   = "1",
-        VECLIB_MAXIMUM_THREADS = "1",
-        NUMEXPR_NUM_THREADS    = "1"
-      )
-    }
-    NULL
-  })
-
-  # Set contrasts options on workers
-  parallel::clusterCall(cl, function(opts) { options(contrasts = opts); NULL }, contrasts_opts)
 
   # Sanitize ... so explicit 'relaxed' here cannot be overridden
   dots <- list(...)
@@ -407,9 +711,8 @@ svem_significance_test_parallel <- function(
   }
 
   # Validate remaining '...' names on the master before spawning workers:
-  # SVEMnet()/glmnet() warnings raised inside %dopar% iterations are not
-  # visible on the default PSOCK cluster, so a misspelled argument would
-  # otherwise vanish silently.
+  # SVEMnet()/glmnet() warnings raised in PSOCK workers are not visible on the
+  # master, so a misspelled argument would otherwise vanish silently.
   unknown <- .svem_unknown_glmnet_args(
     dots,
     funs = list(SVEMnet, glmnet::glmnet),
@@ -437,6 +740,14 @@ svem_significance_test_parallel <- function(
   y  <- stats::model.response(mf)
 
   if (length(y) < 2L) stop("Not enough complete cases to run the significance test.")
+  if (is.matrix(y) || is.array(y) || !is.numeric(y)) {
+    stop("The whole-model test requires one numeric continuous response.",
+         call. = FALSE)
+  }
+  if (any(!is.finite(y))) {
+    stop("The whole-model-test response must contain only finite values after NA removal.",
+         call. = FALSE)
+  }
 
   # For sampling, decide which raw columns are categorical vs continuous
   if (!is.null(spec)) {
@@ -446,13 +757,27 @@ svem_significance_test_parallel <- function(
     continuous_vars   <- names(is_cat)[!is_cat]
     disc_vars         <- spec$settings$discrete_numeric %||% character(0L)
     disc_levels       <- spec$settings$discrete_levels  %||% list()
+    # Blocking variables are nuisance factors: hold them fixed at a single
+    # reference value in the evaluation grid (matching svem_random_table_multi)
+    # instead of sweeping them, so between-block variation does not inflate
+    # the observed surface distances relative to the permutation surfaces.
+    blocking_vars     <- intersect(as.character(spec$settings$blocking %||% character(0L)),
+                                   predictor_vars)
+    categorical_vars  <- setdiff(categorical_vars, blocking_vars)
+    continuous_vars   <- setdiff(continuous_vars, blocking_vars)
   } else {
     predictor_vars   <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data_fit)))
-    predictor_types  <- sapply(data_fit[predictor_vars], function(z) class(z)[1L])
-    categorical_vars <- predictor_vars[predictor_types %in% c("factor", "character", "logical")]
+    # is.factor() (not class(z)[1L]) so ordered factors are categorical too;
+    # class(ordered)[1L] is "ordered", which previously fell through to the
+    # continuous sampler and produced all-NA predictions.
+    is_cat_col       <- vapply(data_fit[predictor_vars], function(z) {
+      is.factor(z) || is.character(z) || is.logical(z)
+    }, logical(1L))
+    categorical_vars <- predictor_vars[is_cat_col]
     continuous_vars  <- setdiff(predictor_vars, categorical_vars)
     disc_vars        <- character(0L)
     disc_levels      <- list()
+    blocking_vars    <- character(0L)
   }
 
   # Mixture bookkeeping and validation (mirrors svem_random_table_multi):
@@ -468,6 +793,10 @@ svem_significance_test_parallel <- function(
       if (length(missing_mix)) {
         stop("Mixture variables not in model predictors: ",
              paste(missing_mix, collapse = ", "))
+      }
+      if (length(intersect(grp$vars, blocking_vars))) {
+        stop("Mixture variables cannot be blocking variables. Offending vars: ",
+             paste(intersect(grp$vars, blocking_vars), collapse = ", "))
       }
       bad_mix <- setdiff(grp$vars, continuous_vars)
       if (length(bad_mix)) {
@@ -626,17 +955,22 @@ svem_significance_test_parallel <- function(
     T_categorical <- vector("list", length(categorical_vars))
     names(T_categorical) <- categorical_vars
     for (v in categorical_vars) {
+      # The inner fits see data_fit's raw classes, so the grid must reproduce
+      # them: an ordered training factor requires an ordered grid column or
+      # the predict-time class validator rejects the evaluation points.
+      ord <- is.ordered(data_fit[[v]])
       if (!is.null(spec)) {
         lv <- spec$levels[[v]]
         if (is.null(lv)) lv <- sort(unique(as.character(data_fit[[v]])))
-        T_categorical[[v]] <- factor(sample(lv, nPoint, replace = TRUE), levels = lv)
+        T_categorical[[v]] <- factor(sample(lv, nPoint, replace = TRUE),
+                                     levels = lv, ordered = ord)
       } else {
         x <- data_fit[[v]]
         if (is.factor(x)) {
           obs_lev <- levels(base::droplevels(x))
           T_categorical[[v]] <- factor(
             sample(obs_lev, nPoint, replace = TRUE),
-            levels = levels(x)
+            levels = levels(x), ordered = ord
           )
         } else {
           obs_lev <- sort(unique(as.character(x)))
@@ -646,6 +980,9 @@ svem_significance_test_parallel <- function(
           )
         }
       }
+      if (is.logical(data_fit[[v]])) {
+        T_categorical[[v]] <- as.logical(as.character(T_categorical[[v]]))
+      }
     }
     T_categorical <- as.data.frame(T_categorical, stringsAsFactors = FALSE)
   }
@@ -653,189 +990,172 @@ svem_significance_test_parallel <- function(
   # Assemble evaluation grid
   parts <- list(T_continuous, T_mixture, T_categorical)
   parts <- parts[!vapply(parts, is.null, logical(1))]
-  if (length(parts) == 0) stop("No predictors provided.")
-  T_data <- do.call(cbind, parts)
+  if (length(parts) == 0 && !length(blocking_vars)) stop("No predictors provided.")
+  T_data <- if (length(parts)) {
+    do.call(cbind, parts)
+  } else {
+    as.data.frame(matrix(nrow = nPoint, ncol = 0))
+  }
+
+  # Pin blocking variables to a single reference value across the grid,
+  # mirroring svem_random_table_multi(): numeric blocks at the range midpoint
+  # (snapped to the discrete support when recorded), categorical blocks at the
+  # most frequent training level (ties broken by level order).
+  if (length(blocking_vars)) {
+    for (v in blocking_vars) {
+      if (isTRUE(spec$is_cat[[v]])) {
+        lv <- spec$levels[[v]]
+        if (is.null(lv) || !length(lv)) lv <- sort(unique(as.character(data_fit[[v]])))
+        tab <- table(factor(as.character(data_fit[[v]]), levels = lv))
+        mode_val <- if (length(tab) && any(tab > 0)) names(tab)[which.max(tab)] else lv[1L]
+        T_data[[v]] <- if (is.logical(data_fit[[v]])) {
+          rep(as.logical(mode_val), nPoint)
+        } else {
+          factor(rep(mode_val, nPoint), levels = lv,
+                 ordered = is.ordered(data_fit[[v]]))
+        }
+      } else {
+        r <- if (!is.null(spec$num_range) && v %in% colnames(spec$num_range)) {
+          spec$num_range[, v]
+        } else {
+          range(as.numeric(data_fit[[v]]), na.rm = TRUE)
+        }
+        val <- (as.numeric(r[1L]) + as.numeric(r[2L])) / 2
+        if (v %in% disc_vars) {
+          lv <- as.numeric(disc_levels[[v]])
+          lv <- lv[is.finite(lv)]
+          if (length(lv)) val <- lv[which.min(abs(lv - val))]
+        }
+        T_data[[v]] <- rep(val, nPoint)
+      }
+    }
+  }
 
   y_mean <- mean(y, na.rm = TRUE)
 
   # --- Per-iteration seeds (schedule-independent reproducibility) --------------
   # Use separate namespaces so permutations don't change when nSVEM changes.
-  seed_Y_base   <- .seed_add(seed, 1000001L)
-  seed_piY_base <- .seed_add(seed, 2000001L)
+  seed_Y_base <- .svem_wmt_seed_add(seed, 1000001L)
+  seed_piY_base <- .svem_wmt_seed_add(seed, 2000001L)
+  iter_seeds_Y <- .svem_wmt_make_iter_seeds(
+    nSVEM, base_seed = seed_Y_base, sample_kind = rng_sample_kind
+  )
+  iter_seeds_piY <- .svem_wmt_make_iter_seeds(
+    nPerm, base_seed = seed_piY_base, sample_kind = rng_sample_kind
+  )
 
-  iter_seeds_Y   <- .make_iter_seeds(nSVEM, base_seed = seed_Y_base)
-  iter_seeds_piY <- .make_iter_seeds(nPerm, base_seed = seed_piY_base)
-
-  # --- Originals: parallel SVEM fits (reproducible via per-iteration seeds) ---
-  if (isTRUE(verbose)) message("Fitting SVEM models to original data (parallel)...")
-  M_Y <- foreach::foreach(
-    i = 1:nSVEM,
-    .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats")
-  ) %dopar% {
-    # ensure deterministic RNG per iteration, independent of scheduling/cores
-    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-    set.seed(iter_seeds_Y[i])
-
-    svem_model <- tryCatch({
-      do.call(SVEMnet::SVEMnet, c(list(
-        formula = f_use, data = data_fit, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
-        weight_scheme = weight_scheme, objective = objective,
-        relaxed = relaxed
-      ), dots))
-    }, error = function(e) {
-      message("Error in SVEMnet during SVEM fitting: ", e$message)
-      return(NULL)
-    })
-    if (is.null(svem_model)) return(rep(NA_real_, nPoint))
-
-    pred_res <- predict(svem_model, newdata = T_data, debias = FALSE, se.fit = TRUE)
-    f_hat_Y_T <- pred_res$fit
-    s_hat_Y_T <- pred_res$se.fit
-    s_hat_Y_T[s_hat_Y_T == 0] <- 1e-6
-    (f_hat_Y_T - y_mean) / s_hat_Y_T
-  }
-
-  # --- Permutations: parallel SVEM fits (reproducible via per-iteration seeds) -
-  if (isTRUE(verbose)) message("Starting permutation testing (parallel)...")
-  start_time_perm <- Sys.time()
-  M_pi_Y <- foreach::foreach(
-    jloop = 1:nPerm,
-    .combine = rbind,
-    .packages = c("SVEMnet", "glmnet", "stats")
-  ) %dopar% {
-    ok <- try(suppressWarnings(RNGkind("L'Ecuyer-CMRG", sample.kind = "Rounding")), silent = TRUE)
-    if (inherits(ok, "try-error")) RNGkind("L'Ecuyer-CMRG")
-    set.seed(iter_seeds_piY[jloop])
-
-    y_perm <- sample(y, replace = FALSE)
-    data_perm <- data_fit
-    data_perm[[resp_name]] <- y_perm
-
-    svem_model_perm <- tryCatch({
-      do.call(SVEMnet::SVEMnet, c(list(
-        formula = f_use, data = data_perm, nBoot = nBoot, glmnet_alpha = glmnet_alpha,
-        weight_scheme = weight_scheme, objective = objective,
-        relaxed = relaxed
-      ), dots))
-    }, error = function(e) {
-      message("Error in SVEMnet during permutation fitting: ", e$message)
-      return(NULL)
-    })
-    if (is.null(svem_model_perm)) return(rep(NA_real_, nPoint))
-
-    pred_res <- predict(svem_model_perm, newdata = T_data, debias = FALSE, se.fit = TRUE)
-    f_hat_piY_T <- pred_res$fit
-    s_hat_piY_T <- pred_res$se.fit
-    s_hat_piY_T[s_hat_piY_T == 0] <- 1e-6
-    h_piY <- (f_hat_piY_T - y_mean) / s_hat_piY_T
-
-    if (isTRUE(verbose) && (jloop %% 10 == 0 || jloop == nPerm)) {
-      elapsed_time <- Sys.time() - start_time_perm
-      elapsed_secs <- as.numeric(elapsed_time, units = "secs")
-      estimated_total_secs <- (elapsed_secs / jloop) * nPerm
-      remaining_secs <- pmax(0, estimated_total_secs - elapsed_secs)
-      remaining_time_formatted <- sprintf(
-        "%02d:%02d:%02d",
-        floor(remaining_secs / 3600),
-        floor((remaining_secs %% 3600) / 60),
-        floor(remaining_secs %% 60)
-      )
-      message(sprintf("Permutation %d/%d completed. Estimated time remaining: %s",
-                      jloop, nPerm, remaining_time_formatted))
-    }
-
-    h_piY
-  }
-
-  # Gather and check
-  # foreach(.combine = rbind) returns a plain vector when there is a single
-  # iteration; coerce to a one-row matrix so the row filtering below works
-  if (!is.matrix(M_Y))    M_Y    <- matrix(M_Y, nrow = 1L)
-  if (!is.matrix(M_pi_Y)) M_pi_Y <- matrix(M_pi_Y, nrow = 1L)
-  M_Y    <- M_Y[stats::complete.cases(M_Y), , drop = FALSE]
-  M_pi_Y <- M_pi_Y[stats::complete.cases(M_pi_Y), , drop = FALSE]
-  if (nrow(M_Y) == 0)    stop("All SVEM fits on the original data failed.")
-  if (nrow(M_pi_Y) == 0) stop("All SVEM fits on permuted data failed.")
-
-  # Normalize by permutation mean/sd
-  col_means_M_pi_Y <- colMeans(M_pi_Y, na.rm = TRUE)
-  col_sds_M_pi_Y   <- apply(M_pi_Y, 2, sd, na.rm = TRUE)
-  col_sds_M_pi_Y[col_sds_M_pi_Y == 0] <- 1e-6
-  tilde_M_pi_Y <- scale(M_pi_Y, center = col_means_M_pi_Y, scale = col_sds_M_pi_Y)
-
-  M_Y_centered <- sweep(M_Y, 2, col_means_M_pi_Y, "-")
-  tilde_M_Y    <- sweep(M_Y_centered, 2, col_sds_M_pi_Y, "/")
-
-  # SVD and distances (paper-consistent scaling)
-  svd_res <- svd(tilde_M_pi_Y)
-  s <- svd_res$d
-  V <- svd_res$v
-
-  n_perm <- nrow(tilde_M_pi_Y)
-  p_cols <- ncol(tilde_M_pi_Y)
-
-  # 1) correlation-PCA eigenvalues: (s^2)/(n_perm - 1)
-  evalues_all <- (s^2) / max(n_perm - 1, 1L)
-
-  # 2) Rescale to make eigenvalues sum to p (matches paper)
-  ev_sum <- sum(evalues_all)
-  if (!is.finite(ev_sum) || ev_sum <= 0) ev_sum <- 1e-12
-  evalues_all <- evalues_all / ev_sum * p_cols
-
-  # Explained-variance percent under this convention
-  cumsum_evalues <- cumsum(evalues_all) / p_cols * 100
-  percent <- max(min(percent, 99.999), 0.1)
-  k_idx <- which(cumsum_evalues >= percent)[1L]
-  if (!length(k_idx) || is.na(k_idx)) k_idx <- length(evalues_all)
-  k_idx <- min(k_idx, ncol(V))
-  k_idx <- max(k_idx, 1L)
-
-  evalues  <- evalues_all[seq_len(k_idx)]
-  evectors <- V[, seq_len(k_idx), drop = FALSE]
-
-  # Force matrices to avoid accidental data.frames
-  tilde_M_pi_Y <- as.matrix(tilde_M_pi_Y)
-  tilde_M_Y    <- as.matrix(tilde_M_Y)
-
-  # Project
-  Z_pi <- tilde_M_pi_Y %*% evectors   # nPerm x k
-  Z_Y  <- tilde_M_Y    %*% evectors   # nSVEM x k
-
-  # Numerical guard: zero/NA eigenvalues
-  evalues[!is.finite(evalues) | evalues <= 0] <- 1e-12
-
-  T2_perm <- rowSums((Z_pi^2) / rep(evalues, each = nrow(Z_pi)))
-  d_pi_Y  <- sqrt(T2_perm)
-
-  T2_Y <- rowSums((Z_Y^2) / rep(evalues, each = nrow(Z_Y)))
-  d_Y  <- sqrt(T2_Y)
-
-  if (length(d_pi_Y) == 0) stop("No valid permutation distances to fit a distribution.")
-
-  # SHASHo fit
-  suppressMessages(
-    distribution_fit <- tryCatch({
-      gamlss::gamlss(
-        d_pi_Y ~ 1,
-        family = gamlss.dist::SHASHo(mu.link = "identity", sigma.link = "log",
-                                     nu.link = "identity", tau.link = "log"),
-        control = gamlss::gamlss.control(n.cyc = 1000, trace = FALSE)
-      )
-    }, error = function(e) {
-      message("Error in fitting SHASHo distribution: ", e$message)
-      NULL
+  tasks <- c(
+    lapply(seq_len(nSVEM), function(i) {
+      list(type = "original", index = i, seed = iter_seeds_Y[i])
+    }),
+    lapply(seq_len(nPerm), function(i) {
+      list(type = "permutation", index = i, seed = iter_seeds_piY[i])
     })
   )
-  if (is.null(distribution_fit)) stop("Failed to fit SHASHo distribution.")
+  if (isTRUE(verbose)) {
+    mode <- if (nCore == 1L) "in-process" else paste0("on ", nCore, " workers")
+    message(
+      "Fitting ", nSVEM, " original and ", nPerm,
+      " permutation SVEM model(s) ", mode, "."
+    )
+  }
+  fit_results <- .svem_wmt_lapply(
+    tasks = tasks,
+    fun = .svem_wmt_fit_task,
+    nCore = nCore,
+    contrasts_opts = contrasts_opts,
+    sample_kind = rng_sample_kind,
+    normal_kind = rng_normal_kind,
+    f_use = f_use,
+    data_fit = data_fit,
+    resp_name = resp_name,
+    nBoot = nBoot,
+    glmnet_alpha = glmnet_alpha,
+    weight_scheme = weight_scheme,
+    objective = objective,
+    relaxed = relaxed,
+    dots = dots,
+    T_data = T_data,
+    y_mean = y_mean,
+    rng_sample_kind = rng_sample_kind,
+    rng_normal_kind = rng_normal_kind
+  )
+  original_results <- fit_results[seq_len(nSVEM)]
+  permutation_results <- fit_results[nSVEM + seq_len(nPerm)]
+  .svem_wmt_abort_failed_slots(original_results, "original-data")
+  .svem_wmt_abort_failed_slots(permutation_results, "permutation")
+
+  M_Y <- do.call(rbind, lapply(original_results, `[[`, "surface"))
+  M_pi_Y <- do.call(rbind, lapply(permutation_results, `[[`, "surface"))
+  reduction <- .svem_wmt_reduce_surfaces(M_Y, M_pi_Y, percent)
+  d_Y <- reduction$d_Y
+  d_pi_Y <- reduction$d_pi_Y
+
+  # SHASHo fit
+  shasho_warnings <- character(0L)
+  shasho_error <- NULL
+  distribution_fit <- suppressMessages(
+    withCallingHandlers(
+      tryCatch(
+        gamlss::gamlss(
+          d_pi_Y ~ 1,
+          family = gamlss.dist::SHASHo(
+            mu.link = "identity", sigma.link = "log",
+            nu.link = "identity", tau.link = "log"
+          ),
+          control = gamlss::gamlss.control(n.cyc = 1000, trace = FALSE)
+        ),
+        error = function(e) {
+          shasho_error <<- conditionMessage(e)
+          NULL
+        }
+      ),
+      warning = function(w) {
+        shasho_warnings <<- c(shasho_warnings, conditionMessage(w))
+        invokeRestart("muffleWarning")
+      }
+    )
+  )
+  shasho_warnings <- unique(shasho_warnings)
+  warning_text <- if (length(shasho_warnings)) {
+    paste0(" Warning(s): ", paste(shasho_warnings, collapse = "; "))
+  } else {
+    ""
+  }
+  if (is.null(distribution_fit)) {
+    stop(
+      "Failed to fit the SHASHo permutation-distance distribution",
+      if (!is.null(shasho_error)) paste0(": ", shasho_error) else ".",
+      warning_text,
+      call. = FALSE
+    )
+  }
+  if (!isTRUE(distribution_fit$converged)) {
+    stop(
+      "The SHASHo permutation-distance fit did not converge; no WMT p-value ",
+      "was returned.", warning_text,
+      call. = FALSE
+    )
+  }
+  if (length(shasho_warnings)) {
+    warning(
+      "The converged SHASHo permutation-distance fit reported warning(s): ",
+      paste(shasho_warnings, collapse = "; "),
+      call. = FALSE
+    )
+  }
 
   mu    <- as.numeric(stats::coef(distribution_fit, what = "mu"))
   sigma <- exp(as.numeric(stats::coef(distribution_fit, what = "sigma")))
   nu    <- as.numeric(stats::coef(distribution_fit, what = "nu"))
   tau   <- exp(as.numeric(stats::coef(distribution_fit, what = "tau")))
 
-  p_values <- 1 - gamlss.dist::pSHASHo(d_Y, mu = mu, sigma = sigma, nu = nu, tau = tau)
+  # pSHASHo(lower.tail = FALSE) currently computes 1 - CDF internally, which
+  # loses extreme right-tail probabilities to cancellation. The transformed
+  # normal survival probability is algebraically identical to SHASHo's CDF.
+  p_values <- .svem_wmt_shasho_upper_tail(
+    d_Y, mu = mu, sigma = sigma, nu = nu, tau = tau
+  )
   p_value  <- stats::median(p_values)
 
   data_d <- data.frame(
@@ -844,13 +1164,43 @@ svem_significance_test_parallel <- function(
     Response = resp_name
   )
 
+  retry_failures <- unlist(
+    lapply(fit_results, `[[`, "retry_failures"),
+    use.names = FALSE
+  )
+  retry_failure_counts <- if (length(retry_failures)) {
+    sort(table(retry_failures), decreasing = TRUE)
+  } else {
+    structure(integer(0L), names = character(0L))
+  }
+  retry_counts_Y <- vapply(original_results, `[[`, integer(1L), "retries")
+  retry_counts_piY <- vapply(
+    permutation_results, `[[`, integer(1L), "retries"
+  )
+
   results_list <- list(
     p_value = p_value,
     p_values = p_values,
     d_Y = d_Y,
     d_pi_Y = d_pi_Y,
     distribution_fit = distribution_fit,
-    data_d = data_d
+    data_d = data_d,
+    diagnostics = list(
+      rng_kind = "L'Ecuyer-CMRG",
+      rng_normal_kind = rng_normal_kind,
+      rng_sample_kind = rng_sample_kind,
+      retry_counts = list(
+        original = retry_counts_Y,
+        permutation = retry_counts_piY,
+        total = sum(retry_counts_Y) + sum(retry_counts_piY)
+      ),
+      retry_failure_reasons = retry_failure_counts,
+      shasho_converged = TRUE,
+      shasho_warnings = shasho_warnings,
+      removed_grid_columns = reduction$removed_grid_columns,
+      retained_grid_columns = reduction$retained_grid_columns,
+      retained_components = reduction$retained_components
+    )
   )
   class(results_list) <- "svem_significance_test"
   results_list

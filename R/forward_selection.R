@@ -1,0 +1,1164 @@
+# Forward-selection fitters sharing SVEMnet's formula / bigexp_spec front end.
+#
+# Two exported entry points:
+#   * forward_aicc(): deterministic greedy forward selection over whole model
+#     terms, minimizing a Gaussian least-squares AICc (or AIC / BIC).
+#   * svem_forward(): SVEM ensemble whose per-bootstrap base learner is
+#     training-weighted forward selection; the forward path plays the
+#     lambda-path role and is scored by the same validation-weighted
+#     wSSE/wAIC/wBIC criteria as SVEMnet().
+#
+# Both functions build the design exactly like SVEMnet() (locked bigexp types,
+# levels, contrasts, blocking, sampling schema) and return objects of class
+# "svem_model" so predict(), coef(), plot(), svem_nonzero(), and the
+# random-table / scoring tools work unchanged. Gaussian responses only.
+
+## ----------------------------------------------------------------------------
+## Shared front end: model frame, groups, schema, sampling schema
+## ----------------------------------------------------------------------------
+
+.svem_forward_design <- function(formula, data, response = NULL,
+                                 unseen = c("warn_na", "error"),
+                                 fun_name = "forward selection") {
+  unseen <- match.arg(unseen)
+  data <- as.data.frame(data)
+  contrasts_opts_used <- NULL
+
+  # Detect bigexp_spec either passed directly or attached to the formula
+  using_spec     <- inherits(formula, "bigexp_spec")
+  spec           <- NULL
+  spec_from_attr <- FALSE
+
+  if (using_spec) {
+    spec <- formula
+  } else {
+    spec_attr <- attr(formula, "bigexp_spec", exact = TRUE)
+    if (!is.null(spec_attr) && inherits(spec_attr, "bigexp_spec")) {
+      using_spec     <- TRUE
+      spec           <- spec_attr
+      spec_from_attr <- TRUE
+    }
+  }
+
+  contrasts_used_full <- NULL
+  schema_data <- data
+
+  if (using_spec) {
+    if (!is.null(response)) {
+      f_use <- stats::as.formula(paste(response, "~", spec$rhs), env = baseenv())
+    } else if (spec_from_attr) {
+      f_use <- formula
+    } else {
+      f_use <- spec$formula
+    }
+
+    prep <- bigexp_prepare(spec, data, unseen = unseen)
+    schema_data <- prep$data
+
+    spec_settings <- spec$settings
+    if (is.null(spec_settings)) spec_settings <- list()
+
+    blocking <- spec_settings$blocking
+    if (is.null(blocking)) blocking <- character(0L)
+
+    if (!is.null(spec_settings$contrasts_options)) {
+      spec_contrasts_opts <- spec_settings$contrasts_options
+    } else {
+      spec_contrasts_opts <- getOption("contrasts")
+    }
+    spec_contrasts <- spec_settings$contrasts
+
+    contrasts_opts_used <- spec_contrasts_opts
+    old_opts <- options(contrasts = spec_contrasts_opts)
+    on.exit(options(old_opts), add = TRUE)
+
+    mf <- stats::model.frame(f_use, prep$data, na.action = stats::na.omit)
+    if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+    X  <- stats::model.matrix(f_use, mf, contrasts.arg = spec_contrasts)
+    contrasts_used_full <- attr(X, "contrasts")
+
+  } else {
+    f_use <- formula
+    mf    <- stats::model.frame(f_use, data, na.action = stats::na.omit)
+    if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
+    contrasts_opts_used <- getOption("contrasts")
+    X        <- stats::model.matrix(f_use, mf)
+    blocking <- character(0L)
+    contrasts_used_full <- attr(X, "contrasts")
+  }
+
+  y <- stats::model.response(mf)
+
+  terms_full <- attr(mf, "terms")
+  if (!identical(attr(terms_full, "intercept"), 1L) ||
+      (using_spec && identical(spec$settings$intercept, FALSE))) {
+    stop(
+      fun_name, " fits follow the published intercept convention; formulas using `~ 0`, ",
+      "`- 1`, or `bigexp_terms(intercept = FALSE)` are not supported.",
+      call. = FALSE
+    )
+  }
+
+  if (is.matrix(y) || is.array(y) || length(y) != nrow(mf)) {
+    stop(fun_name,
+         " requires a single univariate response; matrix/multivariate responses are not supported.",
+         call. = FALSE)
+  }
+  if (!is.numeric(y)) {
+    stop(fun_name, " requires a numeric response (family = 'gaussian' only).",
+         call. = FALSE)
+  }
+  y_vec <- as.numeric(y)
+
+  ## Capture assign BEFORE subsetting: matrix subsetting drops the attribute
+  assign_full <- attr(X, "assign")
+
+  ## drop intercept column; match only the exact model.matrix name so a real
+  ## predictor named "Intercept" is not deleted
+  int_idx <- which(colnames(X) == "(Intercept)")
+  if (length(int_idx)) {
+    X <- X[, -int_idx, drop = FALSE]
+    if (!is.null(assign_full)) assign_full <- assign_full[-int_idx]
+  }
+  if (!is.null(contrasts_used_full)) {
+    attr(X, "contrasts") <- contrasts_used_full
+  }
+
+  if (any(!is.finite(y_vec)) || any(!is.finite(X))) {
+    stop("Non-finite values in response/predictors after NA handling.")
+  }
+  storage.mode(X) <- "double"
+
+  n <- nrow(X); p <- ncol(X)
+
+  ## Whole-effect groups: all columns generated by one model term enter and
+  ## leave the forward path together (multi-column factor contrasts move as
+  ## a unit). Group order is model-matrix term order; ties in the greedy
+  ## step are broken by this order.
+  term_labels <- attr(terms_full, "term.labels")
+  if (is.null(assign_full)) assign_full <- if (p) seq_len(p) else integer(0L)
+  groups <- list()
+  if (p > 0L) {
+    for (a in unique(assign_full)) {
+      cols  <- which(assign_full == a)
+      label <- if (a >= 1L && a <= length(term_labels)) {
+        term_labels[a]
+      } else {
+        paste0("term_", a)
+      }
+      groups[[label]] <- cols
+    }
+  }
+
+  ## Capture a compact, self-contained formula environment for prediction.
+  compact_formula <- .svem_compact_formula_terms(
+    f_use, terms_full, data_names = names(schema_data)
+  )
+  f_store     <- compact_formula$formula
+  terms_clean <- compact_formula$terms
+  schema_data_used <- schema_data
+  omitted_rows <- as.integer(attr(mf, "na.action"))
+  if (length(omitted_rows) && nrow(schema_data_used) >= max(omitted_rows)) {
+    schema_data_used <- schema_data_used[-omitted_rows, , drop = FALSE]
+  }
+
+  predictor_vars <- base::all.vars(stats::delete.response(terms_full))
+
+  resp_vars   <- .svem_response_vars(f_use)
+  resp_in_rhs <- intersect(resp_vars, predictor_vars)
+  if (length(resp_in_rhs)) {
+    stop(
+      fun_name, " does not allow a predictor with the same name as the response ('",
+      paste(resp_in_rhs, collapse = "', '"),
+      "'). Please rename your variables or adjust the formula."
+    )
+  }
+
+  var_classes <- stats::setNames(vapply(predictor_vars, function(v) {
+    if (v %in% names(schema_data)) class(schema_data[[v]])[1] else NA_character_
+  }, character(1)), predictor_vars)
+
+  xlevels <- list()
+  factor_levels <- list()
+  for (v in predictor_vars) {
+    if (v %in% names(schema_data_used)) {
+      if (is.factor(schema_data_used[[v]])) {
+        xlevels[[v]] <- levels(schema_data_used[[v]])
+        factor_levels[[v]] <- levels(schema_data_used[[v]])
+      } else if (is.character(schema_data_used[[v]])) {
+        lev <- sort(unique(as.character(schema_data_used[[v]])))
+        xlevels[[v]] <- lev
+        factor_levels[[v]] <- lev
+      }
+    }
+  }
+
+  contrasts_used <- contrasts_used_full
+
+  .mode_level <- function(x) {
+    if (is.null(x)) return(NA_character_)
+    x_chr <- as.character(x)
+    x_chr <- x_chr[!is.na(x_chr)]
+    if (!length(x_chr)) return(NA_character_)
+    tab <- table(x_chr)
+    if (!length(tab)) return(NA_character_)
+    maxfreq <- max(tab)
+    modes <- names(tab)[tab == maxfreq]
+    modes[1L]
+  }
+
+  blocking <- intersect(blocking, predictor_vars)
+
+  block_cat_modes <- NULL
+  if (length(blocking)) {
+    block_cat <- intersect(blocking, names(factor_levels))
+    if (length(block_cat)) {
+      block_cat_modes <- vector("list", length(block_cat))
+      names(block_cat_modes) <- block_cat
+      for (v in block_cat) {
+        if (v %in% colnames(mf)) {
+          mode_v <- .mode_level(mf[[v]])
+          if (!is.na(mode_v)) {
+            block_cat_modes[[v]] <- mode_v
+          }
+        }
+      }
+      if (!length(block_cat_modes) ||
+          all(vapply(block_cat_modes, is.null, logical(1)))) {
+        block_cat_modes <- NULL
+      }
+    }
+  }
+
+  if (using_spec &&
+      !is.null(spec$num_range) &&
+      is.matrix(spec$num_range) &&
+      ncol(spec$num_range) > 0L &&
+      !is.null(colnames(spec$num_range))) {
+
+    if (!is.null(spec$is_cat) && length(spec$is_cat)) {
+      num_vars <- predictor_vars[predictor_vars %in% names(spec$is_cat) &
+                                   !spec$is_cat[predictor_vars]]
+    } else {
+      num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
+        v %in% colnames(mf) && is.numeric(mf[[v]])
+      }, logical(1))]
+    }
+
+    cols <- intersect(num_vars, colnames(spec$num_range))
+    if (length(cols)) {
+      num_ranges <- spec$num_range[, cols, drop = FALSE]
+      storage.mode(num_ranges) <- "double"
+    } else {
+      num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
+                           dimnames = list(c("min", "max"), NULL))
+    }
+
+    if (!is.null(spec$levels) && length(spec$levels)) {
+      fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
+      fl <- fl[!vapply(fl, is.null, logical(1))]
+      if (length(fl)) factor_levels <- fl
+    }
+
+  } else {
+    num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
+      v %in% colnames(mf) && is.numeric(mf[[v]])
+    }, logical(1))]
+    if (length(num_vars)) {
+      rng_mat <- vapply(num_vars, function(v) {
+        r <- range(mf[[v]], na.rm = TRUE)
+        if (!all(is.finite(r)) || r[1] == r[2]) {
+          r <- c(min(mf[[v]], na.rm = TRUE), max(mf[[v]], na.rm = TRUE))
+        }
+        r
+      }, numeric(2))
+      rownames(rng_mat) <- c("min", "max")
+      num_ranges <- as.matrix(rng_mat)
+    } else {
+      num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
+                           dimnames = list(c("min", "max"), NULL))
+    }
+  }
+
+  discrete_numeric_vars   <- character(0L)
+  discrete_numeric_levels <- list()
+  if (using_spec && !is.null(spec$settings)) {
+    dn <- spec$settings$discrete_numeric
+    dl <- spec$settings$discrete_levels
+
+    if (is.null(dn)) dn <- character(0L)
+    if (!is.character(dn)) dn <- character(0L)
+    dn <- intersect(unique(dn), predictor_vars)
+
+    if (!is.null(dl) && is.list(dl) && length(dn)) {
+      dl <- dl[intersect(names(dl), dn)]
+      for (nm in names(dl)) {
+        vv <- as.numeric(dl[[nm]])
+        vv <- sort(unique(vv[is.finite(vv)]))
+        if (length(vv)) discrete_numeric_levels[[nm]] <- vv
+      }
+    }
+
+    if (length(dn)) discrete_numeric_vars <- dn
+  }
+
+  feature_names <- colnames(X)
+  terms_str <- tryCatch(
+    paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
+    error = function(e) NA_character_
+  )
+  safe_hash <- function(s) {
+    if (!is.character(s) || !length(s) || is.na(s)) return(NA_character_)
+    bytes <- charToRaw(paste0(s, collapse = ""))
+    sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
+  }
+  schema <- list(
+    feature_names     = feature_names,
+    terms_str         = terms_str,
+    xlevels           = xlevels,
+    contrasts         = contrasts_used,
+    contrasts_options = contrasts_opts_used,
+    terms_hash        = safe_hash(terms_str)
+  )
+
+  sampling_schema <- list(
+    predictor_vars   = predictor_vars,
+    var_classes      = var_classes,
+    num_ranges       = num_ranges,
+    factor_levels    = factor_levels,
+    blocking         = blocking,
+    block_cat_modes  = block_cat_modes,
+    discrete_numeric = discrete_numeric_vars,
+    discrete_levels  = discrete_numeric_levels
+  )
+
+  list(
+    X = X, y_vec = y_vec, n = n, p = p,
+    groups = groups,
+    f_store = f_store, terms_clean = terms_clean,
+    xlevels = xlevels,
+    contrasts_used = contrasts_used,
+    contrasts_opts_used = contrasts_opts_used,
+    schema = schema, sampling_schema = sampling_schema,
+    using_spec = using_spec
+  )
+}
+
+## ----------------------------------------------------------------------------
+## Forward-path numerics
+## ----------------------------------------------------------------------------
+
+## Relative projected-column-norm ratio at or below which a candidate group is
+## treated as linearly dependent on the current path and skipped.
+.svem_forward_gate <- 1e-8
+
+## Rank tolerance for every qr() factorization in this file. Must be strictly
+## tighter than .svem_forward_gate: base qr()'s default tolerance (1e-7) would
+## declare columns aliased that the 1e-8 acceptance gate admitted (for example
+## timestamp-scale predictors), so accepted path points could no longer be
+## refit as full rank.
+.svem_forward_qr_tol <- 1e-10
+
+## Numerical noise floor for forward-path RSS comparisons: anchored to the
+## intercept-only RSS (the signal scale once the mean is absorbed), with a
+## response-energy floor for the degenerate constant-response case. Anchoring
+## to raw response energy would silently truncate selection for large-mean
+## responses (e.g. y ~ 1e8 + signal).
+.svem_forward_dust <- function(rss_intercept_only, yvec) {
+  max(
+    1e-12 * max(rss_intercept_only, .Machine$double.xmin),
+    1e-12 * .Machine$double.eps * max(sum(yvec^2), .Machine$double.xmin)
+  )
+}
+
+## Evaluate every candidate group against the current path in one pass.
+## One QR of the current path columns; each candidate is scored by projecting
+## its columns off the current orthonormal basis, so the RSS decrease is the
+## squared norm of the projected-residual components. Returns NA rss for
+## candidates that are (near-)collinear with the current path. Below `dust`
+## log-RSS comparisons are rounding-dominated, so callers stop growing.
+.svem_forward_step <- function(Xmat, yvec, path_idx, candidate_groups, dust) {
+  Qc <- qr.Q(qr(Xmat[, path_idx, drop = FALSE], tol = .svem_forward_qr_tol))
+  resid <- yvec - as.vector(Qc %*% crossprod(Qc, yvec))
+  rss_current <- sum(resid^2)
+
+  out <- rep(NA_real_, length(candidate_groups))
+  if (rss_current <= dust) {
+    return(list(rss = out, rss_current = rss_current, near_perfect = TRUE))
+  }
+
+  for (gi in seq_along(candidate_groups)) {
+    cols <- Xmat[, candidate_groups[[gi]], drop = FALSE]
+    proj <- cols - Qc %*% crossprod(Qc, cols)
+    if (ncol(cols) == 1L) {
+      pn  <- sqrt(sum(proj * proj))
+      on_ <- sqrt(sum(cols * cols))
+      if (pn / max(on_, .Machine$double.xmin) <= .svem_forward_gate) next
+      gain    <- sum(proj * resid) / pn
+      rss_new <- rss_current - gain * gain
+    } else {
+      on_ <- sqrt(colSums(cols^2))
+      qrp <- qr(proj, tol = .svem_forward_qr_tol)
+      if (qrp$rank < ncol(cols)) next
+      Rd    <- abs(diag(qr.R(qrp)))
+      pivot <- qrp$pivot
+      scale <- pmax(on_[pivot], .Machine$double.xmin)
+      if (min(Rd / scale) <= .svem_forward_gate) next
+      Qp      <- qr.Q(qrp)
+      gains   <- crossprod(Qp, resid)
+      rss_new <- rss_current - sum(gains^2)
+    }
+    if (rss_new < rss_current * 1e-12 || rss_new <= dust) {
+      ## The projected RSS update is cancellation-dominated for near-perfect
+      ## candidate fits; only an exact refit keeps log-RSS comparisons among
+      ## such candidates meaningful.
+      exact <- .svem_forward_refit(Xmat, yvec,
+                                   c(path_idx, candidate_groups[[gi]]))
+      if (!is.finite(exact$rss)) next
+      rss_new <- exact$rss
+    }
+    out[gi] <- max(rss_new, 0)
+  }
+  list(rss = out, rss_current = rss_current, near_perfect = FALSE)
+}
+
+## Exact least-squares refit of one column subset (unique solution expected;
+## rank-deficient subsets surface as NA coefficients for the caller to handle).
+.svem_forward_refit <- function(Xmat, yvec, idx) {
+  sub <- Xmat[, idx, drop = FALSE]
+  cf  <- qr.coef(qr(sub, tol = .svem_forward_qr_tol), yvec)
+  fitted <- if (anyNA(cf)) rep(NA_real_, length(yvec)) else as.vector(sub %*% cf)
+  rss <- if (anyNA(cf)) NA_real_ else sum((yvec - fitted)^2)
+  list(coefficients = cf, rss = rss)
+}
+
+## Gaussian least-squares information criteria, computed up to the additive
+## Gaussian constant. K = p_reg + 1 counts the fitted regression coefficients
+## (including the structural intercept) plus the residual variance. Returns
+## NA when the criterion is undefined for this (n, p_reg).
+.svem_forward_ic <- function(criterion, n, rss, p_reg) {
+  rss_log <- max(rss, .Machine$double.xmin)
+  K <- p_reg + 1
+  if (criterion == "AICc") {
+    denom <- n - K - 1
+    if (denom <= 0) return(NA_real_)
+    return(n * log(rss_log / n) + 2 * K + 2 * K * (K + 1) / denom)
+  }
+  if (n - p_reg <= 0) return(NA_real_)
+  if (criterion == "AIC") {
+    return(n * log(rss_log / n) + 2 * K)
+  }
+  n * log(rss_log / n) + K * log(n)  # BIC
+}
+
+## Grow one greedy forward path to its end (all groups, rank exhaustion, or
+## the wAIC/wBIC admissibility ceiling). Steps minimize training RSS over
+## whole-effect groups; no improvement check, because the path plays the
+## lambda-path role and selection happens in validation scoring.
+.svem_forward_grow <- function(Xmat, yvec, groups, k_slope_ceiling = NULL) {
+  path_idx  <- 1L
+  remaining <- groups
+  points       <- list(path_idx)
+  group_names  <- list(character(0L))
+  selected     <- character(0L)
+  truncated    <- FALSE
+
+  int_col <- Xmat[, 1L]
+  fit0    <- sum(int_col * yvec) / sum(int_col * int_col)
+  rss0    <- sum((yvec - int_col * fit0)^2)
+  dust    <- .svem_forward_dust(rss0, yvec)
+
+  while (length(remaining)) {
+    if (!is.null(k_slope_ceiling) &&
+        (length(path_idx) - 1L) >= k_slope_ceiling) {
+      ## Every further path point is inadmissible for wAIC/wBIC because the
+      ## slope count only grows; wSSE paths never take this shortcut.
+      truncated <- TRUE
+      break
+    }
+    step_eval <- .svem_forward_step(Xmat, yvec, path_idx, remaining, dust)
+    if (step_eval$near_perfect) break
+    rss <- step_eval$rss
+    if (!any(is.finite(rss))) break
+    best_gi  <- which.min(rss)
+    path_idx <- c(path_idx, remaining[[best_gi]])
+    selected <- c(selected, names(remaining)[best_gi])
+    points[[length(points) + 1L]]           <- path_idx
+    group_names[[length(group_names) + 1L]] <- selected
+    remaining[[best_gi]] <- NULL
+  }
+
+  list(points = points, group_names = group_names, truncated = truncated)
+}
+
+## ----------------------------------------------------------------------------
+## forward_aicc(): deterministic forward selection by AICc / AIC / BIC
+## ----------------------------------------------------------------------------
+
+#' Forward Selection by AICc (or AIC / BIC)
+#'
+#' Deterministic greedy forward selection over whole model terms for Gaussian
+#' responses, minimizing a least-squares information criterion. This is a
+#' single-model benchmark companion to \code{\link{SVEMnet}} (in the same
+#' spirit as \code{\link{glmnet_with_cv}}): it shares SVEMnet's formula and
+#' \code{bigexp_terms()} front end and returns an object compatible with
+#' \code{predict()}, \code{coef()}, and the downstream scoring tools, but fits
+#' one deterministic model instead of an SVEM ensemble.
+#'
+#' Starting from the intercept-only model, each step evaluates every remaining
+#' model term (all columns of a multi-column term, such as a factor's contrast
+#' block, enter together), refits by least squares, and adds the term whose
+#' augmented model minimizes the criterion. Selection stops when no candidate
+#' improves the criterion, when all remaining candidates are collinear with
+#' the current model, or when the criterion is undefined for every candidate
+#' (for example, AICc requires \eqn{n - K - 1 > 0}). Ties are broken by
+#' model-matrix term order.
+#'
+#' The criteria are computed up to the additive Gaussian constant as
+#' \itemize{
+#'   \item AICc: \eqn{n \log(RSS/n) + 2K + 2K(K+1)/(n - K - 1)},
+#'   \item AIC: \eqn{n \log(RSS/n) + 2K},
+#'   \item BIC: \eqn{n \log(RSS/n) + K \log(n)},
+#' }
+#' where \eqn{K = p + 1} counts the fitted regression coefficients (including
+#' the intercept) plus the residual variance. Candidate models that are rank
+#' deficient given the current path, or whose criterion is undefined, are
+#' skipped.
+#'
+#' @param formula A model formula or a \code{bigexp_spec} created by
+#'   \code{bigexp_terms()}, exactly as in \code{\link{SVEMnet}}.
+#' @param data A data frame containing the variables in the model.
+#' @param criterion Character. One of \code{"AICc"} (default), \code{"AIC"},
+#'   or \code{"BIC"}.
+#' @param response Optional character. When \code{formula} is a
+#'   \code{bigexp_spec}, names the response column to use on the left-hand
+#'   side. Defaults to the response stored in the spec.
+#' @param unseen How to treat factor levels not seen in the original
+#'   \code{bigexp_spec}: \code{"warn_na"} (default) or \code{"error"}.
+#' @return An object of classes \code{"svem_forward_ic"} and
+#'   \code{"svem_model"}, structured like an \code{\link{SVEMnet}} fit so that
+#'   \code{predict()}, \code{coef()}, and \code{plot()} work unchanged
+#'   (\code{coef_matrix} has a single row, so bootstrap uncertainty options
+#'   are unavailable). Additional components:
+#' \itemize{
+#'   \item \code{criterion}: the criterion used.
+#'   \item \code{criterion_value}: its value at the selected model.
+#'   \item \code{selected_terms}: character vector of selected term labels,
+#'     in selection order.
+#'   \item \code{selection_path}: data frame with one row per accepted step
+#'     (\code{step}, \code{term}, \code{k}, \code{rss}, \code{criterion},
+#'     \code{improvement}).
+#' }
+#'
+#' @details
+#' Only Gaussian responses are supported. The fit is deterministic: no
+#' random weights are drawn and repeated calls return identical results.
+#' Because \code{coef_matrix} has one row, \code{predict(..., se.fit = TRUE)}
+#' and \code{interval = TRUE} are unavailable; use \code{\link{svem_forward}}
+#' for ensemble uncertainty with forward-selection base learners.
+#'
+#' @seealso \code{\link{svem_forward}}, \code{\link{SVEMnet}},
+#'   \code{\link{glmnet_with_cv}}
+#'
+#' @examples
+#' set.seed(1)
+#' n  <- 40
+#' X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
+#' y  <- 1 + 2 * X1 - 1.5 * X2 + rnorm(n, 0, 0.3)
+#' dat <- data.frame(y, X1, X2, X3)
+#'
+#' fit <- forward_aicc(y ~ (X1 + X2 + X3)^2, dat)
+#' fit$selected_terms
+#' fit$selection_path
+#' preds <- predict(fit, dat)
+#'
+#' ## bigexp_spec front end, as in SVEMnet()
+#' spec <- bigexp_terms(y ~ X1 + X2 + X3, dat, factorial_order = 2)
+#' fit2 <- forward_aicc(spec, dat)
+#'
+#' @importFrom stats setNames delete.response model.frame model.matrix model.response
+#' @export
+forward_aicc <- function(formula, data,
+                         criterion = c("AICc", "AIC", "BIC"),
+                         response = NULL,
+                         unseen = c("warn_na", "error")) {
+  criterion <- match.arg(criterion)
+  unseen    <- match.arg(unseen)
+
+  design <- .svem_forward_design(formula, data, response = response,
+                                 unseen = unseen, fun_name = "forward_aicc")
+  X <- design$X; y_vec <- design$y_vec
+  n <- design$n; p <- design$p
+
+  Xint <- cbind(`(Intercept)` = rep(1, n), X)
+  groups <- lapply(design$groups, function(cols) cols + 1L)
+
+  improvement_tolerance <- 1e-12
+  path_idx       <- 1L
+  selected_terms <- character(0L)
+  remaining      <- groups
+
+  mu0  <- mean(y_vec)
+  rss0 <- sum((y_vec - mu0)^2)
+  current_value <- .svem_forward_ic(criterion, n, rss0, 1L)
+  path_records  <- list()
+  dust <- .svem_forward_dust(rss0, y_vec)
+
+  if (!is.finite(current_value)) {
+    warning("forward_aicc: ", criterion,
+            " is undefined for the intercept-only model (n = ", n,
+            " is too small); returning the intercept-only fit.",
+            call. = FALSE)
+  } else {
+    step <- 1L
+    while (length(remaining)) {
+      step_eval <- .svem_forward_step(Xint, y_vec, path_idx, remaining, dust)
+      if (step_eval$near_perfect) {
+        if (length(remaining)) {
+          warning("forward_aicc: selection stopped because the residual sum ",
+                  "of squares (", format(step_eval$rss_current, digits = 3),
+                  ") is at the numerical noise floor; remaining candidate ",
+                  "terms were not evaluated.", call. = FALSE)
+        }
+        break
+      }
+
+      cand_vals <- rep(NA_real_, length(remaining))
+      for (gi in seq_along(remaining)) {
+        rss_gi <- step_eval$rss[gi]
+        if (!is.finite(rss_gi)) next
+        p_reg <- length(path_idx) + length(remaining[[gi]])
+        v <- .svem_forward_ic(criterion, n, rss_gi, p_reg)
+        if (is.finite(v)) cand_vals[gi] <- v
+      }
+      if (!any(is.finite(cand_vals))) break
+
+      best_gi     <- which.min(cand_vals)
+      improvement <- current_value - cand_vals[best_gi]
+      if (improvement <= improvement_tolerance) break
+
+      path_idx       <- c(path_idx, remaining[[best_gi]])
+      selected_terms <- c(selected_terms, names(remaining)[best_gi])
+      current_value  <- cand_vals[best_gi]
+      path_records[[step]] <- data.frame(
+        step        = step,
+        term        = names(remaining)[best_gi],
+        k           = length(path_idx),
+        rss         = step_eval$rss[best_gi],
+        criterion   = current_value,
+        improvement = improvement,
+        stringsAsFactors = FALSE
+      )
+      remaining[[best_gi]] <- NULL
+      step <- step + 1L
+    }
+  }
+
+  ## Final exact refit of the selected model
+  refit <- .svem_forward_refit(Xint, y_vec, path_idx)
+  cf <- refit$coefficients
+  if (anyNA(cf) || any(!is.finite(cf))) {
+    warning("forward_aicc: final selected model is rank deficient; ",
+            "dependent coefficients are set to zero.", call. = FALSE)
+    cf[!is.finite(cf)] <- 0
+    refit$rss <- sum((y_vec - as.vector(Xint[, path_idx, drop = FALSE] %*% cf))^2)
+  }
+  coef_full <- stats::setNames(numeric(p + 1L), colnames(Xint))
+  coef_full[path_idx] <- cf
+  final_value <- .svem_forward_ic(criterion, n, refit$rss, length(path_idx))
+
+  y_pred <- as.vector(X %*% coef_full[-1L] + coef_full[1L])
+
+  selection_path <- if (length(path_records)) {
+    do.call(rbind, path_records)
+  } else {
+    data.frame(step = integer(0L), term = character(0L), k = integer(0L),
+               rss = numeric(0L), criterion = numeric(0L),
+               improvement = numeric(0L), stringsAsFactors = FALSE)
+  }
+
+  coef_matrix <- matrix(coef_full, nrow = 1L,
+                        dimnames = list(NULL, names(coef_full)))
+
+  result <- list(
+    parms            = coef_full,
+    parms_debiased   = coef_full,
+    debias_fit       = NULL,
+    coef_matrix      = coef_matrix,
+    nBoot            = 1L,
+    nBoot_input      = 1L,
+    weight_scheme    = "none",
+    objective_input  = criterion,
+    objective_used   = criterion,
+    objective        = criterion,
+    auto_used        = FALSE,
+    auto_decision    = NA_character_,
+    criterion        = criterion,
+    criterion_value  = final_value,
+    selected_terms   = selected_terms,
+    selection_path   = selection_path,
+    diagnostics      = list(
+      k_summary       = c(k_median = length(path_idx), k_iqr = 0),
+      fallback_rate   = 0,
+      fallback_reasons = integer(0L),
+      candidate_terms = names(design$groups)
+    ),
+    actual_y         = y_vec,
+    training_X       = X,
+    y_pred           = y_pred,
+    y_pred_debiased  = NULL,
+    nobs             = n,
+    nparm            = p + 1L,
+    formula          = design$f_store,
+    terms            = design$terms_clean,
+    xlevels          = design$xlevels,
+    contrasts        = design$contrasts_used,
+    schema           = design$schema,
+    sampling_schema  = design$sampling_schema,
+    used_bigexp_spec = design$using_spec,
+    family           = "gaussian",
+    method           = "forward_ic"
+  )
+  class(result) <- c("svem_forward_ic", "svem_model", "SVEMnet")
+  result
+}
+
+## ----------------------------------------------------------------------------
+## svem_forward(): SVEM ensemble with forward-selection base learners
+## ----------------------------------------------------------------------------
+
+#' Fit an SVEM Model with Forward-Selection Base Learners
+#'
+#' Fit a Self-Validated Ensemble Model in which each bootstrap replicate's
+#' base learner is greedy forward selection on training-weighted least
+#' squares, instead of the glmnet elastic-net path used by
+#' \code{\link{SVEMnet}}. The forward path (intercept-only model up to the
+#' full greedy path) plays the lambda-path role: every path point is scored
+#' on the fractional-random-weight validation copy with the same
+#' validation-weighted criteria as \code{SVEMnet()} (\code{"wAIC"} by
+#' default, or \code{"wBIC"} / \code{"wSSE"}), and the minimizing path point
+#' wins that replicate. Winning coefficient vectors are averaged across
+#' bootstrap replicates exactly as in \code{SVEMnet()}.
+#'
+#' Per replicate and row, a shared uniform draw is converted to
+#' anti-correlated train/validation weights (\code{weight_scheme = "SVEM"}),
+#' the forward path is grown on rows scaled by \code{sqrt(w_train)}, greedy
+#' steps add the whole model term (multi-column factor blocks move as a
+#' unit) that most reduces training RSS, and each path point is refit and
+#' scored by validation-weighted residuals on the original (unweighted)
+#' rows. For \code{"wAIC"}/\code{"wBIC"}, path growth stops once the slope
+#' count reaches the Kish admissible effective sample size
+#' \eqn{n_{eff,adm}}, because all further path points would be inadmissible;
+#' \code{"wSSE"} paths are never truncated. Replicates with no admissible
+#' finite path point fall back to a weighted intercept-only model, as in
+#' \code{SVEMnet()}.
+#'
+#' @param formula A model formula or a \code{bigexp_spec} created by
+#'   \code{bigexp_terms()}, exactly as in \code{\link{SVEMnet}}.
+#' @param data A data frame containing the variables in the model.
+#' @param nBoot Integer. Number of bootstrap replicates (default \code{200}).
+#' @param objective Character. One of \code{"auto"} (resolves to
+#'   \code{"wAIC"}), \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}, with the
+#'   same definitions as in \code{\link{SVEMnet}} (Gaussian case): the model
+#'   size \eqn{k} counts the fitted coefficients of the path point including
+#'   the intercept.
+#' @param weight_scheme Character. \code{"SVEM"} (default),
+#'   \code{"FRW_plain"}, or \code{"Identity"}, as in \code{\link{SVEMnet}}.
+#'   \code{"Identity"} with \code{nBoot = 1} yields a single deterministic
+#'   forward-selection fit tuned by the chosen information criterion on the
+#'   training data.
+#' @param response Optional character. When \code{formula} is a
+#'   \code{bigexp_spec}, names the response column to use on the left-hand
+#'   side.
+#' @param unseen How to treat factor levels not seen in the original
+#'   \code{bigexp_spec}: \code{"warn_na"} (default) or \code{"error"}.
+#' @param store_member_weights Logical; default \code{FALSE}. If \code{TRUE},
+#'   retain the exact per-member uniforms and mean-one training and validation
+#'   weights in \code{member_weights}. This can materially increase object size.
+#'
+#' @return An object of classes \code{"svem_forward"} and
+#'   \code{"svem_model"}, structured like an \code{\link{SVEMnet}} fit:
+#'   \code{parms}, \code{parms_debiased}, \code{debias_fit},
+#'   \code{coef_matrix} (rows = bootstrap members), \code{diagnostics},
+#'   \code{schema}, \code{sampling_schema}, and so on, so that
+#'   \code{predict()} (including \code{se.fit}/\code{interval}),
+#'   \code{coef()}, \code{plot()}, \code{svem_nonzero()},
+#'   \code{svem_random_table_multi()}, and \code{svem_score_random()} work
+#'   unchanged. Forward-selection-specific components:
+#' \itemize{
+#'   \item \code{best_ks}: per-bootstrap selected model size (coefficients
+#'     including the intercept).
+#'   \item \code{best_edfs}: per-bootstrap effective df; for the full-rank
+#'     weighted least-squares refits used here this equals \code{best_ks}.
+#'   \item \code{member_diagnostics}: per-member validation SSE, objective
+#'     value, support/effective df, Kish validation size, residual scale, and
+#'     admissibility warnings.
+#'   \item \code{member_weights}: optional stored FRW draws and weights, when
+#'     \code{store_member_weights = TRUE}.
+#'   \item \code{diagnostics$path_length_max}: longest grown path (points,
+#'     including the intercept-only point).
+#'   \item \code{diagnostics$admissibility_truncation_rate}: fraction of
+#'     replicates whose path growth was stopped by the wAIC/wBIC
+#'     admissibility ceiling.
+#'   \item \code{diagnostics$selection_frequencies}: fraction of replicates
+#'     in which each model term was part of the winning model.
+#' }
+#'
+#' @details
+#' Only Gaussian responses are supported. There is no debias argument at fit
+#' time: as in \code{SVEMnet()}, a linear calibration \code{lm(y ~ y_pred)}
+#' is stored when \code{nBoot >= 10} and the fitted values vary, and
+#' \code{predict(..., debias = TRUE)} applies it.
+#'
+#' Unlike the elastic net, forward selection contains no shrinkage, so
+#' exactly collinear candidates (for example the third mixture component
+#' after the first two have entered) are skipped as rank deficient rather
+#' than entering with shrunk coefficients.
+#'
+#' @seealso \code{\link{forward_aicc}} for the deterministic single-model
+#'   version, \code{\link{SVEMnet}} for the elastic-net ensemble.
+#'
+#' @examples
+#' set.seed(42)
+#' n  <- 30
+#' X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
+#' y  <- 1 + 2 * X1 - 1.5 * X2 + 0.8 * X1 * X2 + rnorm(n, 0, 0.5)
+#' dat <- data.frame(y, X1, X2, X3)
+#'
+#' fit <- svem_forward(y ~ (X1 + X2 + X3)^2, dat, nBoot = 8)
+#' preds <- predict(fit, dat)
+#'
+#' ## bigexp_spec front end, as in SVEMnet()
+#' spec <- bigexp_terms(y ~ X1 + X2 + X3, dat, factorial_order = 2)
+#' fit2 <- svem_forward(spec, dat, nBoot = 8)
+#'
+#' @importFrom stats runif lm predict coef var median IQR
+#' @export
+svem_forward <- function(formula, data,
+                         nBoot = 200,
+                         objective = c("auto", "wAIC", "wBIC", "wSSE"),
+                         weight_scheme = c("SVEM", "FRW_plain", "Identity"),
+                         response = NULL,
+                         unseen = c("warn_na", "error"),
+                         store_member_weights = FALSE) {
+  objective     <- match.arg(objective)
+  weight_scheme <- match.arg(weight_scheme)
+  unseen        <- match.arg(unseen)
+  store_member_weights <- .svem_logical_scalar(
+    store_member_weights, "store_member_weights"
+  )
+  nBoot         <- .svem_integer_scalar(nBoot, "nBoot", min = 1L)
+  nBoot_input   <- nBoot
+
+  design <- .svem_forward_design(formula, data, response = response,
+                                 unseen = unseen, fun_name = "svem_forward")
+  X <- design$X; y_vec <- design$y_vec
+  n <- design$n; p <- design$p
+
+  Xint <- cbind(`(Intercept)` = rep(1, n), X)
+  groups <- lapply(design$groups, function(cols) cols + 1L)
+
+  auto_used      <- identical(objective, "auto")
+  objective_used <- if (auto_used) "wAIC" else objective
+  auto_decision  <- if (auto_used) objective_used else NA_character_
+
+  structural_intercept_only <- p == 0L || length(unique(y_vec)) < 2L
+
+  coef_matrix <- matrix(NA_real_, nrow = nBoot, ncol = p + 1L)
+  colnames(coef_matrix) <- c("(Intercept)", colnames(X))
+  k_sel_vec       <- rep(NA_integer_, nBoot)
+  fallbacks       <- integer(nBoot)
+  fallback_reason <- rep(NA_character_, nBoot)
+  n_eff_keep      <- numeric(nBoot)
+  path_len_vec    <- integer(nBoot)
+  trunc_vec       <- logical(nBoot)
+  sel_counts      <- stats::setNames(numeric(length(groups)), names(groups))
+  objective_value <- rep(NA_real_, nBoot)
+  validation_sse  <- rep(NA_real_, nBoot)
+  frw_uniforms       <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
+  training_weights   <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
+  validation_weights <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
+
+  eps <- .Machine$double.eps
+
+  for (i in seq_len(nBoot)) {
+    U <- rep(NA_real_, n)
+    if (weight_scheme == "SVEM") {
+      U <- pmin(pmax(stats::runif(n), eps), 1 - eps)
+      w_train <- -log(U); w_valid <- -log1p(-U)
+    } else if (weight_scheme == "FRW_plain") {
+      U <- pmin(pmax(stats::runif(n), eps), 1 - eps)
+      w_train <- -log(U); w_valid <- w_train
+    } else {
+      w_train <- rep(1, n); w_valid <- rep(1, n)
+    }
+    w_train <- w_train * (n / sum(w_train))
+    w_valid <- w_valid * (n / sum(w_valid))
+    if (store_member_weights) {
+      frw_uniforms[i, ]       <- U
+      training_weights[i, ]   <- w_train
+      validation_weights[i, ] <- w_valid
+    }
+
+    sumw  <- sum(w_valid); sumw2 <- sum(w_valid^2)
+    n_eff_raw <- (sumw^2) / (sumw2 + eps)
+    n_eff_adm <- max(2, min(n, n_eff_raw))
+    n_eff_keep[i] <- n_eff_raw
+
+    if (structural_intercept_only) {
+      mu_w <- sum(w_train * y_vec) / sum(w_train)
+      coef_matrix[i, ] <- c(mu_w, rep(0, p))
+      k_sel_vec[i]     <- 1L
+      path_len_vec[i]  <- 1L
+      sse_i <- sum(w_valid * (y_vec - mu_w)^2)
+      validation_sse[i] <- sse_i
+      objective_value[i] <- switch(
+        objective_used,
+        "wSSE" = sse_i,
+        "wAIC" = sumw * log(max(sse_i, eps) / sumw) + 2,
+        "wBIC" = sumw * log(max(sse_i, eps) / sumw) + log(n_eff_adm)
+      )
+      next
+    }
+
+    sqrt_w <- sqrt(w_train)
+    Xw <- Xint * sqrt_w
+    yw <- y_vec * sqrt_w
+
+    ceiling_k <- if (objective_used %in% c("wAIC", "wBIC")) n_eff_adm else NULL
+    path <- .svem_forward_grow(Xw, yw, groups, k_slope_ceiling = ceiling_k)
+    path_len_vec[i] <- length(path$points)
+    trunc_vec[i]    <- path$truncated
+
+    ## Score every path point: training-weighted exact refit, validation
+    ## weights applied to residuals on the ORIGINAL unweighted rows.
+    L <- length(path$points)
+    sse_w     <- numeric(L)
+    kvals     <- integer(L)
+    coef_list <- vector("list", L)
+    for (j in seq_len(L)) {
+      idx <- path$points[[j]]
+      cf  <- qr.coef(qr(Xw[, idx, drop = FALSE], tol = .svem_forward_qr_tol), yw)
+      kvals[j] <- length(idx)
+      if (anyNA(cf) || any(!is.finite(cf))) {
+        sse_w[j] <- Inf
+        next
+      }
+      r <- as.vector(Xint[, idx, drop = FALSE] %*% cf) - y_vec
+      s <- sum(w_valid * r * r)
+      sse_w[j] <- if (is.finite(s)) s else Inf
+      coef_list[[j]] <- cf
+    }
+
+    sse_adj <- pmax(sse_w, eps)
+    if (objective_used == "wSSE") {
+      scores <- sse_adj
+    } else {
+      k_slope <- pmax(kvals - 1L, 0L)
+      adm     <- k_slope < n_eff_adm
+      n_like  <- sumw
+      pen     <- if (objective_used == "wAIC") 2 else log(n_eff_adm)
+      scores  <- rep(Inf, L)
+      scores[adm] <- n_like * log(sse_adj[adm] / n_like) + pen * kvals[adm]
+    }
+    scores[!is.finite(scores)] <- Inf
+
+    ok <- any(is.finite(scores))
+    if (ok) {
+      winner <- which.min(scores)
+      ok     <- !is.null(coef_list[[winner]])
+    }
+    if (!ok) {
+      fallbacks[i]       <- 1L
+      fallback_reason[i] <- "no admissible finite forward path point"
+      mu_w <- sum(w_train * y_vec) / sum(w_train)
+      coef_matrix[i, ] <- c(mu_w, rep(0, p))
+      k_sel_vec[i]     <- 1L
+      validation_sse[i] <- sum(w_valid * (y_vec - mu_w)^2)
+      next
+    }
+
+    beta <- numeric(p + 1L)
+    beta[path$points[[winner]]] <- coef_list[[winner]]
+    coef_matrix[i, ] <- beta
+    k_sel_vec[i]     <- kvals[winner]
+    validation_sse[i] <- sse_w[winner]
+    objective_value[i] <- scores[winner]
+    sel_terms_i <- path$group_names[[winner]]
+    if (length(sel_terms_i)) {
+      sel_counts[sel_terms_i] <- sel_counts[sel_terms_i] + 1
+    }
+  }
+
+  fallback_summary <- if (any(fallbacks == 1L)) {
+    sort(table(fallback_reason[fallbacks == 1L]), decreasing = TRUE)
+  } else {
+    integer(0L)
+  }
+  if (!structural_intercept_only && all(fallbacks == 1L)) {
+    stop(
+      "All bootstrap fits fell back to intercept-only models. Reasons: ",
+      paste(names(fallback_summary), as.integer(fallback_summary),
+            sep = " (n=", collapse = "); "),
+      ").",
+      call. = FALSE
+    )
+  }
+  if (any(fallbacks == 1L) && !all(fallbacks == 1L)) {
+    warning(
+      sum(fallbacks == 1L), " of ", nBoot,
+      " bootstrap fits fell back to intercept-only models. ",
+      "See `diagnostics$fallback_reasons`.",
+      call. = FALSE
+    )
+  }
+
+  valid_rows <- rowSums(!is.finite(coef_matrix)) == 0
+  if (!any(valid_rows)) {
+    stop("All bootstrap iterations failed to produce valid coefficients.")
+  }
+  coef_matrix  <- coef_matrix[valid_rows, , drop = FALSE]
+  k_sel_vec    <- k_sel_vec[valid_rows]
+  fallbacks    <- fallbacks[valid_rows]
+  n_eff_keep   <- n_eff_keep[valid_rows]
+  path_len_vec <- path_len_vec[valid_rows]
+  trunc_vec    <- trunc_vec[valid_rows]
+  fallback_reason <- fallback_reason[valid_rows]
+  objective_value <- objective_value[valid_rows]
+  validation_sse  <- validation_sse[valid_rows]
+  if (store_member_weights) {
+    frw_uniforms       <- frw_uniforms[valid_rows, , drop = FALSE]
+    training_weights   <- training_weights[valid_rows, , drop = FALSE]
+    validation_weights <- validation_weights[valid_rows, , drop = FALSE]
+  }
+
+  nBoot_used <- nrow(coef_matrix)
+
+  avg_coefficients <- colMeans(coef_matrix)
+  y_pred <- as.vector(X %*% avg_coefficients[-1L] + avg_coefficients[1L])
+
+  debias_fit      <- NULL
+  y_pred_debiased <- NULL
+  parms_debiased  <- avg_coefficients
+
+  if (nBoot_used >= 10 && stats::var(y_pred) > 0) {
+    debias_fit <- stats::lm(y_vec ~ y_pred)
+    y_pred_debiased <- stats::predict(debias_fit)
+    ab <- try(stats::coef(debias_fit), silent = TRUE)
+    if (!inherits(ab, "try-error") &&
+        length(ab) >= 2 &&
+        is.finite(ab[1]) && is.finite(ab[2])) {
+      a <- unname(ab[1]); b <- unname(ab[2])
+      int_name <- "(Intercept)"
+      if (!is.null(names(parms_debiased)) && int_name %in% names(parms_debiased)) {
+        parms_debiased[int_name] <- a + b * parms_debiased[int_name]
+        if (length(parms_debiased) > 1L) {
+          slope_names <- setdiff(names(parms_debiased), int_name)
+          parms_debiased[slope_names] <- b * parms_debiased[slope_names]
+        }
+      } else {
+        parms_debiased[1] <- a + b * parms_debiased[1]
+        if (length(parms_debiased) > 1L) parms_debiased[-1] <- b * parms_debiased[-1]
+      }
+    }
+  }
+
+  diagnostics <- list(
+    k_summary = c(k_median = stats::median(k_sel_vec),
+                  k_iqr    = stats::IQR(k_sel_vec)),
+    fallback_rate    = mean(fallbacks),
+    fallback_reasons = fallback_summary,
+    n_eff_summary    = summary(n_eff_keep),
+    path_length_max  = max(path_len_vec),
+    admissibility_truncation_rate = mean(trunc_vec),
+    selection_frequencies = sort(sel_counts / nBoot_used, decreasing = TRUE)
+  )
+
+  n_eff_adm_keep <- pmax(2, pmin(n, n_eff_keep))
+  residual_df_support <- n - k_sel_vec
+  residual_variance_support <- ifelse(
+    residual_df_support > 0 & is.finite(validation_sse),
+    validation_sse / residual_df_support,
+    NA_real_
+  )
+  residual_scale_support <- sqrt(residual_variance_support)
+  member_warning <- rep(NA_character_, nBoot_used)
+  for (ii in seq_len(nBoot_used)) {
+    wi <- character(0L)
+    if (fallbacks[ii] == 1L) {
+      wi <- c(wi, paste0("fallback: ", fallback_reason[ii]))
+    }
+    if (residual_df_support[ii] <= 0) {
+      wi <- c(wi, "nonpositive n - support residual denominator")
+    }
+    if (objective_used %in% c("wAIC", "wBIC") &&
+        (n_eff_adm_keep[ii] - (k_sel_vec[ii] - 1L)) <= 1) {
+      wi <- c(wi, "selected support is within one coefficient of the Kish guardrail")
+    }
+    if (length(wi)) member_warning[ii] <- paste(wi, collapse = "; ")
+  }
+  member_diagnostics <- data.frame(
+    member = seq_len(nBoot_used),
+    objective = rep(objective_used, nBoot_used),
+    validation_sse = validation_sse,
+    objective_value = objective_value,
+    support_size = k_sel_vec,
+    effective_df = as.numeric(k_sel_vec),
+    kish_validation_n_eff = n_eff_keep,
+    kish_validation_n_eff_adm = n_eff_adm_keep,
+    residual_df_support = residual_df_support,
+    residual_variance_support = residual_variance_support,
+    residual_scale_support = residual_scale_support,
+    admissible_for_residual_scale = residual_df_support > 0 &
+      is.finite(residual_scale_support) & fallbacks == 0L,
+    fallback = fallbacks == 1L,
+    admissibility_warning = member_warning,
+    stringsAsFactors = FALSE
+  )
+  member_weights <- if (store_member_weights) {
+    list(
+      uniforms = frw_uniforms,
+      training = training_weights,
+      validation = validation_weights,
+      normalization = "each weight row rescaled to mean one"
+    )
+  } else NULL
+
+  result <- list(
+    parms            = avg_coefficients,
+    parms_debiased   = parms_debiased,
+    debias_fit       = debias_fit,
+    coef_matrix      = coef_matrix,
+    nBoot            = nBoot_used,
+    nBoot_input      = nBoot_input,
+    best_ks          = k_sel_vec,
+    best_edfs        = as.numeric(k_sel_vec),
+    member_diagnostics = member_diagnostics,
+    member_weights   = member_weights,
+    store_member_weights = store_member_weights,
+    weight_scheme    = weight_scheme,
+    objective_input  = objective,
+    objective_used   = objective_used,
+    objective        = objective_used,
+    auto_used        = auto_used,
+    auto_decision    = if (auto_used) auto_decision else NA_character_,
+    diagnostics      = diagnostics,
+    actual_y         = y_vec,
+    training_X       = X,
+    y_pred           = y_pred,
+    y_pred_debiased  = y_pred_debiased,
+    nobs             = n,
+    nparm            = p + 1L,
+    formula          = design$f_store,
+    terms            = design$terms_clean,
+    xlevels          = design$xlevels,
+    contrasts        = design$contrasts_used,
+    schema           = design$schema,
+    sampling_schema  = design$sampling_schema,
+    used_bigexp_spec = design$using_spec,
+    family           = "gaussian",
+    method           = "svem_forward"
+  )
+  class(result) <- c("svem_forward", "svem_model", "SVEMnet")
+  result
+}

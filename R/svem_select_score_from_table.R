@@ -122,17 +122,15 @@ svem_select_from_score_table <- function(score_table,
   # Capture the call (arguments) for output
   mc <- match.call()
 
-  if (!is.character(target) || length(target) != 1L || !nzchar(target))
+  if (!is.character(target) || length(target) != 1L || is.na(target) || !nzchar(target))
     stop("`target` must be a nonempty character scalar naming a column.")
   if (!(target %in% colnames(score_table)))
     stop("Column `", target, "` not found in `score_table`.")
 
-  if (!is.numeric(k) || length(k) != 1L || !is.finite(k))
-    stop("`k` must be a single finite numeric value.")
-  k <- as.integer(k)
+  k <- .svem_integer_scalar(k, "k", min = -.Machine$integer.max)
 
   if (!is.null(label)) {
-    if (!is.character(label) || length(label) != 1L) {
+    if (!is.character(label) || length(label) != 1L || is.na(label)) {
       stop("`label` must be a single character string or NULL.")
     }
   }
@@ -142,7 +140,8 @@ svem_select_from_score_table <- function(score_table,
   if (!is.numeric(vals))
     stop("Column `", target, "` must be numeric for ranking.")
 
-  if (all(!is.finite(vals))) {
+  finite_idx <- which(is.finite(vals))
+  if (!length(finite_idx)) {
     stop("All values in `target = '", target, "'` are non-finite; cannot select best row.")
   }
 
@@ -150,8 +149,8 @@ svem_select_from_score_table <- function(score_table,
 
   # Deterministic tie-breaker: keep original row order among ties
   # (order() is not guaranteed stable across all R/OS builds)
-  key <- if (decreasing_flag) -vals else vals
-  ord <- order(key, seq_along(key), na.last = TRUE)
+  key <- if (decreasing_flag) -vals[finite_idx] else vals[finite_idx]
+  ord <- finite_idx[order(key, finite_idx)]
 
   if (!length(ord))
     stop("No rows available in score_table for selection.")
@@ -168,8 +167,22 @@ svem_select_from_score_table <- function(score_table,
 
     ## --- determine predictor_cols (needed only for PAM) ---
 
-    if (is.null(predictor_cols)) {
+    user_supplied_predictors <- !is.null(predictor_cols)
+    if (!user_supplied_predictors) {
       predictor_cols <- attr(score_table, "svem_predictor_cols")
+    }
+
+    if (user_supplied_predictors) {
+      # explicitly supplied names must exist: silently intersecting away a
+      # misspelled vector would fall through to the heuristic as if the user
+      # had passed NULL (mirrors svem_select_candidates())
+      missing_pc <- setdiff(as.character(predictor_cols), names(score_table))
+      if (length(missing_pc)) {
+        stop(
+          "predictor_cols not found in score_table: ",
+          paste(missing_pc, collapse = ", ")
+        )
+      }
     }
 
     if (!is.null(predictor_cols)) {
@@ -210,19 +223,13 @@ svem_select_from_score_table <- function(score_table,
       ## --- convert top_type/top into a top_frac in (0, 1] ---
 
       if (top_type == "frac") {
-        if (!(is.numeric(top) && length(top) == 1L &&
-              is.finite(top) && top > 0 && top <= 1)) {
-          stop("When top_type = 'frac', `top` must be in (0, 1].")
-        }
-        top_frac <- top
+        top_frac <- .svem_numeric_scalar(top, "top", lower = 0, upper = 1,
+                                         lower_open = TRUE)
         # same rounding as svem_select_candidates() so the warning is accurate
         n_top_est <- max(1L, min(n_total, ceiling(top_frac * n_total - 1e-9)))
       } else {  # top_type == "n"
-        if (!(is.numeric(top) && length(top) == 1L &&
-              is.finite(top) && top >= 1)) {
-          stop("When top_type = 'n', `top` must be >= 1.")
-        }
-        n_top_est <- min(n_total, as.integer(top))
+        top_n <- .svem_integer_scalar(top, "top", min = 1L)
+        n_top_est <- min(n_total, top_n)
         top_frac  <- n_top_est / n_total
       }
 

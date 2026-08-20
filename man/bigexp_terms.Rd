@@ -45,17 +45,23 @@ non-blocking predictors. A value of 1 means only linear terms; 2 adds
 squares \code{I(X^2)}; 3 adds cubes \code{I(X^3)}; in general, all powers
 \code{I(X^k)} for \code{k} from 2 up to \code{polynomial_order} are added.}
 
-\item{include_pc_2way}{Logical. If \code{TRUE} (default) and
-\code{polynomial_order >= 2}, include partial-cubic two-way terms of the
-form \code{Z:I(X^2)} where \code{X} is continuous and \code{Z} is another
-non-blocking predictor.}
+\item{include_pc_2way}{Logical. If \code{TRUE} (default),
+\code{polynomial_order >= 2}, and \code{factorial_order >= 2}, include
+partial-cubic two-way terms of the form \code{Z:I(X^2)} where \code{X} is
+continuous and \code{Z} is another non-blocking predictor. (These are
+cross terms, so \code{factorial_order = 1} — "main effects only" —
+suppresses them.)}
 
-\item{include_pc_3way}{Logical. If \code{TRUE} and \code{polynomial_order >= 2},
-include partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
+\item{include_pc_3way}{Logical. If \code{TRUE},
+\code{polynomial_order >= 2}, and \code{factorial_order >= 3}, include
+partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
 predictors.}
 
 \item{intercept}{Logical. If \code{TRUE} (default), include an intercept in the
-expansion; if \code{FALSE}, the generated RHS drops the intercept.}
+expansion; if \code{FALSE}, the generated RHS drops the intercept. The
+no-intercept form is available for standalone design-matrix workflows;
+\code{SVEMnet()} and \code{glmnet_with_cv()} require the intercept convention
+used by the published SVEM methods and reject such a specification.}
 
 \item{blocking}{Optional character vector of column names in \code{data} to
 treat as blocking factors. These variables are included in the spec and
@@ -242,14 +248,13 @@ spec_block$rhs
 ## A common case is a numeric process setting that only takes a small set
 ## of allowed values (e.g., 0.5, 1, 2, 4). Use `discrete_numeric` in
 ## bigexp_terms() so downstream sampling respects those levels automatically.
-\donttest{
 set.seed(3)
 D_allowed <- c(0.5, 1, 2, 4)
 df_disc <- data.frame(
-  y  = rnorm(60),
-  D  = sample(D_allowed, 60, replace = TRUE),   # numeric with discrete support
-  X1 = rnorm(60),
-  G  = factor(sample(c("A", "B"), 60, replace = TRUE))
+  y  = rnorm(40),
+  D  = sample(D_allowed, 40, replace = TRUE),   # numeric with discrete support
+  X1 = rnorm(40),
+  G  = factor(sample(c("A", "B"), 40, replace = TRUE))
 )
 
 # Record that D should be treated as "discrete numeric" for downstream sampling.
@@ -265,20 +270,20 @@ spec_disc <- bigexp_terms(
 
 # Fit. The discrete support is expected to propagate into fit$sampling_schema
 # (assuming the updated SVEMnet implementation that stores sampling_schema).
-fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 20)
+fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 8,
+                    glmnet_alpha = 1, relaxed = FALSE)
 
 # Score random candidates; sampled D values stay in D_allowed
 scored <- svem_score_random(
   objects         = list(y = fit_disc),
   goals           = list(y = list(goal = "max", weight = 1)),
-  n               = 2000,
+  n               = 200,
   numeric_sampler = "random",
   verbose         = FALSE
 )
 
 table(scored$score_table$D)
 stopifnot(all(scored$score_table$D \%in\% D_allowed))
-}
 }
 \seealso{
 \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},

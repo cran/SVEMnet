@@ -102,6 +102,12 @@
 #'   value inserted into the wAIC/wBIC penalty and is intended for simulation
 #'   study of the alpha/gamma comparison; the published SVEM results use
 #'   \code{"support"}.
+#' @param store_member_weights Logical; default \code{FALSE}. If \code{TRUE},
+#'   retain the exact per-member uniforms and the mean-one training and
+#'   validation weights in \code{member_weights}. This can materially increase
+#'   object size. The stored weights support reproducibility and experimental
+#'   ensemble-mean diagnostics; they do not make the member-percentile limits
+#'   calibrated confidence or prediction intervals.
 #' @param ... Additional arguments passed to \code{glmnet()}, such as
 #'   \code{penalty.factor}, \code{lower.limits}, \code{upper.limits}, or
 #'   \code{standardize.response}. Any user-supplied \code{weights} are ignored
@@ -137,8 +143,17 @@
 #'   \item \code{complexity}: The complexity measure actually used
 #'     (\code{"support"} or \code{"edf"}).
 #'   \item \code{best_edfs}: Per-bootstrap blended effective df of the
-#'     selected path point when \code{complexity = "edf"}; \code{NA}
-#'     otherwise.
+#'     selected Gaussian path point. This diagnostic is computed even when
+#'     \code{complexity = "support"}; it is \code{NA} for binomial fits.
+#'   \item \code{member_diagnostics}: Per-member Gaussian validation SSE,
+#'     selected objective value, support size, effective df, raw and bounded
+#'     Kish validation size, support-based residual df and scale, fallback
+#'     status, and admissibility warnings. Gaussian residual-scale fields are
+#'     \code{NA} for binomial fits.
+#'   \item \code{member_weights}: If \code{store_member_weights = TRUE}, a
+#'     list containing matrices \code{uniforms}, \code{training}, and
+#'     \code{validation}, with rows aligned to \code{coef_matrix}; otherwise
+#'     \code{NULL}.
 #'   \item \code{weight_scheme}: The weighting scheme that was used.
 #'   \item \code{relaxed}: Logical flag indicating whether relaxed paths were
 #'     used.
@@ -160,6 +175,8 @@
 #'         (number of nonzero coefficients including intercept).
 #'       \item \code{fallback_rate}: Proportion of bootstraps that fell back
 #'         to an intercept-only fit.
+#'       \item \code{fallback_reasons}: Named counts summarizing why any
+#'         non-structural bootstrap fits required that fallback.
 #'        \item \code{n_eff_summary}: Summary of raw Kish effective validation
 #'         sizes \eqn{n_eff = (\sum_i w_i^{valid})^2 / \sum_i (w_i^{valid})^2}
 #'         across bootstraps (before truncation to form \eqn{n_eff_adm}).
@@ -183,7 +200,8 @@
 #'   \item \code{formula}: The formula used for fitting (possibly derived
 #'     from a \code{bigexp_spec}).
 #'   \item \code{terms}: \code{terms} object used for building the design
-#'     matrix, with environment set to \code{baseenv()} for safety.
+#'     matrix, with a compact evaluation environment containing any required
+#'     formula transformations.
 #'   \item \code{xlevels}: Factor levels recorded at training time.
 #'   \item \code{contrasts}: Contrasts used for building the design matrix.
 #'   \item \code{schema}: Compact description for safe prediction, including
@@ -327,9 +345,9 @@
 #' \itemize{
 #'   \item Predictors are always standardized internally via
 #'     \code{glmnet(..., standardize = TRUE)}.
-#'   \item The terms object is stored with its environment set to
-#'     \code{baseenv()} so that prediction does not accidentally capture
-#'     objects from the calling environment.
+#'   \item The terms object is stored with a compact evaluation environment so
+#'     that prediction supports standard and local transformation functions
+#'     without accidentally capturing the full calling environment.
 #'   \item A compact schema (feature names, factor levels, contrasts, and
 #'     a simple hash) is stored to allow \code{predict()} and companion
 #'     functions to rebuild model matrices deterministically, even when the
@@ -364,8 +382,8 @@
 #' mod_relax <- SVEMnet(
 #'   y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
 #'   data          = dat,
-#'   glmnet_alpha  = c(1, 0.5),
-#'   nBoot         = 75,
+#'   glmnet_alpha  = 1,
+#'   nBoot         = 10,
 #'   objective     = "auto",
 #'   weight_scheme = "SVEM",
 #'   relaxed       = FALSE
@@ -374,7 +392,6 @@
 #' pred_in_raw <- predict(mod_relax, dat, debias = FALSE)
 #' pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 #'
-#' \donttest{
 #' # ---------------------------------------------------------------------------
 #' # Big expansion (full factorial + polynomial surface + partial-cubic crosses)
 #' # Build once, reuse for one or more responses
@@ -390,8 +407,8 @@
 #' # Fit using the spec (auto-prepares data)
 #' fit_y <- SVEMnet(
 #'   spec, dat,
-#'   glmnet_alpha  = c(1, 0.5),
-#'   nBoot         = 50,
+#'   glmnet_alpha  = 1,
+#'   nBoot         = 8,
 #'   objective     = "auto",
 #'   weight_scheme = "SVEM"
 #' )
@@ -401,8 +418,8 @@
 #' dat$y2 <- 0.5 + 1.4 * X1 - 0.6 * X2 + 0.2 * X3 + rnorm(n, 0, 0.4)
 #' fit_y2 <- SVEMnet(
 #'   spec, dat, response = "y2",
-#'   glmnet_alpha  = c(1, 0.5),
-#'   nBoot         = 50,
+#'   glmnet_alpha  = 1,
+#'   nBoot         = 8,
 #'   objective     = "auto",
 #'   weight_scheme = "SVEM"
 #' )
@@ -428,7 +445,7 @@
 #'
 #' ## Binomial example
 #' set.seed(2)
-#' n  <- 120
+#' n  <- 80
 #' X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
 #' eta <- -0.3 + 1.1 * X1 - 0.8 * X2 + 0.5 * X1 * X3
 #' p   <- plogis(eta)
@@ -437,8 +454,8 @@
 #'
 #' fit_b <- SVEMnet(
 #'   yb ~ (X1 + X2 + X3)^2, db,
-#'   nBoot        = 50,
-#'   glmnet_alpha = c(1, 0.5),
+#'   nBoot        = 10,
+#'   glmnet_alpha = 1,
 #'   family       = "binomial"
 #' )
 #'
@@ -476,11 +493,12 @@
 #'   blocking         = c("Operator", "AmbientTmp")
 #' )
 #'
-#' fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
-#' fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
+#' fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 8,
+#'                   glmnet_alpha = 1, relaxed = FALSE)
+#' fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 8,
+#'                   glmnet_alpha = 1, relaxed = FALSE)
 #'
-#' tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
-#' }
+#' tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 200)
 #' @export
 SVEMnet <- function(formula, data,
                     nBoot = 200,
@@ -492,7 +510,8 @@ SVEMnet <- function(formula, data,
                     unseen = c("warn_na","error"),
                     family = c("gaussian", "binomial"),
                     complexity = c("support", "edf"),
-                    ...) {
+                    ...,
+                    store_member_weights = FALSE) {
 
   ## ----------------- family handling -----------------
   if (inherits(family, "family")) {
@@ -515,6 +534,9 @@ SVEMnet <- function(formula, data,
   weight_scheme <- match.arg(weight_scheme)
   unseen        <- match.arg(unseen)
   complexity    <- match.arg(complexity)
+  store_member_weights <- .svem_logical_scalar(
+    store_member_weights, "store_member_weights"
+  )
 
   if (identical(complexity, "edf") && fam_name == "binomial") {
     warning("complexity = 'edf' is implemented for family = 'gaussian' only; ",
@@ -538,10 +560,7 @@ SVEMnet <- function(formula, data,
   }
 
 
-  if (!is.numeric(nBoot) || length(nBoot) != 1L || !is.finite(nBoot) || nBoot < 1) {
-    stop("nBoot must be >= 1.")
-  }
-  nBoot <- as.integer(nBoot)
+  nBoot <- .svem_integer_scalar(nBoot, "nBoot", min = 1L)
   nBoot_input <- nBoot  # keep what user asked for (fix #2)
 
   if (!is.numeric(glmnet_alpha) || any(!is.finite(glmnet_alpha))) {
@@ -578,6 +597,7 @@ SVEMnet <- function(formula, data,
   }
 
   contrasts_used_full <- NULL  # will capture pre-intercept-drop contrasts (fix #1)
+  schema_data <- data
 
   if (using_spec) {
     # Decide which formula to use:
@@ -585,7 +605,7 @@ SVEMnet <- function(formula, data,
     # - Else, if the spec came via attribute, respect the formula's own LHS.
     # - Else (direct spec), use spec$formula as stored.
     if (!is.null(response)) {
-      f_use <- stats::as.formula(paste(response, "~", spec$rhs))
+      f_use <- stats::as.formula(paste(response, "~", spec$rhs), env = baseenv())
     } else if (spec_from_attr) {
       f_use <- formula
     } else {
@@ -593,6 +613,7 @@ SVEMnet <- function(formula, data,
     }
 
     prep <- bigexp_prepare(spec, data, unseen = unseen)
+    schema_data <- prep$data
 
     spec_settings <- spec$settings
     if (is.null(spec_settings)) spec_settings <- list()
@@ -638,9 +659,22 @@ SVEMnet <- function(formula, data,
     contrasts_used_full <- attr(X, "contrasts")
   }
 
-
-
   y <- stats::model.response(mf)
+
+  terms_full <- attr(mf, "terms")
+  if (!identical(attr(terms_full, "intercept"), 1L) ||
+      (using_spec && identical(spec$settings$intercept, FALSE))) {
+    stop(
+      "SVEMnet fits follow the published intercept convention; formulas using `~ 0`, ",
+      "`- 1`, or `bigexp_terms(intercept = FALSE)` are not supported.",
+      call. = FALSE
+    )
+  }
+
+  if (is.matrix(y) || is.array(y) || length(y) != nrow(mf)) {
+    stop("SVEMnet requires a single univariate response; matrix/multivariate responses are not supported.",
+         call. = FALSE)
+  }
 
   ## ---- response handling by family ----
   .coerce_binomial_01 <- function(y) {
@@ -669,8 +703,9 @@ SVEMnet <- function(formula, data,
     y_vec <- .coerce_binomial_01(y)
   }
 
-  ## drop intercept column (glmnet adds its own)
-  int_idx <- which(colnames(X) %in% c("(Intercept)", "Intercept"))
+  ## drop intercept column (glmnet adds its own); match only the exact
+  ## model.matrix name so a real predictor named "Intercept" is not deleted
+  int_idx <- which(colnames(X) == "(Intercept)")
   if (length(int_idx)) X <- X[, -int_idx, drop = FALSE]
 
   # re-attach contrasts explicitly in case subsetting dropped them (fix #1)
@@ -678,46 +713,57 @@ SVEMnet <- function(formula, data,
     attr(X, "contrasts") <- contrasts_used_full
   }
 
-  if (ncol(X) == 0L) stop("SVEMnet requires at least one predictor.")
-
   if (any(!is.finite(y_vec)) || any(!is.finite(X))) {
     stop("Non-finite values in response/predictors after NA handling.")
   }
   storage.mode(X) <- "double"
 
   n <- nrow(X); p <- ncol(X); nobs <- n; nparm <- p + 1L
+  structural_intercept_only <- p == 0L ||
+    (fam_name == "gaussian" && length(unique(y_vec)) < 2L) ||
+    (fam_name == "binomial" && length(unique(y_vec)) < 2L)
 
-  ## capture training xlevels and contrasts for prediction
-  terms_full  <- attr(mf, "terms")
-  terms_clean <- terms_full; environment(terms_clean) <- baseenv()
+  ## Capture a compact, self-contained formula environment for prediction.
+  compact_formula <- .svem_compact_formula_terms(
+    f_use, terms_full, data_names = names(schema_data)
+  )
+  f_store <- compact_formula$formula
+  terms_clean <- compact_formula$terms
+  schema_data_used <- schema_data
+  omitted_rows <- as.integer(attr(mf, "na.action"))
+  if (length(omitted_rows) && nrow(schema_data_used) >= max(omitted_rows)) {
+    schema_data_used <- schema_data_used[-omitted_rows, , drop = FALSE]
+  }
 
   predictor_vars <- base::all.vars(stats::delete.response(terms_full))
 
   ## ---- guard: response must not also be a predictor ----
-  resp_name <- tryCatch(
-    as.character(f_use[[2L]]),
-    error = function(e) NA_character_
-  )
-  if (!is.na(resp_name) && resp_name %in% predictor_vars) {
+  ## .svem_response_vars() handles transformed responses such as log(y),
+  ## for which as.character(f_use[[2L]]) is length 2 and would crash the
+  ## '&&' below on R >= 4.3.
+  resp_vars <- .svem_response_vars(f_use)
+  resp_in_rhs <- intersect(resp_vars, predictor_vars)
+  if (length(resp_in_rhs)) {
     stop(
       "SVEMnet does not allow a predictor with the same name as the response ('",
-      resp_name, "'). Please rename your variables or adjust the formula."
+      paste(resp_in_rhs, collapse = "', '"),
+      "'). Please rename your variables or adjust the formula."
     )
   }
 
   var_classes <- setNames(vapply(predictor_vars, function(v) {
-    if (v %in% colnames(mf)) class(mf[[v]])[1] else NA_character_
+    if (v %in% names(schema_data)) class(schema_data[[v]])[1] else NA_character_
   }, character(1)), predictor_vars)
 
   xlevels <- list()
   factor_levels <- list()
   for (v in predictor_vars) {
-    if (v %in% colnames(mf)) {
-      if (is.factor(mf[[v]])) {
-        xlevels[[v]] <- levels(mf[[v]])
-        factor_levels[[v]] <- levels(mf[[v]])
-      } else if (is.character(mf[[v]])) {
-        lev <- sort(unique(as.character(mf[[v]])))
+    if (v %in% names(schema_data_used)) {
+      if (is.factor(schema_data_used[[v]])) {
+        xlevels[[v]] <- levels(schema_data_used[[v]])
+        factor_levels[[v]] <- levels(schema_data_used[[v]])
+      } else if (is.character(schema_data_used[[v]])) {
+        lev <- sort(unique(as.character(schema_data_used[[v]])))
         xlevels[[v]] <- lev
         factor_levels[[v]] <- lev
       }
@@ -878,7 +924,13 @@ SVEMnet <- function(formula, data,
   k_sel_vec         <- rep(NA_integer_, nBoot)
   edf_sel_vec       <- rep(NA_real_, nBoot)
   fallbacks         <- integer(nBoot)
+  fallback_reason   <- rep(NA_character_, nBoot)
   n_eff_keep        <- numeric(nBoot)
+  objective_value   <- rep(NA_real_, nBoot)
+  validation_sse    <- rep(NA_real_, nBoot)
+  frw_uniforms      <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
+  training_weights  <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
+  validation_weights <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
 
   ## ---- capture and sanitize user '...' ----
   dots <- list(...)
@@ -910,12 +962,21 @@ SVEMnet <- function(formula, data,
     if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]
   }
 
+  exclude_user <- dots$exclude
+  dots$exclude <- NULL
+  glmnet_design <- .svem_prepare_glmnet_design(
+    X, args = dots, exclude = exclude_user
+  )
+  X_glm <- glmnet_design$x
+  dots <- glmnet_design$args
+
   glmnet_base_args <- .glmnet_prepare_call_args(
     c(list(intercept = TRUE,
            standardize = TRUE,
            nlambda = 500,
            relax = isTRUE(relax_flag),
-           family = fam_name),
+           family = fam_name,
+           exclude = glmnet_design$exclude),
       dots),
     glmnet::glmnet,
     default_control = list(maxit = 1e6)
@@ -953,6 +1014,7 @@ SVEMnet <- function(formula, data,
   ## ---- bootstrap loop ----
   for (i in seq_len(nBoot)) {
     eps <- .Machine$double.eps
+    U <- rep(NA_real_, n)
     if (weight_scheme == "SVEM") {
       U <- pmin(pmax(stats::runif(n), eps), 1 - eps)
       w_train <- -log(U); w_valid <- -log1p(-U)
@@ -964,13 +1026,49 @@ SVEMnet <- function(formula, data,
     }
     w_train <- w_train * (n / sum(w_train))
     w_valid <- w_valid * (n / sum(w_valid))
+    if (store_member_weights) {
+      frw_uniforms[i, ]       <- U
+      training_weights[i, ]   <- w_train
+      validation_weights[i, ] <- w_valid
+    }
+
+    sumw  <- sum(w_valid); sumw2 <- sum(w_valid^2)
+    n_eff_raw <- (sumw^2) / (sumw2 + eps)
+    n_eff_adm <- max(2, min(n, n_eff_raw))
+    n_eff_keep[i] <- n_eff_raw
+
+    if (structural_intercept_only) {
+      mu_w <- sum(w_train * y_vec) / sum(w_train)
+      intercept <- if (fam_name == "gaussian") {
+        mu_w
+      } else {
+        stats::qlogis(pmin(pmax(mu_w, 1e-6), 1 - 1e-6))
+      }
+      coef_matrix[i, ] <- c(intercept, rep(0, p))
+      best_alphas[i] <- NA_real_
+      best_lambdas[i] <- NA_real_
+      best_relax_gammas[i] <- if (isTRUE(relax_flag)) NA_real_ else 1
+      k_sel_vec[i] <- 1L
+      edf_sel_vec[i] <- if (fam_name == "gaussian") 1 else NA_real_
+      if (fam_name == "gaussian") {
+        sse_i <- sum(w_valid * (y_vec - intercept)^2)
+        validation_sse[i] <- sse_i
+        objective_value[i] <- switch(
+          objective_used,
+          "wSSE" = sse_i,
+          "wAIC" = sumw * log(max(sse_i, eps) / sumw) + 2,
+          "wBIC" = sumw * log(max(sse_i, eps) / sumw) + log(n_eff_adm)
+        )
+      }
+      next
+    }
 
     ## complexity = "edf": per-replicate weighted standardized design and a
     ## per-replicate eigenvalue cache keyed by active set. The Gram-matrix
     ## eigenvalues depend only on the active set (not on lambda, alpha, or
     ## gamma, which all enter the df formula analytically), so each unique
     ## active set along the paths is decomposed once per replicate.
-    if (use_edf) {
+    if (fam_name == "gaussian") {
       mw  <- colSums(X * w_train) / n
       Xc  <- sweep(X, 2, mw, "-")
       vw  <- colSums(Xc^2 * w_train) / n
@@ -985,12 +1083,10 @@ SVEMnet <- function(formula, data,
     best_beta_hat  <- rep(NA_real_, p + 1L)
     best_k         <- NA_integer_
     best_kpen      <- NA_real_
+    best_edf       <- NA_real_
+    best_val_core  <- NA_real_
     best_relax_g   <- if (isTRUE(relax_flag)) NA_real_ else 1
-
-    sumw  <- sum(w_valid); sumw2 <- sum(w_valid^2)
-    n_eff_raw <- (sumw^2) / (sumw2 + eps)
-    n_eff_adm <- max(2, min(n, n_eff_raw))
-    n_eff_keep[i] <- n_eff_raw
+    attempt_reasons <- character(0L)
 
     relax_gamma_grid <- if (isTRUE(relax_flag)) c( 0.2, 0.6,  1) else 1
 
@@ -998,13 +1094,20 @@ SVEMnet <- function(formula, data,
       fit <- tryCatch({
         withCallingHandlers({
           do.call(glmnet::glmnet,
-                  c(list(x = X, y = y_vec,
+                  c(list(x = X_glm, y = y_vec,
                          alpha = alpha,
                          weights = w_train),
                     glmnet_base_args))
         }, warning = function(w) base::invokeRestart("muffleWarning"))
-      }, error = function(e) NULL)
-      if (is.null(fit) || !length(fit$lambda)) next
+      }, error = function(e) {
+        attempt_reasons <<- c(attempt_reasons, conditionMessage(e))
+        NULL
+      })
+      if (is.null(fit) || !length(fit$lambda)) {
+        if (is.null(fit)) next
+        attempt_reasons <- c(attempt_reasons, "glmnet returned an empty lambda path")
+        next
+      }
 
       for (relax_g in relax_gamma_grid) {
         coef_path <- tryCatch({
@@ -1013,7 +1116,15 @@ SVEMnet <- function(formula, data,
           } else {
             as.matrix(stats::coef(fit, s = fit$lambda))
           }
-        }, error = function(e) NULL)
+        }, error = function(e) {
+          attempt_reasons <<- c(attempt_reasons, conditionMessage(e))
+          NULL
+        })
+        if (!is.null(coef_path)) {
+          coef_path <- .svem_strip_glmnet_sentinel(
+            coef_path, glmnet_design$sentinel
+          )
+        }
         if (is.null(coef_path) || nrow(coef_path) != (p + 1L)) next
         L <- ncol(coef_path); if (L == 0L) next
 
@@ -1055,6 +1166,8 @@ SVEMnet <- function(formula, data,
         ## For "edf" with alpha < 1, replace the count with the
         ## gamma-blended effective df at each admissible path point.
         k_pen <- k_eff
+        edf_path <- if (fam_name == "gaussian") as.numeric(k_eff) else
+          rep(NA_real_, L)
         if (use_edf && alpha < 1 && length(fit$lambda) == L) {
           k_pen <- as.numeric(k_eff)
           lam2  <- n * fit$lambda * (1 - alpha)
@@ -1078,6 +1191,7 @@ SVEMnet <- function(formula, data,
             r_act  <- sum(ev > ev[1L] * 1e-10)
             k_pen[jj] <- 1 + relax_g * df_pen + (1 - relax_g) * r_act
           }
+          edf_path <- k_pen
         }
 
         if (fam_name == "gaussian") {
@@ -1125,6 +1239,31 @@ SVEMnet <- function(formula, data,
         idx_min    <- which.min(metric)
         lambda_opt <- fit$lambda[idx_min]
         val_score  <- metric[idx_min]
+        selected_edf <- if (fam_name == "gaussian") {
+          as.numeric(edf_path[idx_min])
+        } else NA_real_
+        if (fam_name == "gaussian" && !use_edf && alpha < 1 &&
+            length(fit$lambda) == L) {
+          slope <- coef_path[-1L, idx_min]
+          okf   <- is.finite(slope)
+          ms    <- if (any(okf)) max(abs(slope[okf])) else 0
+          tolj  <- max(1e-7 * max(1, ms), 1e-7)
+          act   <- which(okf & abs(slope) > tolj)
+          if (length(act)) {
+            key <- paste(act, collapse = ",")
+            ev  <- edf_cache[[key]]
+            if (is.null(ev)) {
+              G  <- crossprod(Xs_edf[, act, drop = FALSE])
+              ev <- eigen(G, symmetric = TRUE, only.values = TRUE)$values
+              ev <- pmax(ev, 0)
+              edf_cache[[key]] <- ev
+            }
+            lam2 <- n * fit$lambda[idx_min] * (1 - alpha)
+            df_pen <- sum(ev / (ev + lam2))
+            r_act  <- sum(ev > ev[1L] * 1e-10)
+            selected_edf <- 1 + relax_g * df_pen + (1 - relax_g) * r_act
+          }
+        }
 
         if (is.finite(val_score) && val_score < best_val_score) {
           best_val_score <- val_score
@@ -1133,6 +1272,8 @@ SVEMnet <- function(formula, data,
           best_beta_hat  <- coef_path[, idx_min]
           best_k         <- k_raw[idx_min]
           best_kpen      <- as.numeric(k_pen[idx_min])
+          best_edf       <- selected_edf
+          best_val_core  <- as.numeric(val_core[idx_min])
           best_relax_g   <- relax_g
         }
       }
@@ -1140,6 +1281,12 @@ SVEMnet <- function(formula, data,
 
     if (anyNA(best_beta_hat) || !all(is.finite(best_beta_hat))) {
       fallbacks[i]  <- 1L
+      attempt_reasons <- unique(attempt_reasons[nzchar(attempt_reasons)])
+      fallback_reason[i] <- if (length(attempt_reasons)) {
+        paste(attempt_reasons, collapse = " | ")
+      } else {
+        "no admissible finite glmnet path point"
+      }
       mu_w          <- sum(w_train * y_vec) / sum(w_train)
       if (fam_name == "gaussian") {
         best_beta_hat <- c(mu_w, rep(0, p))
@@ -1151,6 +1298,12 @@ SVEMnet <- function(formula, data,
       best_lambda   <- NA_real_
       best_k        <- 1L
       best_kpen     <- 1
+      best_edf      <- if (fam_name == "gaussian") 1 else NA_real_
+      if (fam_name == "gaussian") {
+        best_val_core <- sum(w_valid * (y_vec - best_beta_hat[1L])^2)
+      } else {
+        best_val_core <- NA_real_
+      }
       best_relax_g  <- if (isTRUE(relax_flag)) NA_real_ else 1
     }
 
@@ -1159,7 +1312,31 @@ SVEMnet <- function(formula, data,
     best_lambdas[i]      <- best_lambda
     best_relax_gammas[i] <- best_relax_g
     k_sel_vec[i]         <- best_k
-    edf_sel_vec[i]       <- if (use_edf) best_kpen else NA_real_
+    edf_sel_vec[i]       <- if (fam_name == "gaussian") best_edf else NA_real_
+    objective_value[i]   <- if (fallbacks[i] == 1L) NA_real_ else best_val_score
+    validation_sse[i]    <- if (fam_name == "gaussian") best_val_core else NA_real_
+  }
+
+  fallback_summary <- if (any(fallbacks == 1L)) {
+    sort(table(fallback_reason[fallbacks == 1L]), decreasing = TRUE)
+  } else {
+    integer(0L)
+  }
+  if (!structural_intercept_only && all(fallbacks == 1L)) {
+    stop(
+      "All bootstrap fits fell back to intercept-only models. Reasons: ",
+      paste(names(fallback_summary), as.integer(fallback_summary),
+            sep = " (n=", collapse = "); "),
+      ").",
+      call. = FALSE
+    )
+  }
+  if (any(fallbacks == 1L) && !all(fallbacks == 1L)) {
+    warning(
+      sum(fallbacks == 1L), " of ", nBoot,
+      " bootstrap fits fell back to intercept-only models. See `diagnostics$fallback_reasons`.",
+      call. = FALSE
+    )
   }
 
   ## ---- finalize ----
@@ -1172,7 +1349,15 @@ SVEMnet <- function(formula, data,
   k_sel_vec         <- k_sel_vec[valid_rows]
   edf_sel_vec       <- edf_sel_vec[valid_rows]
   fallbacks         <- fallbacks[valid_rows]
+  fallback_reason   <- fallback_reason[valid_rows]
   n_eff_keep        <- n_eff_keep[valid_rows]
+  objective_value   <- objective_value[valid_rows]
+  validation_sse    <- validation_sse[valid_rows]
+  if (store_member_weights) {
+    frw_uniforms       <- frw_uniforms[valid_rows, , drop = FALSE]
+    training_weights   <- training_weights[valid_rows, , drop = FALSE]
+    validation_weights <- validation_weights[valid_rows, , drop = FALSE]
+  }
 
   nBoot_used <- nrow(coef_matrix)  # fix #2
 
@@ -1239,7 +1424,9 @@ SVEMnet <- function(formula, data,
     k_summary = c(k_median = stats::median(k_sel_vec),
                   k_iqr    = stats::IQR(k_sel_vec)),
     fallback_rate = mean(fallbacks),
+    fallback_reasons = fallback_summary,
     n_eff_summary = summary(n_eff_keep),
+    edf_summary = if (fam_name == "gaussian") summary(edf_sel_vec) else NULL,
     relax_gamma_freq =
       if (isTRUE(relax_flag) && any(is.finite(best_relax_gammas))) {
         prop.table(table(round(best_relax_gammas, 2)))
@@ -1251,6 +1438,56 @@ SVEMnet <- function(formula, data,
     names(out) <- names(tf)
     out
   } else numeric()
+
+  n_eff_adm_keep <- pmax(2, pmin(n, n_eff_keep))
+  residual_df_support <- n - k_sel_vec
+  residual_variance_support <- if (fam_name == "gaussian") {
+    ifelse(residual_df_support > 0 & is.finite(validation_sse),
+           validation_sse / residual_df_support, NA_real_)
+  } else rep(NA_real_, nBoot_used)
+  residual_scale_support <- sqrt(residual_variance_support)
+  member_warning <- rep(NA_character_, nBoot_used)
+  for (ii in seq_len(nBoot_used)) {
+    wi <- character(0L)
+    if (fallbacks[ii] == 1L) {
+      wi <- c(wi, paste0("fallback: ", fallback_reason[ii]))
+    }
+    if (fam_name == "gaussian" && residual_df_support[ii] <= 0) {
+      wi <- c(wi, "nonpositive n - support residual denominator")
+    }
+    if (objective_used %in% c("wAIC", "wBIC") &&
+        (n_eff_adm_keep[ii] - (k_sel_vec[ii] - 1L)) <= 1) {
+      wi <- c(wi, "selected support is within one coefficient of the Kish guardrail")
+    }
+    if (length(wi)) member_warning[ii] <- paste(wi, collapse = "; ")
+  }
+  member_diagnostics <- data.frame(
+    member = seq_len(nBoot_used),
+    objective = rep(objective_used, nBoot_used),
+    validation_sse = validation_sse,
+    objective_value = objective_value,
+    support_size = k_sel_vec,
+    effective_df = edf_sel_vec,
+    kish_validation_n_eff = n_eff_keep,
+    kish_validation_n_eff_adm = n_eff_adm_keep,
+    residual_df_support = residual_df_support,
+    residual_variance_support = residual_variance_support,
+    residual_scale_support = residual_scale_support,
+    admissible_for_residual_scale =
+      fam_name == "gaussian" & residual_df_support > 0 &
+      is.finite(residual_scale_support) & fallbacks == 0L,
+    fallback = fallbacks == 1L,
+    admissibility_warning = member_warning,
+    stringsAsFactors = FALSE
+  )
+  member_weights <- if (store_member_weights) {
+    list(
+      uniforms = frw_uniforms,
+      training = training_weights,
+      validation = validation_weights,
+      normalization = "each weight row rescaled to mean one"
+    )
+  } else NULL
 
   feature_names <- colnames(X)
   terms_str <- tryCatch(
@@ -1298,6 +1535,9 @@ SVEMnet <- function(formula, data,
     weight_scheme     = weight_scheme,
     complexity        = complexity,
     best_edfs         = edf_sel_vec,
+    member_diagnostics = member_diagnostics,
+    member_weights    = member_weights,
+    store_member_weights = store_member_weights,
     relaxed           = isTRUE(relax_flag),
     relaxed_input     = relaxed_input,
     dropped_alpha0_for_relaxed = dropped_alpha0_for_relaxed,
@@ -1313,7 +1553,7 @@ SVEMnet <- function(formula, data,
     y_pred_debiased   = y_pred_debiased,
     nobs              = nobs,
     nparm             = nparm,
-    formula           = f_use,
+    formula           = f_store,
     terms             = terms_clean,
     xlevels           = xlevels,
     contrasts         = contrasts_used,

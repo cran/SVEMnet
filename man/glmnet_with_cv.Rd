@@ -40,11 +40,14 @@ at least 5 folds when possible.}
 \item{repeats}{Number of independent CV repeats (default \code{5}). Each
 repeat reuses the same folds across all alphas for paired comparisons.}
 
-\item{choose_rule}{Character; how to choose lambda within each alpha:
+\item{choose_rule}{Character; how to choose the tuning point within each
+alpha:
 \itemize{
-\item \code{"min"}: lambda minimizing the cross-validated criterion.
-\item \code{"1se"}: largest lambda within 1 combined SE of the minimum,
-where the SE includes both within- and between-repeat variability.
+\item \code{"min"}: tuning point minimizing the cross-validated
+criterion.
+\item \code{"1se"}: largest lambda (then largest gamma for relaxed
+fits) within 1 combined SE of the minimum, where the SE includes
+both within- and between-repeat variability.
 }
 Default is \code{"min"}. In small-mixture simulations, the 1-SE rule
 tended to increase RMSE on held-out data, so \code{"min"} is used as the
@@ -59,14 +62,12 @@ inside each training fold (requires \code{glmnet} >= 4.1-2).}
 
 \item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet()} and
 \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
-\code{gamma} path (default \code{FALSE}). Lambda is tuned by the
-repeated cross-validation on the standard (gamma = 1) path statistics;
-the relaxed gamma is then selected within the final
-\code{cv.glmnet(relax = TRUE)} call using \code{"gamma.min"} when
-\code{choose_rule = "min"} and \code{"gamma.1se"} when
-\code{choose_rule = "1se"}. If \code{cv.glmnet(relax = TRUE)} fails for
-a particular repeat/alpha, the function retries that fit without
-relaxation; the number of such fallbacks is recorded in
+\code{gamma} path (default \code{FALSE}). The repeated CV criterion is
+aggregated over the full lambda-by-gamma surface and both parameters are
+selected jointly. If \code{cv.glmnet(relax = TRUE)} fails for a particular
+repeat/alpha, the function retries that fit without relaxation; incomplete
+non-relaxed fallback surfaces are not mixed into a successful relaxed
+search. The number of fallbacks is recorded in
 \code{meta$relax_cv_fallbacks}.}
 
 \item{relax_gamma}{Optional numeric vector passed as \code{gamma=} to
@@ -105,6 +106,9 @@ A list of class \code{c("svem_cv","svem_model")} with elements:
 \item \code{glmnet_alpha} Numeric vector of alphas searched.
 \item \code{best_alpha} Numeric; winning alpha.
 \item \code{best_lambda} Numeric; winning lambda.
+\item \code{best_gamma} Numeric; winning relaxed mixing parameter, or
+1 for a non-relaxed fit. It is \code{NA} for structural
+intercept-only fits.
 \item \code{y_pred} In-sample predictions from the returned coefficients
 (fitted values for Gaussian; probabilities for binomial).
 \item \code{debias_fit} For Gaussian, an optional \code{lm(y ~ y_pred)}
@@ -112,12 +116,12 @@ calibration model; \code{NULL} otherwise.
 \item \code{y_pred_debiased} If \code{debias_fit} exists, its fitted
 values; otherwise \code{NULL}.
 \item \code{cv_summary} Named list (one element per alpha) of data frames
-with columns \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
+with columns \code{gamma}, \code{lambda}, \code{mean_cvm}, \code{sd_cvm},
 \code{se_combined}, \code{n_repeats}, \code{idx_min},
 \code{idx_1se}.
 \item \code{formula} Original modeling formula.
-\item \code{terms} Training \code{terms} object with environment set to
-\code{baseenv()}.
+\item \code{terms} Training \code{terms} object with a compact,
+serializable formula-evaluation environment.
 \item \code{training_X} Training design matrix (without intercept column).
 \item \code{actual_y} Training response vector used for glmnet:
 numeric \code{y} for Gaussian, or 0/1 numeric \code{y} for
@@ -150,16 +154,13 @@ slope coefficients (excludes the intercept).
 }
 }
 \description{
-Repeated K-fold cross-validation over a per-alpha lambda path, with a
+Repeated K-fold cross-validation over per-alpha lambda paths, with a
 combined 1-SE rule across repeats. Preserves fields expected by
-\code{predict.svem_model()} and internal prediction helpers. Optionally uses
-\code{glmnet}'s built-in relaxed elastic net for both the warm-start path and
-each CV fit. When \code{relaxed = TRUE}, lambda is tuned by the repeated
-cross-validation described below and the final coefficients are then taken
-from a \code{cv.glmnet(relax = TRUE)} object at that lambda, with the
-relaxed mixing parameter gamma selected by the rule matching
-\code{choose_rule} (\code{"gamma.min"} for \code{"min"}, \code{"gamma.1se"}
-for \code{"1se"}).
+\code{predict.svem_model()} and internal prediction helpers. When
+\code{relaxed = TRUE}, the complete relaxed cross-validation surfaces are
+aggregated across repeats and alpha, lambda, and gamma are selected jointly.
+This mirrors \code{cv.glmnet(relax = TRUE)} rather than choosing lambda from
+the ordinary (gamma = 1) curve before choosing gamma.
 }
 \details{
 This function is a convenience wrapper around \code{glmnet()} and
@@ -178,12 +179,13 @@ The basic workflow is:
 \item For each \code{alpha} in \code{glmnet_alpha}, generate a set of CV
 fold IDs (shared across alphas and repeats).
 \item For that alpha, run \code{repeats} independent \code{cv.glmnet()}
-fits, align the lambda paths, and aggregate the CV curves.
-\item At each lambda, compute a combined SE that accounts for both
-within-repeat and between-repeat variability.
+fits, align the lambda paths and, for relaxed fits, the gamma paths,
+and aggregate the CV surfaces.
+\item At each lambda-gamma point, compute a combined SE that accounts for
+both within-repeat and between-repeat variability.
 \item Apply \code{choose_rule} (\code{"min"} or \code{"1se"}) to select
-lambda for that alpha, then choose the best alpha by comparing these
-per-alpha scores.
+lambda and gamma for that alpha, then choose the best alpha by
+comparing these per-alpha scores.
 }
 
 Special cases and fallbacks:
@@ -213,8 +215,8 @@ cross-validation and any ridge fallback use deviance-style criteria
 
 Design-matrix schema and contrasts:
 \itemize{
-\item The training \code{terms} are stored with environment set to
-\code{baseenv()}.
+\item The training \code{terms} are stored with a compact evaluation
+environment containing required formula transformations.
 \item Factor and character levels are recorded in \code{xlevels} for
 safe prediction.
 \item Per-factor contrasts are stored in \code{contrasts}, normalized
@@ -236,7 +238,7 @@ content was reviewed and finalized by the author.
 
 \examples{
 set.seed(123)
-n <- 100; p <- 10
+n <- 60; p <- 6
 X <- matrix(rnorm(n * p), n, p)
 beta <- c(1, -1, rep(0, p - 2))
 y <- as.numeric(X \%*\% beta + rnorm(n))
@@ -267,7 +269,7 @@ fit_relax <- glmnet_with_cv(
 
 # Binomial example (numeric 0/1 response)
 set.seed(456)
-n2 <- 150; p2 <- 8
+n2 <- 80; p2 <- 5
 X2 <- matrix(rnorm(n2 * p2), n2, p2)
 beta2 <- c(1.0, -1.5, rep(0, p2 - 2))
 linpred <- as.numeric(X2 \%*\% beta2)
@@ -278,9 +280,9 @@ colnames(df_bin) <- c("y", paste0("x", 1:p2))
 
 fit_bin <- glmnet_with_cv(
   y ~ ., df_bin,
-  glmnet_alpha = c(0.5, 1),
+  glmnet_alpha = 1,
   nfolds = 5,
-  repeats = 2,
+  repeats = 1,
   seed = 99,
   family = "binomial"
 )

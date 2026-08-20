@@ -61,10 +61,8 @@ graphics, you may want to customize the output data frame with your own
 plotting code.
 }
 \examples{
-\donttest{
-  ## ---------- Gaussian demo ----------
   set.seed(10)
-  n  <- 220
+  n  <- 60
   x1 <- rnorm(n)
   x2 <- rnorm(n)
   x3 <- rnorm(n)
@@ -72,30 +70,11 @@ plotting code.
   y   <- 0.7 + 1.5*x1 - 0.8*x2 + 0.05*x3 + eps
   dat <- data.frame(y, x1, x2, x3)
 
-  fit <- SVEMnet(y ~ (x1 + x2 + x3)^2, data = dat,
-                 nBoot = 40, relaxed = TRUE)
+  fit <- SVEMnet(y ~ x1 + x2 + x3, data = dat,
+                 nBoot = 10, glmnet_alpha = 1, relaxed = FALSE)
 
-  # Table + plot of bootstrap nonzero percentages
-  nz <- svem_nonzero(fit, tol = 1e-7, plot = TRUE, print_table = TRUE)
+  nz <- svem_nonzero(fit, tol = 1e-7, plot = FALSE, print_table = TRUE)
   head(nz)
-
-  ## ---------- Binomial demo ----------
-  set.seed(11)
-  n  <- 260
-  x1 <- rnorm(n)
-  x2 <- rnorm(n)
-  x3 <- rnorm(n)
-  lp <- -0.3 + 0.9*x1 - 0.6*x2 + 0.2*x3
-  p  <- 1/(1+exp(-lp))
-  y  <- rbinom(n, 1, p)
-  dat_b <- data.frame(y, x1, x2, x3)
-
-  fit_b <- SVEMnet(y ~ x1 + x2 + x3, data = dat_b,
-                   family = "binomial", nBoot = 40, relaxed = TRUE)
-
-  # Still summarizes bootstrap selection frequencies for binomial fits
-  svem_nonzero(fit_b, plot = TRUE, print_table = TRUE)
-}
 
 }
 \seealso{

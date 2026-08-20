@@ -104,8 +104,8 @@ directly from the aggregated coefficients.
 The function rebuilds the design matrix for \code{newdata} to match the
 training design:
 \itemize{
-\item Uses the training \code{terms} (with environment set to
-\code{baseenv()}).
+\item Uses the training \code{terms} and its compact formula-evaluation
+environment.
 \item Harmonizes factor and character predictors to the training
 \code{xlevels}.
 \item Reuses stored per-factor \code{contrasts} when available; otherwise
@@ -168,8 +168,8 @@ dat <- data.frame(y, X1, X2, X3)
 
 fit_g <- SVEMnet(
   y ~ (X1 + X2 + X3)^2, dat,
-  nBoot = 40, glmnet_alpha = c(1, 0.5),
-  relaxed = TRUE, family = "gaussian"
+  nBoot = 10, glmnet_alpha = 1,
+  relaxed = FALSE, family = "gaussian"
 )
 
 ## Aggregate-coefficient predictions (with and without debiasing)
@@ -186,7 +186,6 @@ out_g <- predict(
 )
 str(out_g)
 
-\donttest{
 ## ---- Binomial example ------------------------------------------------
 set.seed(2)
 n  <- 120
@@ -198,8 +197,8 @@ db  <- data.frame(yb = yb, X1 = X1, X2 = X2, X3 = X3)
 
 fit_b <- SVEMnet(
   yb ~ (X1 + X2 + X3)^2, db,
-  nBoot = 50, glmnet_alpha = c(1, 0.5),
-  relaxed = TRUE, family = "binomial"
+  nBoot = 10, glmnet_alpha = 1,
+  relaxed = FALSE, family = "binomial"
 )
 
 ## Probabilities, link, and classes
@@ -216,7 +215,6 @@ out_b <- predict(
   level    = 0.90
 )
 str(out_b)
-}
 
 }
 \seealso{

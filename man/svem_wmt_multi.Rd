@@ -37,6 +37,9 @@ Currently, \code{strength = 1} is used internally.}
 \code{\link{svem_significance_test_parallel}}. By default this is
 \code{list(seed = 123)} so that WMT calls are reproducible; you may
 override or extend this (e.g. \code{list(seed = 999, nPerm = 300)}).
+The WMT is serial by default. Pass \code{nCore} explicitly to opt into
+parallel execution, and use \code{rng_sample_kind = "Rounding"} only when
+reproducing the legacy pre-3.4.0 random stream.
 Any entries not recognized by \code{svem_significance_test_parallel}
 are ignored by that function.}
 
@@ -81,8 +84,17 @@ to downstream scoring functions (for example, as an optional WMT argument
 to \code{svem_score_random()}), with response names matched by
 \code{names()}.
 }
+\section{Acknowledgments}{
+
+OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
+used to assist with coding and roxygen documentation; all
+content was reviewed and finalized by the author.
+}
+
 \examples{
-\donttest{
+\dontrun{
+## Production WMT workflow: not run automatically because each response
+## requires repeated SVEM fits under many response permutations.
 data(lipid_screen)
 
 spec <- bigexp_terms(
@@ -114,7 +126,7 @@ wmt_out <- svem_wmt_multi(
   data           = lipid_screen,
   mixture_groups = mix,
   wmt_transform  = "neglog10",
-  wmt_control    = list(seed = 123),
+  wmt_control    = list(seed = 123, nCore = 1L),
   plot           = TRUE
 )
 
@@ -124,6 +136,42 @@ wmt_out$multipliers
 ## later: pass wmt_out$multipliers into svem_score_random()
 }
 
+}
+\references{
+Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}
+
+Gotwalt, C., & Ramsey, P. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849873/redirect_from_archived_page/true}
+
+Karl, A. T. (2024). A randomized permutation whole-model test heuristic for Self-Validated Ensemble Models (SVEM). \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{249}, 105122. \doi{10.1016/j.chemolab.2024.105122}
+
+Karl, A., Wisnowski, J., & Rushing, H. (2022). JMP Pro 17 Remedies for Practical Struggles with Mixture Experiments. JMP Discovery Conference. \doi{10.13140/RG.2.2.34598.40003/1}
+
+Lemkus, T., Gotwalt, C., Ramsey, P., & Weese, M. L. (2021). Self-Validated Ensemble Models for Design of Experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, 219, 104439. \doi{10.1016/j.chemolab.2021.104439}
+
+Xu, L., Gotwalt, C., Hong, Y., King, C. B., & Meeker, W. Q. (2020). Applications of the Fractional-Random-Weight Bootstrap. \emph{The American Statistician}, 74(4), 345–358. \doi{10.1080/00031305.2020.1731599}
+
+Ramsey, P., Gaudard, M., & Levin, W. (2021). Accelerating Innovation with Space Filling Mixture Designs, Neural Networks and SVEM. \emph{JMP Discovery Conference}. \url{https://community.jmp.com/t5/Abstracts/Accelerating-Innovation-with-Space-Filling-Mixture-Designs/ev-p/756841}
+
+Ramsey, P., & Gotwalt, C. (2018). Model Validation Strategies for Designed Experiments Using Bootstrapping Techniques With Applications to Biopharmaceuticals. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/Model-Validation-Strategies-for-Designed-Experiments-Using/ev-p/849647/redirect_from_archived_page/true}
+
+Ramsey, P., Levin, W., Lemkus, T., & Gotwalt, C. (2021). SVEM: A Paradigm Shift in Design and Analysis of Experiments. \emph{JMP Discovery Conference - Europe}. \url{https://community.jmp.com/t5/Abstracts/SVEM-A-Paradigm-Shift-in-Design-and-Analysis-of-Experiments-2021/ev-p/756634}
+
+Ramsey, P., & McNeill, P. (2023). CMC, SVEM, Neural Networks, DOE, and Complexity: It's All About Prediction. \emph{JMP Discovery Conference}.
+
+Friedman, J. H., Hastie, T., and Tibshirani, R. (2010).
+Regularization Paths for Generalized Linear Models via Coordinate Descent.
+Journal of Statistical Software, 33(1), 1-22.
+
+Meinshausen, N. (2007).
+Relaxed Lasso. Computational Statistics & Data Analysis, 52(1), 374-393.
+
+Kish, L. (1965). \emph{Survey Sampling}. Wiley.
+
+Lumley, T. (2004). Analysis of complex survey samples.
+\emph{Journal of Statistical Software}, 9(1), 1–19.
+
+Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
+\emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
 }
 \seealso{
 \code{\link{svem_significance_test_parallel}},

@@ -18,7 +18,8 @@ test_that("complexity = 'support' is identical to the default", {
   expect_identical(fit_def$parms, fit_sup$parms)
   expect_identical(fit_def$best_lambdas, fit_sup$best_lambdas)
   expect_identical(fit_sup$complexity, "support")
-  expect_true(all(is.na(fit_sup$best_edfs)))
+  expect_true(all(is.finite(fit_sup$best_edfs)))
+  expect_equal(fit_def$best_edfs, fit_sup$best_edfs)
 })
 
 test_that("edf reduces exactly to support for pure lasso (alpha = 1)", {
@@ -92,7 +93,7 @@ test_that("whole-model test refuses to propagate complexity", {
   expect_warning(
     svem_significance_test_parallel(
       y ~ X1 + X2 + X3, dat,
-      nPoint = 100, nSVEM = 1, nPerm = 12, nBoot = 10,
+      nPoint = 100, nSVEM = 1, nPerm = 20, nBoot = 10,
       nCore = 1, seed = 5, verbose = FALSE,
       complexity = "edf"
     ),

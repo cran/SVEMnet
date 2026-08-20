@@ -20,10 +20,9 @@
 #' @return A \code{ggplot2} object.
 #'
 #' @examples
-#' \dontrun{
 #'   ## --- Gaussian example: simulate, fit, and plot --------------------------
 #'   set.seed(2026)
-#'   n  <- 300
+#'   n  <- 60
 #'   X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
 #'   eps <- rnorm(n, sd = 0.4)
 #'   y_g <- 1.2 + 2*X1 - 0.7*X2 + 0.3*X3 + 1.1*(X1*X2) + 0.8*(X1^2) + eps
@@ -33,23 +32,23 @@
 #'     y_g ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
 #'     data          = dat_g,
 #'     family        = "gaussian",
-#'     glmnet_alpha  = c(1, 0.5),
-#'     nBoot         = 60,
+#'     glmnet_alpha  = 1,
+#'     nBoot         = 10,
 #'     objective     = "auto",
 #'     weight_scheme = "SVEM",
-#'     relaxed       = TRUE
+#'     relaxed       = FALSE
 #'   )
 #'
 #'   # Actual vs predicted (with and without debias overlay)
 #'   plot(fit_g, plot_debiased = FALSE)
 #'   plot(fit_g, plot_debiased = TRUE)
-#' }
 #'
 #' @import ggplot2
 #' @importFrom utils tail
 #' @export
 #' @method plot svem_model
 plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
+  plot_debiased <- .svem_logical_scalar(plot_debiased, "plot_debiased")
   actual_y <- x$actual_y
   y_pred   <- x$y_pred
 
@@ -118,10 +117,9 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
 #' @return A \code{ggplot2} object.
 #'
 #' @examples
-#' \dontrun{
 #'   ## --- Binomial example: simulate, fit, and plot --------------------------
 #'   set.seed(2025)
-#'   n  <- 600
+#'   n  <- 100
 #'   x1 <- rnorm(n); x2 <- rnorm(n); x3 <- rnorm(n)
 #'   eta    <- -0.4 + 1.1*x1 - 0.8*x2 + 0.5*x3
 #'   p_true <- plogis(eta)
@@ -132,18 +130,17 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
 #'     y ~ x1 + x2 + x3 + I(x1^2) + (x1 + x2 + x3)^2,
 #'     data          = dat_b,
 #'     family        = "binomial",
-#'     glmnet_alpha  = c(1, 0.5),
-#'     nBoot         = 60,
+#'     glmnet_alpha  = 1,
+#'     nBoot         = 10,
 #'     objective     = "auto",
 #'     weight_scheme = "SVEM",
-#'     relaxed       = TRUE
+#'     relaxed       = FALSE
 #'   )
 #'
 #'   # Calibration / ROC / PR
 #'   plot(fit_b, type = "calibration", bins = 12)
 #'   plot(fit_b, type = "roc")
 #'   plot(fit_b, type = "pr")
-#' }
 #'
 #' @import ggplot2
 #' @importFrom stats quantile aggregate runif
@@ -156,37 +153,58 @@ plot.svem_binomial <- function(x,
                                jitter_width = 0.05,
                                ...) {
   type <- match.arg(type)
-  stopifnot(is.numeric(x$actual_y), all(x$actual_y %in% c(0, 1)))
+  bins <- .svem_integer_scalar(bins, "bins", min = 1L)
+  jitter_width <- .svem_numeric_scalar(jitter_width, "jitter_width", lower = 0)
+  if (!is.numeric(x$actual_y) || !length(x$actual_y) ||
+      any(is.finite(x$actual_y) & !(x$actual_y %in% c(0, 1)))) {
+    stop("`x$actual_y` must contain binary numeric outcomes coded 0/1.",
+         call. = FALSE)
+  }
+  if (!is.numeric(x$y_pred) || length(x$y_pred) != length(x$actual_y)) {
+    stop("`x$y_pred` must be numeric and have the same length as `x$actual_y`.",
+         call. = FALSE)
+  }
   y <- as.integer(x$actual_y)
   p <- as.numeric(x$y_pred)   # stored on probability scale for binomial in SVEMnet()
   ok <- is.finite(y) & is.finite(p)
   y <- y[ok]; p <- p[ok]
+  if (!length(y)) {
+    stop("No finite outcome/prediction pairs are available to plot.", call. = FALSE)
+  }
 
   # minimal helpers (no extra packages)
-  .roc_curve <- function(prob, yy) {
+  # Curves advance once per distinct score threshold.  Grouping tied scores
+  # before accumulating counts makes both metrics invariant to row order
+  # within ties (and gives constant scores AUC 0.5 and AP = prevalence).
+  .threshold_counts <- function(prob, yy) {
     o <- order(prob, decreasing = TRUE)
+    prob <- prob[o]
     yy <- yy[o]
-    tp <- cumsum(yy == 1)
-    fp <- cumsum(yy == 0)
+    group_end <- c(which(diff(prob) != 0), length(prob))
+    data.frame(
+      tp = cumsum(yy == 1)[group_end],
+      fp = cumsum(yy == 0)[group_end]
+    )
+  }
+  .roc_curve <- function(prob, yy) {
     P  <- sum(yy == 1); N <- sum(yy == 0)
     if (P == 0 || N == 0) return(data.frame(fpr = c(0, 1), tpr = c(0, 1)))
-    data.frame(fpr = fp / N, tpr = tp / P)
+    counts <- .threshold_counts(prob, yy)
+    data.frame(fpr = c(0, counts$fp / N),
+               tpr = c(0, counts$tp / P))
   }
   .auc_trap <- function(curve) {
     x <- curve$fpr; y <- curve$tpr
-    o <- order(x, y)
-    x <- x[o]; y <- y[o]
     sum(diff(x) * (head(y, -1) + tail(y, -1)) / 2)
   }
   .pr_curve <- function(prob, yy) {
-    o <- order(prob, decreasing = TRUE)
-    yy <- yy[o]
-    tp <- cumsum(yy == 1)
-    fp <- cumsum(yy == 0)
     P  <- sum(yy == 1)
-    precision <- tp / pmax(1, tp + fp)
-    recall    <- if (P == 0) rep(0, length(tp)) else tp / P
-    data.frame(recall = c(0, recall), precision = c(1, precision))
+    counts <- .threshold_counts(prob, yy)
+    precision <- counts$tp / pmax(1, counts$tp + counts$fp)
+    recall <- if (P == 0) rep(0, nrow(counts)) else counts$tp / P
+    start_precision <- if (P == 0) 0 else 1
+    data.frame(recall = c(0, recall),
+               precision = c(start_precision, precision))
   }
   .ap_step <- function(curve) {
     r <- curve$recall; p <- curve$precision
@@ -213,9 +231,12 @@ plot.svem_binomial <- function(x,
       by = list(bin = b),
       FUN = function(z) c(mean = mean(z), n = sum(is.finite(z)))
     )
-    p_mean <- sapply(agg$p, `[`, 1)
-    y_mean <- sapply(agg$y, `[`, 1)
-    n_bin  <- sapply(agg$p, `[`, 2)
+    # aggregate() with a multi-value FUN returns *matrix* columns
+    # (agg$p is bins x 2 with columns "mean" and "n"), so index the
+    # matrix directly; sapply(agg$p, ...) would iterate element-wise.
+    p_mean <- agg$p[, "mean"]
+    y_mean <- agg$y[, "mean"]
+    n_bin  <- agg$p[, "n"]
     calib  <- data.frame(p_mean = p_mean, y_mean = y_mean, n = n_bin)
     calib  <- calib[is.finite(calib$p_mean) & is.finite(calib$y_mean) & calib$n > 0, , drop = FALSE]
 
@@ -227,12 +248,19 @@ plot.svem_binomial <- function(x,
       pts$y <- jy
     }
 
+    # Merge user args from '...' with the layer defaults so that e.g.
+    # plot(fit, type = "calibration", alpha = 0.5) overrides instead of
+    # erroring with "matched by multiple actual arguments".
+    pts_args <- list(...)
+    if (is.null(pts_args$alpha)) pts_args$alpha <- 0.25
+    if (is.null(pts_args$size))  pts_args$size  <- 1.2
+    pts_layer <- do.call(ggplot2::geom_point, c(
+      list(data = pts, mapping = ggplot2::aes(x = p, y = y), na.rm = TRUE),
+      pts_args
+    ))
+
     plt <- ggplot2::ggplot() +
-      ggplot2::geom_point(
-        data = pts,
-        ggplot2::aes(x = p, y = y),
-        alpha = 0.25, size = 1.2, na.rm = TRUE, ...
-      ) +
+      pts_layer +
       ggplot2::geom_line(
         data = calib,
         ggplot2::aes(x = p_mean, y = y_mean),

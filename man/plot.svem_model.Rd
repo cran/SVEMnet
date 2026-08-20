@@ -32,10 +32,9 @@ This method assumes the fitted object stores the training response in
 by \code{SVEMnet()} and \code{glmnet_with_cv()}.
 }
 \examples{
-\dontrun{
   ## --- Gaussian example: simulate, fit, and plot --------------------------
   set.seed(2026)
-  n  <- 300
+  n  <- 60
   X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
   eps <- rnorm(n, sd = 0.4)
   y_g <- 1.2 + 2*X1 - 0.7*X2 + 0.3*X3 + 1.1*(X1*X2) + 0.8*(X1^2) + eps
@@ -45,16 +44,15 @@ by \code{SVEMnet()} and \code{glmnet_with_cv()}.
     y_g ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
     data          = dat_g,
     family        = "gaussian",
-    glmnet_alpha  = c(1, 0.5),
-    nBoot         = 60,
+    glmnet_alpha  = 1,
+    nBoot         = 10,
     objective     = "auto",
     weight_scheme = "SVEM",
-    relaxed       = TRUE
+    relaxed       = FALSE
   )
 
   # Actual vs predicted (with and without debias overlay)
   plot(fit_g, plot_debiased = FALSE)
   plot(fit_g, plot_debiased = TRUE)
-}
 
 }

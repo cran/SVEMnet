@@ -38,9 +38,10 @@ design-space construction.
 }
 \details{
 The four composition columns \code{PEG}, \code{Helper}, \code{Ionizable},
-and \code{Cholesterol} are stored as proportions in \code{[0,1]}, and in many
-rows they sum (approximately) to 1, making them natural candidates for
-mixture constraints in optimization and design-space examples.
+and \code{Cholesterol} are stored as proportions in \code{[0,1]} and sum to
+exactly 1 in every row (so the mixture columns are exactly collinear),
+making them natural candidates for mixture constraints in optimization and
+design-space examples.
 
 This dataset accompanies examples showing:
 \itemize{
@@ -73,11 +74,13 @@ content was reviewed and finalized by the author.
 }
 
 \examples{
-\donttest{
-# 1) Load the bundled dataset
 data(lipid_screen)
 str(lipid_screen)
 
+\dontrun{
+# Full production-scale modeling workflow. It is not run automatically
+# because it fits wide ensembles, runs permutation WMTs, and scores a large
+# constrained candidate table.
 #2) Build a deterministic expansion using bigexp_terms()
 #  Provide main effects only on the right-hand side; expansion width
 #  is controlled via arguments. Here Operator is treated as a blocking
@@ -135,7 +138,7 @@ wmt_out <- svem_wmt_multi(
                         PDI     = form_pdi),
   data           = lipid_screen,
   mixture_groups = mix,
-  wmt_control    = list(seed = 123),
+  wmt_control    = list(seed = 123, nCore = 1L),
   plot           = TRUE
 )
 

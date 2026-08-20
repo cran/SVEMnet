@@ -18,8 +18,9 @@ svem_significance_test_parallel(
   objective = c("wAIC", "wBIC", "wSSE", "auto"),
   relaxed = FALSE,
   verbose = TRUE,
-  nCore = parallel::detectCores() - 2,
+  nCore = 1L,
   seed = NULL,
+  rng_sample_kind = c("Rejection", "Rounding"),
   spec = NULL,
   response = NULL,
   use_spec_contrasts = TRUE,
@@ -43,19 +44,22 @@ groups. Each element should be a list with components:
 All mixture variables must appear in exactly one group. Defaults to \code{NULL}.}
 
 \item{nPoint}{Number of random evaluation points in the factor space
-(default \code{2000}).}
+(default \code{2000}); must be a positive integer.}
 
 \item{nSVEM}{Number of SVEM fits on the original (unpermuted) data used to
-summarize the observed surface (default \code{10}).}
+summarize the observed surface (default \code{10}); must be at least one.}
 
 \item{nPerm}{Number of SVEM fits on permuted responses used to build the null
-reference distribution (default \code{150}).}
+reference distribution (default \code{150}); must be at least five.
+Values below 20 are permitted for tests but trigger a warning because they
+are too small for production inference.}
 
 \item{percent}{Percentage of variance to capture in the SVD of the permutation
-surfaces (default \code{90}).}
+surfaces (default \code{90}); must lie strictly between zero and 100.}
 
 \item{nBoot}{Number of bootstrap iterations within each inner SVEM fit
-(default \code{100}).}
+(default \code{100}); must be at least two because member standard
+deviations are required.}
 
 \item{glmnet_alpha}{Numeric vector of \code{glmnet} alpha values
 (default \code{c(1)}).}
@@ -79,16 +83,18 @@ When \code{FALSE}, the standard \code{glmnet} path is used. If
 \item{verbose}{Logical; if \code{TRUE}, display progress messages
 (default \code{TRUE}).}
 
-\item{nCore}{Number of CPU cores for parallel processing. Default is
-\code{parallel::detectCores() - 2}, with a floor of \code{1}.}
+\item{nCore}{Number of CPU cores for processing. Default is \code{1}, which
+runs in-process and is suitable for CRAN and other shared systems. Values
+greater than one use a private cluster local to this call.}
 
 \item{seed}{Optional integer seed for reproducible RNG (default \code{NULL}).
-When supplied, the master RNG kind is set to \code{"L'Ecuyer-CMRG"} (with
-\code{sample.kind = "Rounding"} when supported), and deterministic
-per-iteration seeds are generated on the master and applied inside each
-parallel \code{\%dopar\%} iteration via \code{set.seed()}.
-This yields reproducibility regardless of parallel scheduling and core
-count.}
+Deterministic per-fit seeds yield reproducibility regardless of parallel
+scheduling and core count.}
+
+\item{rng_sample_kind}{Sampling algorithm used with the
+\code{"L'Ecuyer-CMRG"} RNG. The default \code{"Rejection"} uses R's modern
+unbiased discrete sampler. Use \code{"Rounding"} to reproduce legacy WMT
+streams from SVEMnet 3.3.1 and earlier.}
 
 \item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
 If provided, the test reuses its locked expansion. The working formula
@@ -100,7 +106,14 @@ when available.
 Discrete numeric predictors recorded by \code{bigexp_terms()}
 (\code{spec$settings$discrete_numeric} + \code{spec$settings$discrete_levels})
 are sampled only from their recorded allowed levels when building the
-evaluation grid.}
+evaluation grid.
+Blocking variables recorded in \code{spec$settings$blocking} are treated
+as nuisance factors and held fixed at a single reference value across the
+evaluation grid (numeric blocks at the range midpoint, snapped to the
+discrete support when recorded; categorical blocks at the most frequent
+training level), matching \code{svem_random_table_multi()}. They are
+never swept, so between-block variation does not contribute to the
+whole-model distances.}
 
 \item{response}{Optional character name for the response variable to use when
 \code{spec} is supplied. If omitted, the response is taken from the
@@ -134,6 +147,9 @@ per-fit \eqn{p}-values.
 \item \code{distribution_fit}: fitted SHASHo distribution object.
 \item \code{data_d}: data frame of distances and source labels
 (original vs permutation), suitable for plotting.
+\item \code{diagnostics}: RNG mode, deterministic retry counts and
+reasons, SHASHo convergence information, removed/retained
+evaluation-grid columns, and the retained SVD component count.
 }
 }
 \description{
@@ -155,18 +171,25 @@ null distribution, the reported \eqn{p}-values are approximate and are
 intended as a diagnostic measure of global factor signal, not as exact
 hypothesis tests.
 
-All SVEM refits (for the original and permuted responses) are run in
-parallel using \code{foreach} + \code{doParallel}.
+With \code{nCore = 1}, SVEM refits run in-process. With more than one core,
+the function uses a private PSOCK cluster and \code{parallel::parLapplyLB()}.
+It does not register or change a \code{foreach} backend.
 
 Reproducible parallel RNG (Windows/macOS/Linux): when \code{seed} is supplied,
-the function sets the master RNG to \code{RNGkind("L'Ecuyer-CMRG",
-sample.kind = "Rounding")} (falling back to \code{"L'Ecuyer-CMRG"} on older R),
-and generates a deterministic, per-iteration seed schedule on the master.
-Each parallel \code{foreach} iteration then calls \code{set.seed()} with its
-assigned seed before performing any random draws (including permutations and
-the bootstrap randomness inside \code{SVEMnet()}).
+the function sets its private computation stream to
+\code{RNGkind("L'Ecuyer-CMRG", sample.kind = rng_sample_kind)} and generates
+a deterministic, per-iteration seed schedule on the master. Each fit slot
+calls \code{set.seed()} with its assigned seed before performing random draws
+(including permutations and the bootstrap randomness inside \code{SVEMnet()}).
 This makes results reproducible regardless of worker scheduling and
-independent of the number of cores.
+independent of the number of cores. The caller's RNG kind and
+\code{.Random.seed} are restored on exit, including error exits.
+A failed fit slot is retried twice with deterministic sub-seeds while its
+response permutation remains fixed. If all three attempts fail, the test
+aborts with a failure summary rather than silently reducing \code{nSVEM} or
+\code{nPerm}.
+Likewise, a non-converged SHASHo null-distribution fit is reported as an
+error rather than being used to calculate a whole-model \eqn{p}-value.
 
 The function can optionally reuse a deterministic, locked expansion built
 with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -187,7 +210,9 @@ content was reviewed and finalized by the author.
 }
 
 \examples{
-\donttest{
+\dontrun{
+  ## Production WMT inference is intentionally not run in examples because
+  ## it requires repeated ensemble fits for many response permutations.
   set.seed(1)
 
   # Small toy data with a 3-component mixture A, B, C
@@ -234,7 +259,7 @@ content was reviewed and finalized by the author.
     weight_scheme  = "SVEM",
     objective      = "auto",
     relaxed        = FALSE,   # default, shown for clarity
-    nCore          = 2,
+    nCore          = 1,
     seed           = 123,
     verbose        = FALSE
   )
@@ -260,7 +285,7 @@ content was reviewed and finalized by the author.
     weight_scheme      = "SVEM",
     objective          = "auto",
     relaxed            = FALSE,
-    nCore              = 2,
+    nCore              = 1,
     seed               = 123,
     spec               = spec,
     response           = "y",

@@ -1,3 +1,180 @@
+.svem_align_goals <- function(goals, resp_names, key_to_resp) {
+  if (!is.list(goals) || !length(goals)) {
+    stop("`goals` must be a nonempty list of per-response goal specifications.",
+         call. = FALSE)
+  }
+
+  goal_names <- names(goals)
+  if (is.null(goal_names)) {
+    if (length(goals) != length(resp_names)) {
+      stop("When `goals` is unnamed, it must have the same length as `objects`.",
+           call. = FALSE)
+    }
+    names(goals) <- resp_names
+    return(goals)
+  }
+
+  blank <- is.na(goal_names) | !nzchar(goal_names)
+  if (all(blank)) {
+    if (length(goals) != length(resp_names)) {
+      stop("When `goals` is unnamed, it must have the same length as `objects`.",
+           call. = FALSE)
+    }
+    names(goals) <- resp_names
+    return(goals)
+  }
+  if (any(blank)) {
+    stop("`goals` must be either fully named or fully unnamed; blank/NA names cannot be mixed with response names.",
+         call. = FALSE)
+  }
+
+  unknown <- setdiff(goal_names, names(key_to_resp))
+  if (length(unknown)) {
+    stop("Unknown goal response name(s): ", paste(unknown, collapse = ", "),
+         ". Use an `objects` list name or a fitted-model response name.",
+         call. = FALSE)
+  }
+
+  remapped <- unname(key_to_resp[goal_names])
+  if (anyDuplicated(remapped)) {
+    duplicate_responses <- unique(remapped[duplicated(remapped)])
+    stop("Goal names/aliases map to duplicate responses: ",
+         paste(duplicate_responses, collapse = ", "),
+         ". Supply exactly one goal specification per response.",
+         call. = FALSE)
+  }
+
+  missing_responses <- setdiff(resp_names, remapped)
+  if (length(missing_responses)) {
+    stop("Missing goals for responses: ", paste(missing_responses, collapse = ", "),
+         ". You can name goals by the objects list names or by the model response names.",
+         call. = FALSE)
+  }
+
+  goals <- goals[match(resp_names, remapped)]
+  names(goals) <- resp_names
+  goals
+}
+
+.svem_response_key_map <- function(resp_names, lhs_names, valid_lhs) {
+  if (length(resp_names) != length(lhs_names) ||
+      length(valid_lhs) != length(lhs_names)) {
+    stop("Internal response-name alignment failure.", call. = FALSE)
+  }
+
+  # A fitted-model LHS must not also be another model's canonical list name:
+  # in that case a goal key would have two plausible meanings.
+  conflict <- valid_lhs & lhs_names %in% resp_names & lhs_names != resp_names
+  if (any(conflict)) {
+    pairs <- paste0(
+      "'", lhs_names[conflict], "' (LHS of '", resp_names[conflict], "')"
+    )
+    stop(
+      "Ambiguous response alias(es): ", paste(pairs, collapse = ", "),
+      " also match another object-list name. Rename the conflicting list entry.",
+      call. = FALSE
+    )
+  }
+
+  key_to_resp <- stats::setNames(resp_names, resp_names)
+  lhs_alias <- valid_lhs & !(lhs_names %in% resp_names)
+  if (any(lhs_alias)) key_to_resp[lhs_names[lhs_alias]] <- resp_names[lhs_alias]
+  key_to_resp
+}
+
+.svem_validate_goals <- function(goals, resp_names) {
+  goal_type <- stats::setNames(character(length(resp_names)), resp_names)
+  weights   <- stats::setNames(numeric(length(resp_names)), resp_names)
+  targets   <- stats::setNames(rep(NA_real_, length(resp_names)), resp_names)
+
+  for (r in resp_names) {
+    gi <- goals[[r]]
+    if (!is.list(gi) || is.null(gi$goal) || is.null(gi$weight)) {
+      stop("Each goals[[response]] must have goal and weight. Offender: ", r,
+           call. = FALSE)
+    }
+
+    if (!is.character(gi$goal) || length(gi$goal) != 1L ||
+        is.na(gi$goal) || !nzchar(gi$goal)) {
+      stop("goal for ", r, " must be a single character value: 'max', 'min', or 'target'.",
+           call. = FALSE)
+    }
+    g <- tolower(gi$goal)
+    if (!(g %in% c("max", "min", "target"))) {
+      stop("goal for ", r, " must be 'max', 'min', or 'target'.", call. = FALSE)
+    }
+
+    gi$weight <- .svem_numeric_scalar(
+      gi$weight, paste0("goals[['", r, "']]$weight"), lower = 0
+    )
+
+    for (field in c("lower_acceptable", "upper_acceptable")) {
+      if (!is.null(gi[[field]])) {
+        gi[[field]] <- .svem_numeric_scalar(
+          gi[[field]], paste0("goals[['", r, "']]$", field)
+        )
+      }
+    }
+    for (field in c("tol", "tol_left", "tol_right", "shape",
+                    "shape_left", "shape_right")) {
+      if (!is.null(gi[[field]])) {
+        gi[[field]] <- .svem_numeric_scalar(
+          gi[[field]], paste0("goals[['", r, "']]$", field),
+          lower = 0, lower_open = TRUE
+        )
+      }
+    }
+
+    if (!is.null(gi$lower_acceptable) && !is.null(gi$upper_acceptable) &&
+        gi$lower_acceptable >= gi$upper_acceptable) {
+      stop("Desirability anchors for response '", r,
+           "' are degenerate; they must satisfy lower_acceptable < upper_acceptable.",
+           call. = FALSE)
+    }
+
+    if (!is.null(gi$target)) {
+      gi$target <- .svem_numeric_scalar(
+        gi$target, paste0("goals[['", r, "']]$target")
+      )
+    }
+
+    if (g == "target") {
+      if (is.null(gi$target)) {
+        stop("target must be provided for ", r, " when goal = 'target'.",
+             call. = FALSE)
+      }
+      if (!is.null(gi$lower_acceptable) && gi$lower_acceptable >= gi$target) {
+        stop("Target desirability for response '", r,
+             "' requires lower_acceptable < target.", call. = FALSE)
+      }
+      if (!is.null(gi$upper_acceptable) && gi$upper_acceptable <= gi$target) {
+        stop("Target desirability for response '", r,
+             "' requires target < upper_acceptable.", call. = FALSE)
+      }
+      targets[[r]] <- gi$target
+    }
+
+    gi$goal <- g
+    goals[[r]] <- gi
+    goal_type[[r]] <- g
+    weights[[r]] <- gi$weight
+  }
+
+  weight_sum <- sum(weights)
+  if (!is.finite(weight_sum) || weight_sum <= 0) {
+    stop("At least one response weight must be strictly positive, and response weights must have a finite sum.",
+         call. = FALSE)
+  }
+
+  list(
+    goals = goals,
+    goal = goal_type,
+    weight = weights,
+    target = targets,
+    normalized_weight = weights / weight_sum
+  )
+}
+
 #' Random-search scoring for SVEM models
 #'
 #' @description
@@ -289,8 +466,35 @@
 #' \code{\link{svem_select_from_score_table}},
 #' \code{svem_append_design_space_cols()},
 #' \code{\link{svem_wmt_multi}}
+#' @template ref-svem
 #' @examples
-#' \donttest{
+#' ## Small runnable two-response example
+#' set.seed(11)
+#' n_toy <- 36
+#' toy <- data.frame(x1 = runif(n_toy), x2 = runif(n_toy))
+#' toy$yield <- 1 + 2 * toy$x1 - toy$x2 + rnorm(n_toy, sd = 0.15)
+#' toy$impurity <- 1.5 - toy$x1 + 0.5 * toy$x2 + rnorm(n_toy, sd = 0.10)
+#'
+#' fit_yield <- SVEMnet(yield ~ x1 + x2, toy, nBoot = 5,
+#'                      glmnet_alpha = 1, relaxed = FALSE)
+#' fit_impurity <- SVEMnet(impurity ~ x1 + x2, toy, nBoot = 5,
+#'                         glmnet_alpha = 1, relaxed = FALSE)
+#'
+#' toy_scored <- svem_score_random(
+#'   objects = list(yield = fit_yield, impurity = fit_impurity),
+#'   goals = list(
+#'     yield = list(goal = "max", weight = 0.7),
+#'     impurity = list(goal = "min", weight = 0.3)
+#'   ),
+#'   n = 100,
+#'   numeric_sampler = "uniform",
+#'   verbose = FALSE
+#' )
+#' head(toy_scored$score_table)
+#'
+#' \dontrun{
+#' ## Production-scale lipid workflow. This is not run automatically because
+#' ## it fits three wide ensembles and optionally performs permutation WMTs.
 #' ## ------------------------------------------------------------------------
 #' ## Multi-response SVEM scoring with Derringer–Suich desirabilities
 #' ## ------------------------------------------------------------------------
@@ -365,7 +569,7 @@
 #'                         PDI     = form_pdi),
 #'   data           = lipid_screen,
 #'   mixture_groups = mix,
-#'   wmt_control    = list(seed = 123),
+#'   wmt_control    = list(seed = 123, nCore = 1L),
 #'   plot           = FALSE,
 #'   verbose        = FALSE
 #' )
@@ -484,14 +688,10 @@ svem_score_random <- function(objects,
   if (!all(vapply(objects, inherits, logical(1), what = "svem_model")))
     stop("All elements of 'objects' must be svem_model objects.")
 
-  if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1) {
-    stop("'n' must be a single integer >= 1.")
-  }
-  n <- as.integer(n)
-
-  if (!is.numeric(level) || length(level) != 1L || !is.finite(level) || level <= 0 || level >= 1) {
-    stop("'level' must be a single number strictly between 0 and 1.")
-  }
+  n <- .svem_integer_scalar(n, "n", min = 1L)
+  level <- .svem_numeric_scalar(level, "level", lower = 0, upper = 1,
+                                lower_open = TRUE, upper_open = TRUE)
+  verbose <- .svem_logical_scalar(verbose, "verbose")
 
   if (!is.null(data) && !is.data.frame(data)) {
     stop("'data' must be NULL or a data.frame.")
@@ -500,7 +700,7 @@ svem_score_random <- function(objects,
   # ---- infer response names from model formulas ----
   lhs_names <- vapply(objects, function(o) {
     if (!is.null(o$formula) && inherits(o$formula, "formula")) {
-      as.character(o$formula[[2L]])
+      .svem_response_label(o$formula)
     } else {
       NA_character_
     }
@@ -519,19 +719,11 @@ svem_score_random <- function(objects,
 
   obj_names <- names(objects)
   if (is.null(obj_names)) obj_names <- rep("", length(objects))
+  obj_names[is.na(obj_names)] <- ""
 
   empty_idx <- which(!nzchar(obj_names) & valid_lhs)
   if (length(empty_idx)) obj_names[empty_idx] <- lhs_names[empty_idx]
   names(objects) <- obj_names
-
-  mismatch <- nzchar(obj_names) & valid_lhs & (obj_names != lhs_names)
-  if (any(mismatch, na.rm = TRUE)) {
-    warning(
-      "names(objects) differ from model response names for: ",
-      paste0(obj_names[mismatch], " (lhs: ", lhs_names[mismatch], ")", collapse = ", "),
-      ". You can refer to these responses in goals/specs by either the list name or the response name."
-    )
-  }
 
   resp_names <- names(objects)
   if (any(!nzchar(resp_names))) {
@@ -550,42 +742,20 @@ svem_score_random <- function(objects,
     )
   }
 
-  # mapping: key -> canonical response name (list name)
-  key_to_resp <- setNames(resp_names, resp_names)
-  if (any(valid_lhs)) key_to_resp[lhs_names[valid_lhs]] <- resp_names[valid_lhs]
+  # mapping: unambiguous object/LHS key -> canonical response name
+  key_to_resp <- .svem_response_key_map(resp_names, lhs_names, valid_lhs)
 
-  # ---- goals: allow unnamed (positional) or named by object name or LHS ----
-  if (!is.list(goals) || !length(goals))
-    stop("goals must be a list of per-response goal specifications.")
-
-  if (is.null(names(goals)) || any(!nzchar(names(goals)))) {
-    if (length(goals) != length(objects)) {
-      stop(
-        "When 'goals' is unnamed, it must have the same length as 'objects'.\n",
-        "Either name goals by response, or provide one goal per model."
-      )
-    }
-    names(goals) <- resp_names
-  } else {
-    gnames <- names(goals)
-    remapped <- gnames
-    for (i in seq_along(gnames)) {
-      key <- gnames[i]
-      if (!key %in% resp_names && key %in% names(key_to_resp)) {
-        remapped[i] <- key_to_resp[[key]]
-      }
-    }
-    names(goals) <- remapped
-  }
-
-  miss_goals <- setdiff(resp_names, names(goals))
-  if (length(miss_goals)) {
-    stop(
-      "Missing goals for responses: ",
-      paste(miss_goals, collapse = ", "),
-      ". You can name goals by the objects list names or by the model response names."
+  mismatch <- nzchar(obj_names) & valid_lhs & (obj_names != lhs_names)
+  if (any(mismatch, na.rm = TRUE)) {
+    warning(
+      "names(objects) differ from model response names for: ",
+      paste0(obj_names[mismatch], " (lhs: ", lhs_names[mismatch], ")", collapse = ", "),
+      ". You can refer to these responses in goals/specs by either the list name or the response name."
     )
   }
+
+  # ---- goals: allow unnamed (positional) or named by object name or LHS ----
+  goals <- .svem_align_goals(goals, resp_names, key_to_resp)
 
   # ---- detect families ----
   resp_family <- vapply(objects, function(o) {
@@ -602,40 +772,16 @@ svem_score_random <- function(objects,
   }
 
   # ---- goals & weights ----
-  goal_df <- data.frame(response = resp_names,
-                        goal     = NA_character_,
-                        weight   = NA_real_,
-                        target   = NA_real_,
-                        stringsAsFactors = FALSE)
-
-  for (i in seq_along(resp_names)) {
-    r  <- resp_names[i]
-    gi <- goals[[r]]
-    if (!is.list(gi) || is.null(gi$goal) || is.null(gi$weight))
-      stop("Each goals[[response]] must have goal and weight. Offender: ", r)
-
-    g <- tolower(as.character(gi$goal))
-    if (!g %in% c("max", "min", "target"))
-      stop("goal for ", r, " must be 'max', 'min', or 'target'.")
-
-    w <- as.numeric(gi$weight)
-    if (!is.finite(w) || w < 0)
-      stop("weight for ", r, " must be nonnegative and finite.")
-
-    tval <- if (g == "target") {
-      if (is.null(gi$target))
-        stop("target must be provided for ", r, " when goal = 'target'.")
-      as.numeric(gi$target)
-    } else NA_real_
-
-    goal_df$goal[i]   <- g
-    goal_df$weight[i] <- w
-    goal_df$target[i] <- tval
-  }
-
-  sw <- sum(goal_df$weight)
-  weights_user <- if (sw > 0) goal_df$weight / sw else rep(1 / nrow(goal_df), nrow(goal_df))
-  names(weights_user) <- goal_df$response
+  goal_info <- .svem_validate_goals(goals, resp_names)
+  goals <- goal_info$goals
+  goal_df <- data.frame(
+    response = resp_names,
+    goal = unname(goal_info$goal),
+    weight = unname(goal_info$weight),
+    target = unname(goal_info$target),
+    stringsAsFactors = FALSE
+  )
+  weights_user <- goal_info$normalized_weight
 
   # ---- optional WMT: extract from svem_wmt_multi result ----
   wmt_p_vals <- setNames(rep(NA_real_, length(resp_names)), resp_names)
@@ -662,6 +808,19 @@ svem_score_random <- function(objects,
     common <- intersect(names(mult_vec), resp_names)
     if (!length(common)) {
       stop("No overlap between response names and names(wmt$multipliers) after name alignment.")
+    }
+    # Surface partial mismatches: a misspelled multiplier name would otherwise
+    # silently leave that response at full weight (1.0) and drop the stray entry
+    no_mult <- setdiff(resp_names, names(mult_vec))
+    if (length(no_mult)) {
+      warning("No wmt multiplier found for response(s): ",
+              paste(no_mult, collapse = ", "),
+              "; using multiplier 1.0 (full weight) for them.", call. = FALSE)
+    }
+    stray_mult <- setdiff(names(mult_vec), resp_names)
+    if (length(stray_mult)) {
+      warning("Ignoring wmt multiplier name(s) that match no response: ",
+              paste(stray_mult, collapse = ", "), call. = FALSE)
     }
     wmt_mult[common] <- as.numeric(mult_vec[common])
 
@@ -740,7 +899,7 @@ svem_score_random <- function(objects,
 
     lhs <- NA_character_
     if (!is.null(obj$formula) && inherits(obj$formula, "formula")) {
-      lhs <- tryCatch(as.character(obj$formula[[2L]]), error = function(e) NA_character_)
+      lhs <- .svem_response_label(obj$formula)
     }
 
     candidates <- character(0L)
@@ -808,19 +967,6 @@ svem_score_random <- function(objects,
     g  <- goal_df$goal[goal_df$response == r]
     y  <- score_table[[resp_pred_cols[[r]]]]
 
-    if (!is.null(gi$shape)) {
-      if (!is.numeric(gi$shape) || length(gi$shape) != 1L || gi$shape <= 0)
-        stop("For response '", r, "', DS 'shape' must be a single positive number.")
-    }
-    if (!is.null(gi$shape_left)) {
-      if (!is.numeric(gi$shape_left) || length(gi$shape_left) != 1L || gi$shape_left <= 0)
-        stop("For response '", r, "', DS 'shape_left' must be a single positive number.")
-    }
-    if (!is.null(gi$shape_right)) {
-      if (!is.numeric(gi$shape_right) || length(gi$shape_right) != 1L || gi$shape_right <= 0)
-        stop("For response '", r, "', DS 'shape_right' must be a single positive number.")
-    }
-
     if (isTRUE(is_binomial_resp[r])) y <- pmin(pmax(as.numeric(y), 0), 1)
 
     L_def <- .q(y, .q_lo)
@@ -840,10 +986,23 @@ svem_score_random <- function(objects,
     L_def <- mid_def - 0.5 * span_use
     U_def <- mid_def + 0.5 * span_use
 
+    # Explicitly supplied anchors that collapse the desirability band would
+    # silently neutralize the response (constant desirability for every row);
+    # surface the input error instead.
+    .check_user_anchors <- function(L, U) {
+      if ((!is.null(gi$lower_acceptable) || !is.null(gi$upper_acceptable)) &&
+          (!is.finite(L) || !is.finite(U) || U <= L)) {
+        stop("Desirability anchors for response '", r, "' are degenerate ",
+             "(need finite lower_acceptable < upper_acceptable; got L = ", L,
+             ", U = ", U, ").", call. = FALSE)
+      }
+    }
+
     if (g == "max") {
       L <- if (!is.null(gi$lower_acceptable)) as.numeric(gi$lower_acceptable) else L_def
       U <- if (!is.null(gi$upper_acceptable)) as.numeric(gi$upper_acceptable) else U_def
       s <- if (!is.null(gi$shape))            as.numeric(gi$shape)            else 1
+      .check_user_anchors(L, U)
       z <- .ds_max(y, L, U, s)
       ds_params[[r]] <- list(type = "max", L = L, U = U, s = s)
 
@@ -851,6 +1010,7 @@ svem_score_random <- function(objects,
       L <- if (!is.null(gi$lower_acceptable)) as.numeric(gi$lower_acceptable) else L_def
       U <- if (!is.null(gi$upper_acceptable)) as.numeric(gi$upper_acceptable) else U_def
       s <- if (!is.null(gi$shape))            as.numeric(gi$shape)            else 1
+      .check_user_anchors(L, U)
       z <- .ds_min(y, L, U, s)
       ds_params[[r]] <- list(type = "min", L = L, U = U, s = s)
 
@@ -868,9 +1028,8 @@ svem_score_random <- function(objects,
       sL <- if (!is.null(gi$shape_left))  as.numeric(gi$shape_left)  else .exp_left
       sR <- if (!is.null(gi$shape_right)) as.numeric(gi$shape_right) else .exp_right
       if (!(is.finite(L) && is.finite(U) && L < T0 && T0 < U)) {
-        band <- .tol_frac * (U_def - L_def)
-        L <- T0 - band
-        U <- T0 + band
+        stop("Resolved target desirability anchors for response '", r,
+             "' must satisfy finite L < target < U.", call. = FALSE)
       }
       z <- .ds_target(y, T0, L, U, sL, sR)
       ds_params[[r]] <- list(type = "target", T0 = T0, L = L, U = U, sL = sL, sR = sR)
@@ -1074,6 +1233,23 @@ svem_score_random <- function(objects,
     pred_mat <- pred_df0[resp_names]
     colnames(pred_mat) <- paste0(resp_names, "_pred")
 
+    # In the iterate-append-refit workflow, 'data' may still carry scored
+    # columns from a previous round's export; cbind would then create
+    # duplicate names and downstream name-based extraction would silently
+    # pick the STALE first copy.
+    appended_names <- c(colnames(pred_mat), names(des_cols),
+                        paste0(resp_names, "_lwr"), paste0(resp_names, "_upr"),
+                        paste0(resp_names, "_ciw_w"),
+                        "score", "wmt_score", "uncertainty_measure")
+    clash <- intersect(appended_names, colnames(data))
+    if (length(clash)) {
+      warning("svem_score_random(): 'data' already contains scored column(s): ",
+              paste(clash, collapse = ", "),
+              ". These look like outputs of a previous scoring round; remove them ",
+              "before scoring to avoid stale duplicates in original_data_scored.",
+              call. = FALSE)
+    }
+
     original_data_scored <- cbind(
       data,
       pred_mat,
@@ -1109,12 +1285,12 @@ svem_score_random <- function(objects,
     score_table <- tryCatch(
       svem_append_design_space_cols(score_table = score_table, objects = objects, specs = specs),
       error = function(e) {
-        if (isTRUE(verbose)) {
-          message(
-            "svem_score_random(): spec-limit augmentation failed for score_table; returning without spec columns. Error: ",
-            conditionMessage(e)
-          )
-        }
+        # a warning (not a verbose-only message): the user asked for spec
+        # columns and would otherwise discover their absence only downstream
+        warning(
+          "svem_score_random(): spec-limit augmentation failed for score_table; returning without spec columns. Error: ",
+          conditionMessage(e), call. = FALSE
+        )
         score_table
       }
     )
@@ -1123,12 +1299,10 @@ svem_score_random <- function(objects,
       original_data_scored <- tryCatch(
         svem_append_design_space_cols(score_table = original_data_scored, objects = objects, specs = specs),
         error = function(e) {
-          if (isTRUE(verbose)) {
-            message(
-              "svem_score_random(): spec-limit augmentation failed for original_data_scored; returning without spec columns. Error: ",
-              conditionMessage(e)
-            )
-          }
+          warning(
+            "svem_score_random(): spec-limit augmentation failed for original_data_scored; returning without spec columns. Error: ",
+            conditionMessage(e), call. = FALSE
+          )
           original_data_scored
         }
       )
@@ -1139,7 +1313,11 @@ svem_score_random <- function(objects,
   attr(score_table, "svem_predictor_cols") <- predictor_cols
   attr(score_table, "svem_resp_cols")      <- resp_cols
   if (!is.null(original_data_scored) && is.data.frame(original_data_scored)) {
-    attr(original_data_scored, "svem_predictor_cols") <- if (is.null(data)) predictor_cols else colnames(data)
+    # restrict to the model's design factors: colnames(data) would include the
+    # measured responses and any ID/notes columns, silently contaminating
+    # Gower-distance diversity clustering in svem_select_from_score_table()
+    attr(original_data_scored, "svem_predictor_cols") <-
+      intersect(predictor_cols, colnames(original_data_scored))
     attr(original_data_scored, "svem_resp_cols")      <- resp_cols
   }
 

@@ -37,6 +37,9 @@
 #'   \code{\link{svem_significance_test_parallel}}. By default this is
 #'   \code{list(seed = 123)} so that WMT calls are reproducible; you may
 #'   override or extend this (e.g. \code{list(seed = 999, nPerm = 300)}).
+#'   The WMT is serial by default. Pass \code{nCore} explicitly to opt into
+#'   parallel execution, and use \code{rng_sample_kind = "Rounding"} only when
+#'   reproducing the legacy pre-3.4.0 random stream.
 #'   Any entries not recognized by \code{svem_significance_test_parallel}
 #'   are ignored by that function.
 #' @param plot Logical; if \code{TRUE} (default), attempt to plot all
@@ -63,8 +66,11 @@
 #' @seealso
 #' \code{\link{svem_significance_test_parallel}},
 #' \code{\link{plot.svem_significance_test}}
+#' @template ref-svem
 #' @examples
-#' \donttest{
+#' \dontrun{
+#' ## Production WMT workflow: not run automatically because each response
+#' ## requires repeated SVEM fits under many response permutations.
 #' data(lipid_screen)
 #'
 #' spec <- bigexp_terms(
@@ -96,7 +102,7 @@
 #'   data           = lipid_screen,
 #'   mixture_groups = mix,
 #'   wmt_transform  = "neglog10",
-#'   wmt_control    = list(seed = 123),
+#'   wmt_control    = list(seed = 123, nCore = 1L),
 #'   plot           = TRUE
 #' )
 #'
@@ -139,18 +145,19 @@ svem_wmt_multi <- function(formulas,
   if (length(fill_idx)) {
     inferred <- vapply(formulas[fill_idx], function(fml) {
       if (!inherits(fml, "formula")) return(NA_character_)
-      lhs <- tryCatch(as.character(fml[[2L]]), error = function(e) NA_character_)
+      # deparse-based label is always a length-1 string, including for
+      # transformed responses such as log(y) (where as.character(fml[[2L]])
+      # is length 2 and would crash the scalar checks below)
+      lhs <- .svem_response_label(fml)
       if (!is.na(lhs) && nzchar(lhs)) lhs else "response"
     }, character(1))
     f_names[fill_idx] <- inferred
   }
 
-  # ensure uniqueness deterministically: second duplicate gets suffix _2, etc.
-  idx <- stats::ave(seq_along(f_names), f_names, FUN = seq_along)
-  dup <- idx > 1L
-  if (any(dup)) {
-    f_names[dup] <- paste0(f_names[dup], "_", idx[dup])
-  }
+  # ensure uniqueness deterministically; make.unique() cannot collide with
+  # existing user-supplied names (an ad-hoc "_2" suffix scheme could, silently
+  # skipping a formula in the by-name loop below)
+  f_names <- make.unique(f_names, sep = "_")
   names(formulas) <- f_names
 
   # ---- protect required args from being overridden via wmt_control ----
@@ -203,7 +210,9 @@ svem_wmt_multi <- function(formulas,
         NULL
       }
     )
-    res_list[[nm]] <- wmt_obj
+    # single-bracket list assignment keeps a NULL entry (documented contract);
+    # res_list[[nm]] <- NULL would delete the element and shrink the list
+    res_list[nm] <- list(wmt_obj)
 
     # robust extraction of scalar p-value
     p <- NA_real_

@@ -47,12 +47,11 @@
 #' @details
 #' Rows are ranked according to \code{by}, with larger or smaller values
 #' treated as better depending on \code{direction} ("max" or "min").
-#' Any rows with missing values in the \code{by} column are placed at the end
-#' by \code{order()} and may or may not enter the top fraction, depending on
-#' \code{top_frac} and the number of nonmissing rows.
+#' Rows whose \code{by} value is \code{NA}, \code{NaN}, \code{Inf}, or
+#' \code{-Inf} are excluded before ranking and cannot enter the top fraction.
+#' The function errors when no finite ranking values remain.
 #'
 #' @examples
-#' \donttest{
 #' set.seed(1)
 #' n <- 100
 #' tab <- data.frame(
@@ -80,7 +79,6 @@
 #'   predictor_cols = c("x1", "x2"),
 #'   direction      = "min"
 #' )
-#' }
 #'
 #' @importFrom cluster daisy pam
 #' @keywords internal
@@ -113,15 +111,10 @@ svem_select_candidates <- function(table,
     stop("Column `", by, "` must be numeric for ranking.")
   }
 
-  if (!is.numeric(top_frac) || length(top_frac) != 1L ||
-      !is.finite(top_frac) || top_frac <= 0 || top_frac > 1) {
-    stop("`top_frac` must be a single finite number in (0, 1].")
-  }
+  top_frac <- .svem_numeric_scalar(top_frac, "top_frac", lower = 0, upper = 1,
+                                   lower_open = TRUE)
 
-  if (!is.numeric(k) || length(k) != 1L || !is.finite(k)) {
-    stop("`k` must be a single finite numeric value.")
-  }
-  k <- as.integer(k)
+  k <- .svem_integer_scalar(k, "k", min = -.Machine$integer.max)
   if (k <= 0L) {
     return(integer(0L))
   }
@@ -129,30 +122,33 @@ svem_select_candidates <- function(table,
   if (!is.character(predictor_cols) || !length(predictor_cols)) {
     stop("`predictor_cols` must be a nonempty character vector of column names.")
   }
+  if (anyNA(predictor_cols) || any(!nzchar(predictor_cols))) {
+    stop("`predictor_cols` cannot contain NA or empty column names.")
+  }
   missing_pred <- setdiff(predictor_cols, colnames(table))
   if (length(missing_pred)) {
     stop("The following `predictor_cols` are not present in `table`: ",
          paste(missing_pred, collapse = ", "))
   }
 
-  # Guard: ranking must have at least one finite value
+  # Rank only finite values.  Inf/-Inf are sentinel values in several scoring
+  # workflows and must not become the best row or enter the PAM candidate set.
   vals <- table[[by]]
-  if (!any(is.finite(vals))) {
+  finite_idx <- which(is.finite(vals))
+  if (!length(finite_idx)) {
     stop("Column `", by, "` has no finite values; cannot rank candidates.")
   }
+  n_rank <- length(finite_idx)
 
   # Determine how many top rows to keep; the small epsilon prevents
   # floating-point noise (e.g. 0.2 * 50 = 10.000000000000002) from
   # inflating the count by one
-  m_top <- max(1L, min(n, ceiling(top_frac * n - 1e-9)))
+  m_top <- max(1L, min(n_rank, ceiling(top_frac * n_rank - 1e-9)))
 
-  # Order by score according to direction; NA go to the end
-  ord <- order(
-    vals,
-    decreasing = (direction == "max"),
-    na.last    = TRUE
-  )
-  top_idx <- ord[seq_len(m_top)]
+  # Deterministic tie-breaker: retain original row order among equal scores.
+  rank_key <- if (direction == "max") -vals[finite_idx] else vals[finite_idx]
+  ord <- order(rank_key, finite_idx)
+  top_idx <- finite_idx[ord[seq_len(m_top)]]
 
   top_X <- table[top_idx, predictor_cols, drop = FALSE]
 
@@ -169,6 +165,13 @@ svem_select_candidates <- function(table,
   k <- min(k, nrow(top_X))
   if (k <= 0L) {
     return(integer(0L))
+  }
+
+  # cluster::pam() requires k <= n - 1 (and daisy() needs n >= 2). When the
+  # requested count covers the whole top set there is nothing to cluster:
+  # return all top rows directly instead of crashing.
+  if (k >= nrow(top_X)) {
+    return(top_idx)
   }
 
   # Critical: reset rownames so pam id.med maps to positions 1..m_top reliably

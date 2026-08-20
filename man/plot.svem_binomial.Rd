@@ -41,10 +41,9 @@ For ROC/PR, simple one-class guards are used (returns a diagonal ROC and trivial
 The function assumes binomial models store \code{x$y_pred} on the \emph{probability} scale.
 }
 \examples{
-\dontrun{
   ## --- Binomial example: simulate, fit, and plot --------------------------
   set.seed(2025)
-  n  <- 600
+  n  <- 100
   x1 <- rnorm(n); x2 <- rnorm(n); x3 <- rnorm(n)
   eta    <- -0.4 + 1.1*x1 - 0.8*x2 + 0.5*x3
   p_true <- plogis(eta)
@@ -55,17 +54,16 @@ The function assumes binomial models store \code{x$y_pred} on the \emph{probabil
     y ~ x1 + x2 + x3 + I(x1^2) + (x1 + x2 + x3)^2,
     data          = dat_b,
     family        = "binomial",
-    glmnet_alpha  = c(1, 0.5),
-    nBoot         = 60,
+    glmnet_alpha  = 1,
+    nBoot         = 10,
     objective     = "auto",
     weight_scheme = "SVEM",
-    relaxed       = TRUE
+    relaxed       = FALSE
   )
 
   # Calibration / ROC / PR
   plot(fit_b, type = "calibration", bins = 12)
   plot(fit_b, type = "roc")
   plot(fit_b, type = "pr")
-}
 
 }

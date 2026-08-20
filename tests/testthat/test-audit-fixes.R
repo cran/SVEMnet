@@ -32,7 +32,7 @@ test_that("glmnet_with_cv 1se rule selects a lambda at least as large as the min
   expect_lte(k_1se, k_min)
 })
 
-test_that("glmnet_with_cv relaxed fit selects gamma by the choose_rule", {
+test_that("glmnet_with_cv relaxed fit jointly selects lambda and gamma", {
   set.seed(456)
   n <- 90; p <- 8
   X <- matrix(rnorm(n * p), n, p)
@@ -44,7 +44,9 @@ test_that("glmnet_with_cv relaxed fit selects gamma by the choose_rule", {
   fit_rel <- glmnet_with_cv(y ~ ., df, glmnet_alpha = 1, nfolds = 5,
                             repeats = 1, choose_rule = "min",
                             relaxed = TRUE, seed = 21)
-  expect_true(any(grepl("gamma.min", fit_rel$note, fixed = TRUE)))
+  expect_true(is.finite(fit_rel$best_gamma))
+  expect_true(fit_rel$best_gamma %in% c(0, 0.25, 0.5, 0.75, 1))
+  expect_true(any(grepl("jointly selected", fit_rel$note, fixed = TRUE)))
 })
 
 test_that("single-level discrete numeric supports round-trip unchanged", {
@@ -183,7 +185,7 @@ test_that("significance test validates mixture variables", {
       mixture_groups = list(list(vars = c("A", "B", "Czz"),
                                  lower = c(0.05, 0.05, 0.05),
                                  upper = c(0.9, 0.9, 0.9), total = 1)),
-      nPoint = 100, nSVEM = 1, nPerm = 5, nBoot = 5,
+      nPoint = 100, nSVEM = 1, nPerm = 20, nBoot = 5,
       nCore = 1, verbose = FALSE
     ),
     "Mixture variables not in model predictors"

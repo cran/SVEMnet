@@ -37,7 +37,7 @@ Generate predictions from a fitted object returned by
 }
 \details{
 The design matrix for \code{newdata} is rebuilt using the stored training
-\code{terms} (with environment set to \code{baseenv()}), together with the
+\code{terms} (with a compact formula-evaluation environment), together with the
 saved factor \code{xlevels} and \code{contrasts} (cached in
 \code{object$schema}). Columns are then aligned back to the training
 design in a robust way:
@@ -76,7 +76,7 @@ fit <- glmnet_with_cv(
   y ~ ., df_ex,
   glmnet_alpha = 1,
   nfolds = 5,
-  repeats = 2,
+  repeats = 1,
   seed = 9,
   family = "gaussian"
 )
@@ -97,9 +97,9 @@ colnames(df_bin) <- c("y", paste0("x", 1:p2))
 
 fit_bin <- glmnet_with_cv(
   y ~ ., df_bin,
-  glmnet_alpha = c(0.5, 1),
+  glmnet_alpha = 1,
   nfolds = 5,
-  repeats = 2,
+  repeats = 1,
   seed = 11,
   family = "binomial"
 )

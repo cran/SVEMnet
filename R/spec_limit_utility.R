@@ -45,12 +45,24 @@
       is.null(object$coef_matrix)) {
     stop("svem_model object must contain 'terms', 'training_X', and 'coef_matrix'.")
   }
+  newdata <- .svem_validate_newdata_classes(object, newdata)
+  if (nrow(newdata) == 0L) {
+    if (!is.matrix(object$coef_matrix) || nrow(object$coef_matrix) < 1L) {
+      stop("`object$coef_matrix` must be a non-empty matrix with an intercept column.")
+    }
+    return(list(
+      pred_mat = matrix(numeric(0L), nrow = 0L, ncol = nrow(object$coef_matrix)),
+      bad_rows = logical(0L)
+    ))
+  }
 
   fam <- tolower(object$family %||% "gaussian")
 
   # Rebuild design matrix (mirror predict.svem_model)
   terms_obj <- stats::delete.response(object$terms)
-  environment(terms_obj) <- baseenv()
+  if (identical(environment(terms_obj), baseenv())) {
+    environment(terms_obj) <- asNamespace("stats")
+  }
 
   # Harmonize factor / character predictors to training levels
   xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else list()
@@ -283,7 +295,13 @@ svem_append_design_space_cols <- function(score_table,
   }
 
   n_row <- nrow(score_table)
-  if (n_row == 0L) return(score_table)
+  if (n_row == 0L) {
+    # keep the appended-column contract even for empty tables so downstream
+    # code can rely on the joint columns existing
+    score_table$p_joint_mean        <- numeric(0L)
+    score_table$joint_in_spec_point <- integer(0L)
+    return(score_table)
+  }
 
   # Predictor columns: use sampling_schema$predictor_vars (must be present)
   first_obj <- objects[[1L]]
@@ -300,6 +318,21 @@ svem_append_design_space_cols <- function(score_table,
   if (length(missing_pred_cols)) {
     stop("The following predictor columns are missing from `score_table`: ",
          paste(missing_pred_cols, collapse = ", "))
+  }
+
+  # All models are evaluated on the same predictor slice, so every model's
+  # schema must be covered by the first model's predictor set (when called
+  # via svem_score_random this is already enforced upstream; direct callers
+  # get a clear error here instead of a missing-variable failure downstream)
+  for (nm in names(objects)) {
+    pv <- objects[[nm]]$sampling_schema$predictor_vars
+    pv <- pv[!is.na(pv) & nzchar(pv)]
+    extra <- setdiff(pv, pred_vars)
+    if (length(extra)) {
+      stop("Model '", nm, "' uses predictor(s) not present in the first model's ",
+           "sampling schema: ", paste(extra, collapse = ", "),
+           ". All models must share the same predictor set.")
+    }
   }
 
   X <- score_table[, pred_vars, drop = FALSE]
@@ -342,10 +375,14 @@ svem_append_design_space_cols <- function(score_table,
     lo <- if (lo_missing) -Inf else as.numeric(lo_raw)
     hi <- if (hi_missing)  Inf else as.numeric(hi_raw)
 
-    if (!is.numeric(lo) || length(lo) != 1L ||
-        !is.numeric(hi) || length(hi) != 1L ||
-        !is.finite(lo) && lo != -Inf ||
-        !is.finite(hi) && hi !=  Inf) {
+    # is.na() must be checked before the != comparisons: a bound that fails
+    # numeric coercion (e.g. "abc" -> NA) would otherwise make the condition
+    # NA and abort with R's generic error instead of this message
+    bad_lo <- !is.numeric(lo) || length(lo) != 1L || is.na(lo) ||
+      (!is.finite(lo) && lo != -Inf)
+    bad_hi <- !is.numeric(hi) || length(hi) != 1L || is.na(hi) ||
+      (!is.finite(hi) && hi != Inf)
+    if (bad_lo || bad_hi) {
       stop("Specs for response '", resp, "' must have numeric scalar bounds (or NULL/NA for one-sided).")
     }
     if (is.finite(lo) && is.finite(hi) && lo > hi) {
@@ -410,8 +447,10 @@ svem_append_design_space_cols <- function(score_table,
     colnames(p_df)   <- paste0(spec_resps, "_p_in_spec_mean")
     colnames(ind_df) <- paste0(spec_resps, "_in_spec_point")
   } else {
-    p_df   <- data.frame()
-    ind_df <- data.frame()
+    # zero-COLUMN (not zero-row) frames so the cbind() below stays
+    # conformable when no response has an active spec
+    p_df   <- as.data.frame(matrix(nrow = n_row, ncol = 0))
+    ind_df <- as.data.frame(matrix(nrow = n_row, ncol = 0))
   }
 
   joint_df <- data.frame(

@@ -48,7 +48,8 @@ coefficients from an SVEM model.}
 \item{\code{\link{svem_nonzero}}}{Bootstrap nonzero percentages for each
 coefficient, with an optional quick plot.}
 \item{\code{\link{plot.svem_model}}}{Quick actual-versus-predicted plot for a
-fitted model (with optional group colorings).}
+fitted model (with ROC, precision-recall, and calibration displays
+for binomial fits).}
 }
 }
 
@@ -103,17 +104,18 @@ inspection.}
 \section{Whole-model testing and plotting}{
 
 \describe{
-\item{\code{\link{svem_significance_test_parallel}}}{Parallel whole-model
-significance test (using \code{foreach} + \code{doParallel}) with
-support for mixture-constrained sampling and reuse of a locked
-\code{bigexp_spec}. Designed for continuous (Gaussian) responses.}
+\item{\code{\link{svem_significance_test_parallel}}}{Whole-model
+significance test with serial execution by default and an optional
+private PSOCK cluster for explicit multi-core runs. Supports
+mixture-constrained sampling and reuse of a locked
+\code{bigexp_spec}; designed for continuous (Gaussian) responses.}
 \item{\code{\link{svem_wmt_multi}}}{Helper to run
 \code{svem_significance_test_parallel} across multiple responses and
 construct whole-model p-values and reweighting multipliers for use
 in \code{\link{svem_score_random}}.}
 \item{\code{\link[=plot.svem_significance_test]{plot.svem_significance_test}}}{Plot helper
-for visualizing multiple significance-test outputs (observed vs
-permutation distances, fitted null, and p-values).}
+for visualizing one or more significance-test outputs (boxplots of
+observed vs permutation distances).}
 }
 }
 

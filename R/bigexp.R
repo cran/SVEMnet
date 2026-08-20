@@ -49,17 +49,8 @@
                               intercept        = TRUE) {
   stopifnot(length(vars) >= 1L)
 
-  if (!is.numeric(factorial_order) || length(factorial_order) != 1L ||
-      !is.finite(factorial_order) || factorial_order < 1) {
-    stop("factorial_order must be a single finite integer >= 1.")
-  }
-  if (!is.numeric(polynomial_order) || length(polynomial_order) != 1L ||
-      !is.finite(polynomial_order) || polynomial_order < 1) {
-    stop("polynomial_order must be a single finite integer >= 1.")
-  }
-
-  factorial_order  <- as.integer(factorial_order)
-  polynomial_order <- as.integer(polynomial_order)
+  factorial_order  <- .svem_integer_scalar(factorial_order, "factorial_order", min = 1L)
+  polynomial_order <- .svem_integer_scalar(polynomial_order, "polynomial_order", min = 1L)
 
   # Explicit factorial block: main effects plus all : interactions up to order k
   build_factorial_terms <- function(vs, k) {
@@ -86,8 +77,9 @@
     }
     rhs_parts <- c(rhs_parts, paste(poly_terms, collapse = " + "))
 
-    # Optional Z:I(X^2) (two-way partial-cubic)
-    if (isTRUE(include_pc_2way)) {
+    # Optional Z:I(X^2) (two-way partial-cubic); these are cross terms, so they
+    # require the corresponding factorial interaction order to be enabled
+    if (isTRUE(include_pc_2way) && factorial_order >= 2L) {
       pc2 <- character()
       for (xi in cont_vars) {
         others <- setdiff(vars, xi)
@@ -100,7 +92,7 @@
     }
 
     # Optional I(X^2):Z:W (three-way partial-cubic)
-    if (isTRUE(include_pc_3way)) {
+    if (isTRUE(include_pc_3way) && factorial_order >= 3L) {
       pc3 <- character()
       for (xi in cont_vars) {
         others <- setdiff(vars, xi)
@@ -115,7 +107,7 @@
   }
 
   rhs <- paste(rhs_parts, collapse = " + ")
-  if (!intercept) rhs <- paste0(rhs, " - 1")
+  if (!isTRUE(intercept)) rhs <- paste0(rhs, " - 1")
   rhs
 }
 
@@ -198,15 +190,21 @@
 #'   non-blocking predictors. A value of 1 means only linear terms; 2 adds
 #'   squares \code{I(X^2)}; 3 adds cubes \code{I(X^3)}; in general, all powers
 #'   \code{I(X^k)} for \code{k} from 2 up to \code{polynomial_order} are added.
-#' @param include_pc_2way Logical. If \code{TRUE} (default) and
-#'   \code{polynomial_order >= 2}, include partial-cubic two-way terms of the
-#'   form \code{Z:I(X^2)} where \code{X} is continuous and \code{Z} is another
-#'   non-blocking predictor.
-#' @param include_pc_3way Logical. If \code{TRUE} and \code{polynomial_order >= 2},
-#'   include partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
+#' @param include_pc_2way Logical. If \code{TRUE} (default),
+#'   \code{polynomial_order >= 2}, and \code{factorial_order >= 2}, include
+#'   partial-cubic two-way terms of the form \code{Z:I(X^2)} where \code{X} is
+#'   continuous and \code{Z} is another non-blocking predictor. (These are
+#'   cross terms, so \code{factorial_order = 1} — "main effects only" —
+#'   suppresses them.)
+#' @param include_pc_3way Logical. If \code{TRUE},
+#'   \code{polynomial_order >= 2}, and \code{factorial_order >= 3}, include
+#'   partial-cubic three-way terms \code{I(X^2):Z:W} among non-blocking
 #'   predictors.
 #' @param intercept Logical. If \code{TRUE} (default), include an intercept in the
-#'   expansion; if \code{FALSE}, the generated RHS drops the intercept.
+#'   expansion; if \code{FALSE}, the generated RHS drops the intercept. The
+#'   no-intercept form is available for standalone design-matrix workflows;
+#'   \code{SVEMnet()} and \code{glmnet_with_cv()} require the intercept convention
+#'   used by the published SVEM methods and reject such a specification.
 #' @param blocking Optional character vector of column names in \code{data} to
 #'   treat as blocking factors. These variables are included in the spec and
 #'   typed like other predictors (categorical vs continuous), but they enter the
@@ -327,14 +325,13 @@
 #' ## A common case is a numeric process setting that only takes a small set
 #' ## of allowed values (e.g., 0.5, 1, 2, 4). Use `discrete_numeric` in
 #' ## bigexp_terms() so downstream sampling respects those levels automatically.
-#' \donttest{
 #' set.seed(3)
 #' D_allowed <- c(0.5, 1, 2, 4)
 #' df_disc <- data.frame(
-#'   y  = rnorm(60),
-#'   D  = sample(D_allowed, 60, replace = TRUE),   # numeric with discrete support
-#'   X1 = rnorm(60),
-#'   G  = factor(sample(c("A", "B"), 60, replace = TRUE))
+#'   y  = rnorm(40),
+#'   D  = sample(D_allowed, 40, replace = TRUE),   # numeric with discrete support
+#'   X1 = rnorm(40),
+#'   G  = factor(sample(c("A", "B"), 40, replace = TRUE))
 #' )
 #'
 #' # Record that D should be treated as "discrete numeric" for downstream sampling.
@@ -350,20 +347,20 @@
 #'
 #' # Fit. The discrete support is expected to propagate into fit$sampling_schema
 #' # (assuming the updated SVEMnet implementation that stores sampling_schema).
-#' fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 20)
+#' fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 8,
+#'                     glmnet_alpha = 1, relaxed = FALSE)
 #'
 #' # Score random candidates; sampled D values stay in D_allowed
 #' scored <- svem_score_random(
 #'   objects         = list(y = fit_disc),
 #'   goals           = list(y = list(goal = "max", weight = 1)),
-#'   n               = 2000,
+#'   n               = 200,
 #'   numeric_sampler = "random",
 #'   verbose         = FALSE
 #' )
 #'
 #' table(scored$score_table$D)
 #' stopifnot(all(scored$score_table$D %in% D_allowed))
-#' }
 #' @export
 #' @importFrom stats model.frame na.pass as.formula model.matrix
 #' @importFrom utils combn
@@ -382,35 +379,24 @@ bigexp_terms <- function(formula, data,
                          report             = TRUE) {
   stopifnot(is.data.frame(data))
 
-  if (!is.numeric(factorial_order) || length(factorial_order) != 1L ||
-      !is.finite(factorial_order) || factorial_order < 1) {
-    stop("factorial_order must be a single finite integer >= 1.")
-  }
-  if (!is.numeric(polynomial_order) || length(polynomial_order) != 1L ||
-      !is.finite(polynomial_order) || polynomial_order < 1) {
-    stop("polynomial_order must be a single finite integer >= 1.")
-  }
+  factorial_order  <- .svem_integer_scalar(factorial_order, "factorial_order", min = 1L)
+  polynomial_order <- .svem_integer_scalar(polynomial_order, "polynomial_order", min = 1L)
+  audit_numeric_rate <- .svem_numeric_scalar(
+    audit_numeric_rate, "audit_numeric_rate", lower = 0, upper = 1,
+    lower_open = TRUE
+  )
+  audit_unique_ratio <- .svem_numeric_scalar(
+    audit_unique_ratio, "audit_unique_ratio", lower = 0, upper = 1,
+    lower_open = TRUE
+  )
+  audit_min_n <- .svem_integer_scalar(audit_min_n, "audit_min_n", min = 1L)
+  report <- .svem_logical_scalar(report, "report")
 
-  if (!is.numeric(audit_numeric_rate) || length(audit_numeric_rate) != 1L ||
-      !is.finite(audit_numeric_rate) || audit_numeric_rate <= 0 || audit_numeric_rate > 1) {
-    stop("audit_numeric_rate must be a single finite number in (0, 1].")
-  }
-  if (!is.numeric(audit_unique_ratio) || length(audit_unique_ratio) != 1L ||
-      !is.finite(audit_unique_ratio) || audit_unique_ratio <= 0 || audit_unique_ratio > 1) {
-    stop("audit_unique_ratio must be a single finite number in (0, 1].")
-  }
-  if (!is.numeric(audit_min_n) || length(audit_min_n) != 1L ||
-      !is.finite(audit_min_n) || audit_min_n < 1) {
-    stop("audit_min_n must be a single finite integer >= 1.")
-  }
-  audit_min_n <- as.integer(audit_min_n)
-
-  if (!is.logical(report) || length(report) != 1L || is.na(report)) {
-    stop("report must be TRUE/FALSE.")
-  }
-
-  factorial_order  <- as.integer(factorial_order)
-  polynomial_order <- as.integer(polynomial_order)
+  ## Validate logical flags up front so that the stored settings, the printed
+  ## spec, and the generated RHS cannot disagree about what was requested.
+  intercept <- .svem_logical_scalar(intercept, "intercept")
+  include_pc_2way <- .svem_logical_scalar(include_pc_2way, "include_pc_2way")
+  include_pc_3way <- .svem_logical_scalar(include_pc_3way, "include_pc_3way")
 
   ## Validate blocking
   if (is.null(blocking)) {
@@ -436,7 +422,7 @@ bigexp_terms <- function(formula, data,
       "The helper will generate interactions and powers."
     )
   }
-  dot_rhs <- grepl("~\\s*\\.", ftxt)
+  dot_rhs <- "." %in% all.vars(formula)
 
   mf <- stats::model.frame(formula, data, na.action = stats::na.pass)
   tt <- attr(mf, "terms")
@@ -509,6 +495,19 @@ bigexp_terms <- function(formula, data,
   ## bigexp_prepare() with a confusing "missing predictor" error.
   missing_cols <- setdiff(vars_all, names(data))
   if (length(missing_cols)) {
+    # Non-syntactic column names (e.g. "Flow Rate (mL/min)") arrive from
+    # terms() wrapped in backticks and would otherwise be misdiagnosed as
+    # transformed terms; give the real reason instead.
+    debacktick <- gsub("^`|`$", "", missing_cols)
+    nonsyntactic <- missing_cols[debacktick %in% names(data)]
+    if (length(nonsyntactic)) {
+      stop(
+        "Column name(s) not syntactically valid in R: ",
+        paste(gsub("^`|`$", "", nonsyntactic), collapse = ", "),
+        ". bigexp_terms() builds formula text from column names, so they must be ",
+        "syntactic; rename the columns first (e.g. names(data) <- make.names(names(data)))."
+      )
+    }
     stop(
       "Predictor(s) not found as columns in 'data': ",
       paste(missing_cols, collapse = ", "),
@@ -759,10 +758,13 @@ bigexp_terms <- function(formula, data,
     }
   }
 
-  form_expanded <- stats::as.formula(paste(resp, "~", rhs))
+  # env = baseenv(): the default would capture this function's evaluation
+  # frame (including the training data and the temporary model matrix), so
+  # every saved spec/model would embed a hidden copy of the data.
+  form_expanded <- stats::as.formula(paste(resp, "~", rhs), env = baseenv())
 
   # Record factor-contrast mapping as used today (and current global options)
-  mm_tmp         <- stats::model.matrix(stats::as.formula(paste("~", rhs)), dat0)
+  mm_tmp         <- stats::model.matrix(stats::as.formula(paste("~", rhs), env = baseenv()), dat0)
   contrasts_used <- attr(mm_tmp, "contrasts")
   contrasts_opts <- getOption("contrasts")
 
@@ -789,6 +791,16 @@ bigexp_terms <- function(formula, data,
     ),
     class = "bigexp_spec"
   )
+
+  # Attach the spec to its own stored formula so that the documented workflow
+  # SVEMnet(spec$formula, data, ...) carries the full spec (blocking,
+  # discrete-numeric supports, locked levels/contrasts) exactly like
+  # SVEMnet(bigexp_formula(spec, "y"), data, ...). The attached copy's own
+  # $formula is the bare pre-attachment formula, so this does not recurse.
+  # The bigexp_formula class only adds a print method that hides the
+  # attached spec (default formula printing would dump it in full).
+  attr(spec$formula, "bigexp_spec") <- spec
+  class(spec$formula) <- c("bigexp_formula", "formula")
 
   if (isTRUE(report)) {
     print(spec)
@@ -974,9 +986,29 @@ bigexp_formula <- function(spec, response) {
     return(spec$formula)
   }
   stopifnot(is.character(response), length(response) == 1L, nzchar(response))
-  f <- stats::as.formula(paste(response, "~", spec$rhs))
+  f <- stats::as.formula(paste(response, "~", spec$rhs), env = baseenv())
   attr(f, "bigexp_spec") <- spec
+  class(f) <- c("bigexp_formula", "formula")
   f
+}
+
+#' Print a formula that carries a \code{bigexp_spec} attribute
+#'
+#' Prints the formula itself and a one-line note, instead of the default
+#' formula print, which would dump the entire attached spec.
+#'
+#' @param x A formula with an attached \code{bigexp_spec}
+#'   (from \code{\link{bigexp_terms}} or \code{\link{bigexp_formula}}).
+#' @param ... Passed to the default formula print method.
+#' @return \code{x}, invisibly.
+#' @export
+print.bigexp_formula <- function(x, ...) {
+  y <- x
+  attr(y, "bigexp_spec") <- NULL
+  class(y) <- "formula"
+  print(y, ...)
+  cat("<locked bigexp_spec attached>\n")
+  invisible(x)
 }
 
 

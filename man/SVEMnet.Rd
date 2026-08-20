@@ -16,7 +16,8 @@ SVEMnet(
   unseen = c("warn_na", "error"),
   family = c("gaussian", "binomial"),
   complexity = c("support", "edf"),
-  ...
+  ...,
+  store_member_weights = FALSE
 )
 }
 \arguments{
@@ -130,6 +131,13 @@ when possible. The arguments \code{nlambda}, \code{lambda}, and
 (\code{nlambda} is fixed at 500); user-supplied values are ignored with
 a warning. Argument names that the installed \code{glmnet} does not
 recognize are also ignored with a warning (misspelling protection).}
+
+\item{store_member_weights}{Logical; default \code{FALSE}. If \code{TRUE},
+retain the exact per-member uniforms and the mean-one training and
+validation weights in \code{member_weights}. This can materially increase
+object size. The stored weights support reproducibility and experimental
+ensemble-mean diagnostics; they do not make the member-percentile limits
+calibrated confidence or prediction intervals.}
 }
 \value{
 An object of class \code{"svem_model"} (and \code{"svem_binomial"}
@@ -152,8 +160,17 @@ model \code{lm(y ~ y_pred)}; otherwise \code{NULL}.
 \item \code{complexity}: The complexity measure actually used
 (\code{"support"} or \code{"edf"}).
 \item \code{best_edfs}: Per-bootstrap blended effective df of the
-selected path point when \code{complexity = "edf"}; \code{NA}
-otherwise.
+selected Gaussian path point. This diagnostic is computed even when
+\code{complexity = "support"}; it is \code{NA} for binomial fits.
+\item \code{member_diagnostics}: Per-member Gaussian validation SSE,
+selected objective value, support size, effective df, raw and bounded
+Kish validation size, support-based residual df and scale, fallback
+status, and admissibility warnings. Gaussian residual-scale fields are
+\code{NA} for binomial fits.
+\item \code{member_weights}: If \code{store_member_weights = TRUE}, a
+list containing matrices \code{uniforms}, \code{training}, and
+\code{validation}, with rows aligned to \code{coef_matrix}; otherwise
+\code{NULL}.
 \item \code{weight_scheme}: The weighting scheme that was used.
 \item \code{relaxed}: Logical flag indicating whether relaxed paths were
 used.
@@ -175,6 +192,8 @@ the "auto" rule (for example \code{"wAIC"} or \code{"wBIC"}).
 (number of nonzero coefficients including intercept).
 \item \code{fallback_rate}: Proportion of bootstraps that fell back
 to an intercept-only fit.
+\item \code{fallback_reasons}: Named counts summarizing why any
+non-structural bootstrap fits required that fallback.
 \item \code{n_eff_summary}: Summary of raw Kish effective validation
 sizes \eqn{n_eff = (\sum_i w_i^{valid})^2 / \sum_i (w_i^{valid})^2}
 across bootstraps (before truncation to form \eqn{n_eff_adm}).
@@ -198,7 +217,8 @@ data (Gaussian only); \code{NULL} otherwise.
 \item \code{formula}: The formula used for fitting (possibly derived
 from a \code{bigexp_spec}).
 \item \code{terms}: \code{terms} object used for building the design
-matrix, with environment set to \code{baseenv()} for safety.
+matrix, with a compact evaluation environment containing any required
+formula transformations.
 \item \code{xlevels}: Factor levels recorded at training time.
 \item \code{contrasts}: Contrasts used for building the design matrix.
 \item \code{schema}: Compact description for safe prediction, including
@@ -360,9 +380,9 @@ Implementation notes:
 \itemize{
 \item Predictors are always standardized internally via
 \code{glmnet(..., standardize = TRUE)}.
-\item The terms object is stored with its environment set to
-\code{baseenv()} so that prediction does not accidentally capture
-objects from the calling environment.
+\item The terms object is stored with a compact evaluation environment so
+that prediction supports standard and local transformation functions
+without accidentally capturing the full calling environment.
 \item A compact schema (feature names, factor levels, contrasts, and
 a simple hash) is stored to allow \code{predict()} and companion
 functions to rebuild model matrices deterministically, even when the
@@ -394,8 +414,8 @@ dat <- data.frame(y, X1, X2, X3)
 mod_relax <- SVEMnet(
   y ~ (X1 + X2 + X3)^2 + I(X1^2) + I(X2^2),
   data          = dat,
-  glmnet_alpha  = c(1, 0.5),
-  nBoot         = 75,
+  glmnet_alpha  = 1,
+  nBoot         = 10,
   objective     = "auto",
   weight_scheme = "SVEM",
   relaxed       = FALSE
@@ -404,7 +424,6 @@ mod_relax <- SVEMnet(
 pred_in_raw <- predict(mod_relax, dat, debias = FALSE)
 pred_in_db  <- predict(mod_relax, dat, debias = TRUE)
 
-\donttest{
 # ---------------------------------------------------------------------------
 # Big expansion (full factorial + polynomial surface + partial-cubic crosses)
 # Build once, reuse for one or more responses
@@ -420,8 +439,8 @@ spec <- bigexp_terms(
 # Fit using the spec (auto-prepares data)
 fit_y <- SVEMnet(
   spec, dat,
-  glmnet_alpha  = c(1, 0.5),
-  nBoot         = 50,
+  glmnet_alpha  = 1,
+  nBoot         = 8,
   objective     = "auto",
   weight_scheme = "SVEM"
 )
@@ -431,8 +450,8 @@ set.seed(99)
 dat$y2 <- 0.5 + 1.4 * X1 - 0.6 * X2 + 0.2 * X3 + rnorm(n, 0, 0.4)
 fit_y2 <- SVEMnet(
   spec, dat, response = "y2",
-  glmnet_alpha  = c(1, 0.5),
-  nBoot         = 50,
+  glmnet_alpha  = 1,
+  nBoot         = 8,
   objective     = "auto",
   weight_scheme = "SVEM"
 )
@@ -458,7 +477,7 @@ preds_new <- predict(fit_y, prep_new$data)
 
 ## Binomial example
 set.seed(2)
-n  <- 120
+n  <- 80
 X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
 eta <- -0.3 + 1.1 * X1 - 0.8 * X2 + 0.5 * X1 * X3
 p   <- plogis(eta)
@@ -467,8 +486,8 @@ db  <- data.frame(yb = yb, X1 = X1, X2 = X2, X3 = X3)
 
 fit_b <- SVEMnet(
   yb ~ (X1 + X2 + X3)^2, db,
-  nBoot        = 50,
-  glmnet_alpha = c(1, 0.5),
+  nBoot        = 10,
+  glmnet_alpha = 1,
   family       = "binomial"
 )
 
@@ -506,11 +525,12 @@ spec_block <- bigexp_terms(
   blocking         = c("Operator", "AmbientTmp")
 )
 
-fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 30)
-fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 30)
+fit_b1 <- SVEMnet(spec_block, df_block, response = "y1", nBoot = 8,
+                  glmnet_alpha = 1, relaxed = FALSE)
+fit_b2 <- SVEMnet(spec_block, df_block, response = "y2", nBoot = 8,
+                  glmnet_alpha = 1, relaxed = FALSE)
 
-tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 500)
-}
+tab_block <- svem_random_table_multi(list(fit_b1, fit_b2), n = 200)
 }
 \references{
 Karl, A. T. (2026). SVEMnet: An R package for self-validated elastic-net ensembles and multi-response optimization in small-sample mixture-process experiments. \emph{Chemometrics and Intelligent Laboratory Systems}, \emph{271}, 105660. \doi{10.1016/j.chemolab.2026.105660}

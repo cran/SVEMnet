@@ -128,6 +128,10 @@ test_that("svem_wmt_multi returns named p_values and multipliers", {
     formulas       = list(Potency = form_pot, Size = form_siz),
     data           = lipid_screen,
     mixture_groups = mix,
+    wmt_control    = list(
+      nPoint = 50, nSVEM = 1, nPerm = 20, nBoot = 5,
+      nCore = 1L, seed = 11, verbose = FALSE
+    ),
     plot           = FALSE,
     verbose        = FALSE
   )

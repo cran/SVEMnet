@@ -4,7 +4,7 @@
 #' \code{glmnet_with_cv()} (class \code{"svem_cv"}).
 #'
 #' The design matrix for \code{newdata} is rebuilt using the stored training
-#' \code{terms} (with environment set to \code{baseenv()}), together with the
+#' \code{terms} (with a compact formula-evaluation environment), together with the
 #' saved factor \code{xlevels} and \code{contrasts} (cached in
 #' \code{object$schema}). Columns are then aligned back to the training
 #' design in a robust way:
@@ -62,7 +62,7 @@
 #'   y ~ ., df_ex,
 #'   glmnet_alpha = 1,
 #'   nfolds = 5,
-#'   repeats = 2,
+#'   repeats = 1,
 #'   seed = 9,
 #'   family = "gaussian"
 #' )
@@ -83,9 +83,9 @@
 #'
 #' fit_bin <- glmnet_with_cv(
 #'   y ~ ., df_bin,
-#'   glmnet_alpha = c(0.5, 1),
+#'   glmnet_alpha = 1,
 #'   nfolds = 5,
-#'   repeats = 2,
+#'   repeats = 1,
 #'   seed = 11,
 #'   family = "binomial"
 #' )
@@ -104,10 +104,15 @@ predict_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
 #' @export
 #' @method predict svem_cv
 predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
-  stopifnot(is.list(object), is.data.frame(newdata))
+  if (!is.list(object)) stop("`object` must be a fitted svem_cv object.")
+  if (!is.data.frame(newdata)) stop("`newdata` must be a data frame.")
   if (is.null(object$terms) || is.null(object$parms) || is.null(object$training_X)) {
     stop("The object is missing required components (terms/parms/training_X).")
   }
+  debias <- .svem_logical_scalar(debias, "debias")
+  strict <- .svem_logical_scalar(strict, "strict")
+  newdata <- .svem_validate_newdata_classes(object, newdata)
+  if (nrow(newdata) == 0L) return(numeric(0L))
 
   # Determine family name (gaussian / binomial) if available
   fam <- NULL
@@ -126,9 +131,11 @@ predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...
   is_gaussian <- identical(fam_name, "gaussian")
   is_binomial <- identical(fam_name, "binomial")
 
-  # Training terms (environment nuked for safety)
+  # Training terms (new fits carry a compact evaluation environment)
   terms_obj <- stats::delete.response(object$terms)
-  environment(terms_obj) <- baseenv()
+  if (identical(environment(terms_obj), baseenv())) {
+    environment(terms_obj) <- asNamespace("stats")
+  }
 
   # Harmonize factor/character levels to training xlevels
   xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else NULL

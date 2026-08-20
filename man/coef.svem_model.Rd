@@ -46,17 +46,16 @@ Passing \code{debiased = TRUE} has no effect if \code{parms_debiased} is
 \code{NULL}.
 }
 \examples{
-\donttest{
   set.seed(1)
-  n  <- 200
+  n  <- 50
   x1 <- rnorm(n)
   x2 <- rnorm(n)
   eps <- rnorm(n, sd = 0.3)
   y_g <- 1 + 2*x1 - 0.5*x2 + eps
   dat_g <- data.frame(y_g, x1, x2)
 
-  # Small nBoot to keep runtime light in examples
-  fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g, nBoot = 30, relaxed = TRUE)
+  fit_g <- SVEMnet(y_g ~ x1 + x2, data = dat_g,
+                   nBoot = 10, glmnet_alpha = 1, relaxed = FALSE)
 
   # Ensemble-averaged coefficients
   cc <- coef(fit_g)
@@ -65,23 +64,6 @@ Passing \code{debiased = TRUE} has no effect if \code{parms_debiased} is
   # Debiased (only if available for Gaussian fits)
   ccd <- coef(fit_g, debiased = TRUE)
   head(ccd)
-
-  # Binomial example (0/1 outcome)
-  set.seed(2)
-  n  <- 250
-  x1 <- rnorm(n)
-  x2 <- rnorm(n)
-  eta <- -0.4 + 1.1*x1 - 0.7*x2
-  p   <- 1/(1+exp(-eta))
-  y_b <- rbinom(n, 1, p)
-  dat_b <- data.frame(y_b, x1, x2)
-
-  fit_b <- SVEMnet(y_b ~ x1 + x2, data = dat_b,
-                   family = "binomial", nBoot = 30, relaxed = TRUE)
-
-  # Averaged coefficients (binomial; debiased is ignored)
-  coef(fit_b)
-}
 
 }
 \seealso{

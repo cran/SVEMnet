@@ -26,8 +26,8 @@
 #' The function rebuilds the design matrix for \code{newdata} to match the
 #' training design:
 #' \itemize{
-#'   \item Uses the training \code{terms} (with environment set to
-#'         \code{baseenv()}).
+#'   \item Uses the training \code{terms} and its compact formula-evaluation
+#'         environment.
 #'   \item Harmonizes factor and character predictors to the training
 #'         \code{xlevels}.
 #'   \item Reuses stored per-factor \code{contrasts} when available; otherwise
@@ -139,8 +139,8 @@
 #'
 #' fit_g <- SVEMnet(
 #'   y ~ (X1 + X2 + X3)^2, dat,
-#'   nBoot = 40, glmnet_alpha = c(1, 0.5),
-#'   relaxed = TRUE, family = "gaussian"
+#'   nBoot = 10, glmnet_alpha = 1,
+#'   relaxed = FALSE, family = "gaussian"
 #' )
 #'
 #' ## Aggregate-coefficient predictions (with and without debiasing)
@@ -157,7 +157,6 @@
 #' )
 #' str(out_g)
 #'
-#' \donttest{
 #' ## ---- Binomial example ------------------------------------------------
 #' set.seed(2)
 #' n  <- 120
@@ -169,8 +168,8 @@
 #'
 #' fit_b <- SVEMnet(
 #'   yb ~ (X1 + X2 + X3)^2, db,
-#'   nBoot = 50, glmnet_alpha = c(1, 0.5),
-#'   relaxed = TRUE, family = "binomial"
+#'   nBoot = 10, glmnet_alpha = 1,
+#'   relaxed = FALSE, family = "binomial"
 #' )
 #'
 #' ## Probabilities, link, and classes
@@ -187,7 +186,6 @@
 #'   level    = 0.90
 #' )
 #' str(out_b)
-#' }
 #'
 #' @family SVEM methods
 #' @importFrom stats plogis qlogis
@@ -204,9 +202,12 @@ predict.svem_model <- function(object, newdata,
   if (is.null(object$terms) || is.null(object$parms)) {
     stop("The fitted object is missing required components (terms/parms).")
   }
-  if (!is.numeric(level) || length(level) != 1L || level <= 0 || level >= 1) {
-    stop("`level` must be a single number in (0,1).")
-  }
+  level <- .svem_numeric_scalar(level, "level", lower = 0, upper = 1,
+                                lower_open = TRUE, upper_open = TRUE)
+  debias <- .svem_logical_scalar(debias, "debias")
+  se.fit <- .svem_logical_scalar(se.fit, "se.fit")
+  interval <- .svem_logical_scalar(interval, "interval")
+  newdata <- .svem_validate_newdata_classes(object, newdata)
 
   `%||%` <- function(a, b) if (!is.null(a)) a else b
   fam <- tolower(object$family %||% "gaussian")
@@ -224,9 +225,38 @@ predict.svem_model <- function(object, newdata,
     type <- NULL
   }
 
+  have_members <- !is.null(object$coef_matrix) && is.matrix(object$coef_matrix)
+  if ((se.fit || interval) &&
+      (!have_members || nrow(object$coef_matrix) < 2L)) {
+    stop(
+      "se.fit/interval require at least two bootstrap member predictions in `coef_matrix`.",
+      call. = FALSE
+    )
+  }
+  if (identical(fam, "binomial") && !have_members) {
+    stop("Binomial SVEM predictions require bootstrap member coefficients (`coef_matrix`).")
+  }
+
+  if (nrow(newdata) == 0L) {
+    empty <- if (identical(fam, "binomial") && identical(type, "class")) {
+      integer(0L)
+    } else numeric(0L)
+    if (se.fit && interval) {
+      return(list(fit = empty, se.fit = numeric(0L),
+                  lwr = numeric(0L), upr = numeric(0L)))
+    }
+    if (se.fit) return(list(fit = empty, se.fit = numeric(0L)))
+    if (interval) {
+      return(list(fit = empty, lwr = numeric(0L), upr = numeric(0L)))
+    }
+    return(empty)
+  }
+
   # --- Build model frame/matrix exactly like at fit time ---------------------
   terms_obj <- stats::delete.response(object$terms)
-  environment(terms_obj) <- baseenv()
+  if (identical(environment(terms_obj), baseenv())) {
+    environment(terms_obj) <- asNamespace("stats")
+  }
 
   # Harmonize factor columns to training xlevels BEFORE model.frame()
   xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else list()
@@ -323,8 +353,6 @@ predict.svem_model <- function(object, newdata,
   }
 
   # --- Do we need bootstrap members? ----------------------------------------
-  have_members <- !is.null(object$coef_matrix) && is.matrix(object$coef_matrix)
-
   if (identical(fam, "binomial")) {
     # Binomial always uses member predictions (like old agg = "mean")
     if (!have_members) {

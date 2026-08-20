@@ -146,14 +146,9 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   if (!all(vapply(objects, function(o) is.list(o$sampling_schema), logical(1))))
     stop("Each 'svem_model' must contain a valid $sampling_schema. Refit with updated SVEMnet().")
 
-  if (!is.numeric(n) || length(n) != 1L || !is.finite(n) || n < 1) {
-    stop("'n' must be a single integer >= 1.")
-  }
-  n <- as.integer(n)
-
-  if (!is.numeric(range_tol) || length(range_tol) != 1L || !is.finite(range_tol) || range_tol < 0) {
-    stop("'range_tol' must be a single finite nonnegative number.")
-  }
+  n <- .svem_integer_scalar(n, "n", min = 1L)
+  range_tol <- .svem_numeric_scalar(range_tol, "range_tol", lower = 0)
+  debias <- .svem_logical_scalar(debias, "debias")
 
   # Reference schema from first object
   ref <- objects[[1L]]$sampling_schema
@@ -577,7 +572,11 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
              "' in sampling_schema or xlevels; cannot sample it. ",
              "Refit the model with a version of SVEMnet() that records factor levels.")
       }
-      T_cat[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
+      # Reproduce the training class: predictors fitted as ordered factors
+      # must be sampled as ordered or predict()'s class validator rejects
+      # the table.
+      T_cat[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev,
+                           ordered = identical(unname(var_classes[v]), "ordered"))
     }
     T_cat <- as.data.frame(T_cat, stringsAsFactors = FALSE)
   }
@@ -633,7 +632,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
         if (is.null(mode_val) || is.na(mode_val) || !(mode_val %in% lev)) {
           mode_val <- lev[1L]
         }
-        T_data[[v]] <- factor(rep(mode_val, n), levels = lev)
+        T_data[[v]] <- factor(rep(mode_val, n), levels = lev,
+                              ordered = identical(unname(var_classes[v]), "ordered"))
 
       } else if (!is_block && is_num_like) {
         if (!is.null(discrete_map[[v]])) {
@@ -657,7 +657,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
                "' in sampling_schema or xlevels; cannot sample it. ",
                "Refit the model with a version of SVEMnet() that records factor levels.")
         }
-        T_data[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev)
+        T_data[[v]] <- factor(sample(lev, n, replace = TRUE), levels = lev,
+                              ordered = identical(unname(var_classes[v]), "ordered"))
       }
     }
   }
@@ -675,10 +676,13 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     preds <- predict(obj, newdata = data_df, debias = debias)
     if (is.list(preds) && !is.null(preds$fit)) preds <- preds$fit
 
-    resp <- tryCatch(
-      as.character(obj$formula[[2L]]),
-      error = function(e) paste0("resp", i)
-    )
+    # deparse-based label stays a length-1 string for transformed responses
+    # such as log(y), where as.character(formula[[2L]]) would be length 2 and
+    # crash the scalar %in% checks below
+    resp <- .svem_response_label(obj$formula)
+    if (!is.character(resp) || length(resp) != 1L || is.na(resp) || !nzchar(resp)) {
+      resp <- paste0("resp", i)
+    }
 
     base_colname <- paste0(resp, "_pred")
 
