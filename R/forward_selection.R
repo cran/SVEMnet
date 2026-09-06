@@ -348,8 +348,9 @@
 ## Forward-path numerics
 ## ----------------------------------------------------------------------------
 
-## Relative projected-column-norm ratio at or below which a candidate group is
-## treated as linearly dependent on the current path and skipped.
+## Relative projected-column-norm ratio at or below which a candidate group
+## needs an exact refit to distinguish a small independent direction from
+## linear dependence on the current path.
 .svem_forward_gate <- 1e-8
 
 ## Rank tolerance for every qr() factorization in this file. Must be strictly
@@ -375,7 +376,7 @@
 ## One QR of the current path columns; each candidate is scored by projecting
 ## its columns off the current orthonormal basis, so the RSS decrease is the
 ## squared norm of the projected-residual components. Returns NA rss for
-## candidates that are (near-)collinear with the current path. Below `dust`
+## candidates that are rank deficient under the refit's QR tolerance. Below `dust`
 ## log-RSS comparisons are rounding-dominated, so callers stop growing.
 .svem_forward_step <- function(Xmat, yvec, path_idx, candidate_groups, dust) {
   Qc <- qr.Q(qr(Xmat[, path_idx, drop = FALSE], tol = .svem_forward_qr_tol))
@@ -389,29 +390,36 @@
 
   for (gi in seq_along(candidate_groups)) {
     cols <- Xmat[, candidate_groups[[gi]], drop = FALSE]
+    if (length(path_idx) + ncol(cols) > nrow(Xmat)) next
     proj <- cols - Qc %*% crossprod(Qc, cols)
+    exact_needed <- FALSE
     if (ncol(cols) == 1L) {
       pn  <- sqrt(sum(proj * proj))
       on_ <- sqrt(sum(cols * cols))
-      if (pn / max(on_, .Machine$double.xmin) <= .svem_forward_gate) next
-      gain    <- sum(proj * resid) / pn
-      rss_new <- rss_current - gain * gain
+      exact_needed <- pn / max(on_, .Machine$double.xmin) <= .svem_forward_gate
+      if (!exact_needed) {
+        gain    <- sum(proj * resid) / pn
+        rss_new <- rss_current - gain * gain
+      }
     } else {
       on_ <- sqrt(colSums(cols^2))
       qrp <- qr(proj, tol = .svem_forward_qr_tol)
-      if (qrp$rank < ncol(cols)) next
       Rd    <- abs(diag(qr.R(qrp)))
       pivot <- qrp$pivot
       scale <- pmax(on_[pivot], .Machine$double.xmin)
-      if (min(Rd / scale) <= .svem_forward_gate) next
-      Qp      <- qr.Q(qrp)
-      gains   <- crossprod(Qp, resid)
-      rss_new <- rss_current - sum(gains^2)
+      exact_needed <- qrp$rank < ncol(cols) ||
+        min(Rd / scale) <= .svem_forward_gate
+      if (!exact_needed) {
+        Qp      <- qr.Q(qrp)
+        gains   <- crossprod(Qp, resid)
+        rss_new <- rss_current - sum(gains^2)
+      }
     }
-    if (rss_new < rss_current * 1e-12 || rss_new <= dust) {
-      ## The projected RSS update is cancellation-dominated for near-perfect
-      ## candidate fits; only an exact refit keeps log-RSS comparisons among
-      ## such candidates meaningful.
+    if (exact_needed || rss_new < rss_current * 1e-12 || rss_new <= dust) {
+      ## A small projection alone does not establish rank deficiency (e.g.
+      ## a timestamp with a large origin and meaningful variation). Let the
+      ## same exact QR used for final fitting decide. Exact refitting also
+      ## avoids cancellation in RSS updates for near-perfect candidate fits.
       exact <- .svem_forward_refit(Xmat, yvec,
                                    c(path_idx, candidate_groups[[gi]]))
       if (!is.finite(exact$rss)) next
@@ -504,6 +512,11 @@
 #' \code{bigexp_terms()} front end and returns an object compatible with
 #' \code{predict()}, \code{coef()}, and the downstream scoring tools, but fits
 #' one deterministic model instead of an SVEM ensemble.
+#'
+#' This benchmark accompanies the newer \code{\link{svem_forward}} extension.
+#' The core elastic-net ensemble workflow in Karl (2026),
+#' \doi{10.1016/j.chemolab.2026.105660}, is implemented by
+#' \code{\link{SVEMnet}}.
 #'
 #' Starting from the intercept-only model, each step evaluates every remaining
 #' model term (all columns of a multi-column term, such as a factor's contrast
@@ -739,6 +752,11 @@ forward_aicc <- function(formula, data,
 #' default, or \code{"wBIC"} / \code{"wSSE"}), and the minimizing path point
 #' wins that replicate. Winning coefficient vectors are averaged across
 #' bootstrap replicates exactly as in \code{SVEMnet()}.
+#'
+#' This is an experimental alternative to the elastic-net base learners in
+#' the package workflow described by Karl (2026),
+#' \doi{10.1016/j.chemolab.2026.105660}. The package paper's results do not
+#' establish the performance of this implementation.
 #'
 #' Per replicate and row, a shared uniform draw is converted to
 #' anti-correlated train/validation weights (\code{weight_scheme = "SVEM"}),

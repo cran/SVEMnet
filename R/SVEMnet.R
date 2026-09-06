@@ -7,6 +7,11 @@
 #' minimized to select the penalty, and predictions are ensembled across
 #' replicates. Gaussian and binomial responses are supported.
 #'
+#' This is the core ensemble fitter described in Karl (2026),
+#' \doi{10.1016/j.chemolab.2026.105660}. The published package workflow uses
+#' the default \code{complexity = "support"}; the optional
+#' \code{complexity = "edf"} selector is an experimental extension.
+#'
 #' You can pass either:
 #' \itemize{
 #'   \item a standard model formula, e.g.,

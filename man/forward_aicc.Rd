@@ -54,6 +54,11 @@ spirit as \code{\link{glmnet_with_cv}}): it shares SVEMnet's formula and
 one deterministic model instead of an SVEM ensemble.
 }
 \details{
+This benchmark accompanies the newer \code{\link{svem_forward}} extension.
+The core elastic-net ensemble workflow in Karl (2026),
+\doi{10.1016/j.chemolab.2026.105660}, is implemented by
+\code{\link{SVEMnet}}.
+
 Starting from the intercept-only model, each step evaluates every remaining
 model term (all columns of a multi-column term, such as a factor's contrast
 block, enter together), refits by least squares, and adds the term whose

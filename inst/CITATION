@@ -1,6 +1,10 @@
 # CITATION file for the SVEMnet package
 
-citHeader("If you use the SVEMnet package, please cite the following works:")
+citHeader(paste(
+  "Please cite Karl (2026) as the primary reference for SVEMnet's core workflow",
+  "and the package manual to identify the software version used.",
+  "Additional method references are provided below as appropriate."
+))
 
 # Package Paper Citation
 citation_paper <- bibentry(

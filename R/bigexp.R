@@ -38,6 +38,8 @@
 #'   predictors in \code{vars}.
 #' @param intercept Logical. If \code{FALSE}, the final RHS explicitly drops the
 #'   intercept using \code{" - 1"}.
+#' @param polynomial_centers Named numeric vector of fixed centers for powered
+#'   predictors. Unlisted predictors retain their raw powers.
 #'
 #' @keywords internal
 #' @noRd
@@ -46,7 +48,8 @@
                               polynomial_order = 3L,
                               include_pc_2way  = TRUE,
                               include_pc_3way  = FALSE,
-                              intercept        = TRUE) {
+                              intercept        = TRUE,
+                              polynomial_centers = numeric(0L)) {
   stopifnot(length(vars) >= 1L)
 
   factorial_order  <- .svem_integer_scalar(factorial_order, "factorial_order", min = 1L)
@@ -70,10 +73,22 @@
 
   # Polynomial powers and partial-cubic crosses
   if (length(cont_vars) > 0L && polynomial_order >= 2L) {
+    power_term <- function(x, degree) {
+      if (x %in% names(polynomial_centers)) {
+        # Embed a round-trip numeric literal: no training-data environment or
+        # prediction-batch mean is needed to evaluate the resulting formula.
+        center <- format(polynomial_centers[[x]], digits = 17L,
+                         scientific = TRUE, trim = TRUE, decimal.mark = ".")
+        paste0("I((", x, " - (", center, "))^", degree, ")")
+      } else {
+        paste0("I(", x, "^", degree, ")")
+      }
+    }
     # I(X^2), I(X^3), ..., I(X^p)
     poly_terms <- character()
     for (deg in 2L:polynomial_order) {
-      poly_terms <- c(poly_terms, paste0("I(", cont_vars, "^", deg, ")"))
+      poly_terms <- c(poly_terms, vapply(cont_vars, power_term, "", degree = deg,
+                                        USE.NAMES = FALSE))
     }
     rhs_parts <- c(rhs_parts, paste(poly_terms, collapse = " + "))
 
@@ -85,7 +100,7 @@
         others <- setdiff(vars, xi)
         if (length(others)) {
           # form: X3:I(X2^2)
-          pc2 <- c(pc2, paste0(others, ":I(", xi, "^2)"))
+          pc2 <- c(pc2, paste0(others, ":", power_term(xi, 2L)))
         }
       }
       if (length(pc2)) rhs_parts <- c(rhs_parts, paste(pc2, collapse = " + "))
@@ -98,7 +113,7 @@
         others <- setdiff(vars, xi)
         if (length(others) >= 2L) {
           for (pair in utils::combn(others, 2L, simplify = FALSE)) {
-            pc3 <- c(pc3, paste0("I(", xi, "^2):", pair[[1]], ":", pair[[2]]))
+            pc3 <- c(pc3, paste0(power_term(xi, 2L), ":", pair[[1]], ":", pair[[2]]))
           }
         }
       }
@@ -154,6 +169,27 @@
 #' \code{\link{bigexp_formula}}. The RHS and contrast settings are locked, so
 #' the same spec applied to different data produces design matrices with the
 #' same columns in the same order (up to missing levels for specific batches).
+#'
+#' @section Centered polynomial powers:
+#' With \code{center_polynomials = TRUE}, a power \code{I(X^k)} is replaced
+#' by \code{I((X - c)^k)}, where \code{c} is the arithmetic mean of the
+#' finite values of \code{X} in the data supplied to \code{bigexp_terms()}.
+#' The same replacement is used wherever that power occurs in a partial-cubic
+#' term. Main effects, ordinary factorial interactions, and the non-powered
+#' factors in partial-cubic terms remain on their original scales.
+#'
+#' Each center is computed separately from its predictor, without excluding
+#' rows because another predictor or response is missing. This keeps the
+#' expansion independent of the response used to build the spec. The constants
+#' are recorded in \code{spec$settings$polynomial_centers} and embedded in the
+#' formula; \code{bigexp_prepare()}, \code{bigexp_formula()}, and prediction
+#' reuse them without recentering new data. Predictor ranges, discrete sampling
+#' levels, and supplied data values are unchanged. Only design-matrix
+#' construction changes; fitting algorithms are unchanged, although selecting
+#' or penalizing terms in the new basis can change the fitted model.
+#'
+#' Predictors named in \code{mixture_vars} retain raw powers. Mixture membership
+#' is explicit and is not inferred from names, ranges, or observed sums.
 #'
 #' @section Typical workflow:
 #' In a typical multi-response workflow you:
@@ -246,6 +282,14 @@
 #' @param report Logical. If \code{TRUE} (default), print a compact summary of the
 #'   inferred predictor types and settings (via \code{print.bigexp_spec}) when
 #'   \code{bigexp_terms()} returns.
+#' @param center_polynomials Logical; default \code{FALSE}. If \code{TRUE},
+#'   subtract each eligible predictor's fixed training-data mean before
+#'   raising it to a power. Applies to numeric, non-blocking predictors except
+#'   those in \code{mixture_vars}. See \emph{Centered polynomial powers}.
+#' @param mixture_vars Optional character vector naming numeric, non-blocking
+#'   predictors whose polynomial powers must remain uncentered. This only
+#'   excludes them from polynomial centering; it does not impose mixture sum
+#'   constraints or replace \code{mixture_groups} in downstream sampling.
 #'
 #' @return An object of class \code{"bigexp_spec"} with components:
 #' \itemize{
@@ -263,7 +307,10 @@
 #'         \code{factorial_order}, \code{polynomial_order},
 #'         \code{include_pc_2way},
 #'         \code{include_pc_3way}, \code{intercept}, \code{blocking}, and
-#'         stored contrast information.
+#'         stored contrast information. When polynomial centering or mixture
+#'         exclusions are requested, also records \code{center_polynomials},
+#'         the named numeric vector \code{polynomial_centers}, and
+#'         \code{mixture_vars}.
 #' }
 #'
 #' @seealso \code{\link{bigexp_prepare}}, \code{\link{bigexp_formula}},
@@ -288,6 +335,16 @@
 #' )
 #'
 #' print(spec)
+#'
+#' ## Optional centering of powers using fixed training-data means
+#' spec_centered <- bigexp_terms(
+#'   y ~ X1 + X2 + G, data = df,
+#'   factorial_order = 2, polynomial_order = 2,
+#'   center_polynomials = TRUE
+#' )
+#' spec_centered$settings$polynomial_centers
+#' ## For mixture-process data, also supply mixture_vars = c("A", "B", "C")
+#' ## to keep the named mixture components' powers on their raw scales.
 #'
 #' ## Example 2: pure main effects (no interactions, no polynomial terms)
 #' spec_main <- bigexp_terms(
@@ -345,8 +402,7 @@
 #' )
 #'
 #'
-#' # Fit. The discrete support is expected to propagate into fit$sampling_schema
-#' # (assuming the updated SVEMnet implementation that stores sampling_schema).
+#' # Fit. The discrete support is retained in fit$sampling_schema.
 #' fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 8,
 #'                     glmnet_alpha = 1, relaxed = FALSE)
 #'
@@ -376,7 +432,9 @@ bigexp_terms <- function(formula, data,
                          audit_numeric_rate = 0.90,
                          audit_unique_ratio = 0.80,
                          audit_min_n        = 12L,
-                         report             = TRUE) {
+                         report             = TRUE,
+                         center_polynomials = FALSE,
+                         mixture_vars       = NULL) {
   stopifnot(is.data.frame(data))
 
   factorial_order  <- .svem_integer_scalar(factorial_order, "factorial_order", min = 1L)
@@ -397,6 +455,16 @@ bigexp_terms <- function(formula, data,
   intercept <- .svem_logical_scalar(intercept, "intercept")
   include_pc_2way <- .svem_logical_scalar(include_pc_2way, "include_pc_2way")
   include_pc_3way <- .svem_logical_scalar(include_pc_3way, "include_pc_3way")
+  center_polynomials <- .svem_logical_scalar(center_polynomials, "center_polynomials")
+  if (is.null(mixture_vars)) {
+    mixture_vars <- character(0L)
+  } else if (!is.character(mixture_vars) || anyNA(mixture_vars) ||
+             any(!nzchar(mixture_vars))) {
+    stop("mixture_vars must be a character vector of nonempty predictor names, or NULL.",
+         call. = FALSE)
+  } else {
+    mixture_vars <- unique(mixture_vars)
+  }
 
   ## Validate blocking
   if (is.null(blocking)) {
@@ -726,6 +794,24 @@ bigexp_terms <- function(formula, data,
   main_vars <- setdiff(vars_all, blocking_vars)
   cont_vars <- main_vars[!is_cat[main_vars]]
 
+  invalid_mixture <- setdiff(mixture_vars, cont_vars)
+  if (length(invalid_mixture)) {
+    stop("mixture_vars must name numeric, non-blocking predictors in the expansion: ",
+         paste(invalid_mixture, collapse = ", "), call. = FALSE)
+  }
+  polynomial_centers <- numeric(0L)
+  if (center_polynomials && polynomial_order >= 2L) {
+    eligible <- setdiff(cont_vars, mixture_vars)
+    polynomial_centers <- vapply(eligible, function(v) {
+      x <- dat0[[v]]
+      mean(x[is.finite(x)])
+    }, numeric(1L))
+    if (any(!is.finite(polynomial_centers))) {
+      stop("Could not compute finite polynomial centers for all eligible predictors.",
+           call. = FALSE)
+    }
+  }
+
   rhs_terms <- character()
 
   if (length(main_vars) > 0L) {
@@ -736,7 +822,8 @@ bigexp_terms <- function(formula, data,
       polynomial_order = polynomial_order,
       include_pc_2way  = include_pc_2way,
       include_pc_3way  = include_pc_3way,
-      intercept        = intercept
+      intercept        = intercept,
+      polynomial_centers = polynomial_centers
     )
     rhs_terms <- c(rhs_terms, rhs_main)
   }
@@ -791,6 +878,13 @@ bigexp_terms <- function(formula, data,
     ),
     class = "bigexp_spec"
   )
+
+  # Leave the default spec unchanged, including its metadata and formula text.
+  if (center_polynomials || length(mixture_vars)) {
+    spec$settings$center_polynomials <- center_polynomials
+    spec$settings$polynomial_centers <- polynomial_centers
+    spec$settings$mixture_vars <- mixture_vars
+  }
 
   # Attach the spec to its own stored formula so that the documented workflow
   # SVEMnet(spec$formula, data, ...) carries the full spec (blocking,
@@ -1222,6 +1316,16 @@ print.bigexp_spec <- function(x, ...) {
       "\n",
       sep = ""
     )
+  }
+  if (isTRUE(x$settings$center_polynomials)) {
+    centers <- x$settings$polynomial_centers
+    cat("  Centered polynomial powers: ",
+        if (length(centers)) paste(names(centers), collapse = ", ") else "none",
+        "\n", sep = "")
+    if (length(x$settings$mixture_vars)) {
+      cat("  Mixture predictors (raw powers): ",
+          paste(x$settings$mixture_vars, collapse = ", "), "\n", sep = "")
+    }
   }
   if (!is.null(x$settings$contrasts_options)) {
     co <- x$settings$contrasts_options

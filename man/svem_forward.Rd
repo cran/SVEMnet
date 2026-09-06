@@ -88,6 +88,11 @@ wins that replicate. Winning coefficient vectors are averaged across
 bootstrap replicates exactly as in \code{SVEMnet()}.
 }
 \details{
+This is an experimental alternative to the elastic-net base learners in
+the package workflow described by Karl (2026),
+\doi{10.1016/j.chemolab.2026.105660}. The package paper's results do not
+establish the performance of this implementation.
+
 Per replicate and row, a shared uniform draw is converted to
 anti-correlated train/validation weights (\code{weight_scheme = "SVEM"}),
 the forward path is grown on rows scaled by \code{sqrt(w_train)}, greedy

@@ -20,13 +20,9 @@ test_that("svem_random_table_multi validates schemas and predicts", {
   expect_true(all(c("data","pred","all") %in% names(res)))
   expect_true(all(c("X1","X2","A","B","C","F") %in% names(res$data)))
 
-  # --- UPDATED: allow old names (y/z or y.pred/z.pred) OR new *_pred names ---
-  pred_names <- names(res$pred)
-  has_old_plain <- all(c("y", "z") %in% pred_names)
-  has_old_dot   <- all(c("y.pred", "z.pred") %in% pred_names)
-  has_new_suf   <- all(c("y_pred", "z_pred") %in% pred_names)
-
-  expect_true(has_old_plain || has_old_dot || has_new_suf)
+  expect_named(res$pred, c("y_pred", "z_pred"))
+  expect_equal(res$pred$y_pred, as.numeric(predict(f1, res$data, debias = FALSE)))
+  expect_equal(res$pred$z_pred, as.numeric(predict(f2, res$data, debias = FALSE)))
 
   expect_equal(nrow(res$data), 50)
   expect_equal(nrow(res$pred), 50)
@@ -86,11 +82,9 @@ test_that("svem_random_table_multi respects blocking for numeric and categorical
   expect_equal(nrow(res$pred), 200)
   expect_equal(nrow(res$all), 200)
 
-  ## Prediction column names: allow old and new conventions
-  pred_names <- names(res$pred)
-  has_old_plain <- all(c("y1", "y2") %in% pred_names)
-  has_old_dot   <- all(c("y1.pred", "y2.pred") %in% pred_names)
-  has_new_suf   <- all(c("y1_pred", "y2_pred") %in% pred_names)
-
-  expect_true(has_old_plain || has_old_dot || has_new_suf)
+  expect_named(res$pred, c("y1_pred", "y2_pred"))
+  expect_equal(res$pred$y1_pred,
+               as.numeric(predict(fit_b1, res$data, debias = FALSE)))
+  expect_equal(res$pred$y2_pred,
+               as.numeric(predict(fit_b2, res$data, debias = FALSE)))
 })

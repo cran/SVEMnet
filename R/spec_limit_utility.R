@@ -158,8 +158,6 @@
   }
   storage.mode(coef_matrix) <- "double"
 
-  n_boot <- nrow(coef_matrix)
-
   intercepts <- as.numeric(coef_matrix[, 1])
   betas      <- coef_matrix[, -1, drop = FALSE]
 

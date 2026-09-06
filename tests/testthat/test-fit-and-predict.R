@@ -1,26 +1,26 @@
 testthat::skip_on_cran()
-test_that("SVEMnet fits and predicts (parms vs mean)", {
+test_that("Gaussian aggregate and member-mean predictions agree", {
   skip_if_not_installed("SVEMnet")
   set.seed(2)
   d <- gen_toy_df(80, with_factor = TRUE)
   fit <- SVEMnet::SVEMnet(y ~ (X1 + X2 + X3 + F)^2 + A + B + C, d, nBoot = 30, glmnet_alpha = 1)
-  p1 <- predict(fit, d[1:10, ], agg = "parms")
+  p1 <- predict(fit, d[1:10, ], debias = FALSE)
   expect_type(p1, "double")
-  p2 <- predict(fit, d[1:10, ], agg = "mean")
+  p2 <- predict(fit, d[1:10, ], debias = FALSE, se.fit = TRUE)$fit
   expect_type(p2, "double")
   expect_equal(length(p1), 10L)
   expect_equal(length(p2), 10L)
+  expect_equal(p1, p2, tolerance = 1e-10)
 })
 
 test_that("SVEMnet relaxed path runs", {
-  skip_on_cran()
   set.seed(4)
   n <- 40
   X1 <- rnorm(n); X2 <- rnorm(n)
   y  <- 1 + X1 - 0.5*X2 + rnorm(n, 0, 0.3)
   d  <- data.frame(y, X1, X2)
   fit <- SVEMnet(y ~ X1 + X2, d, nBoot = 20, glmnet_alpha = c(1, 0.5), relaxed = TRUE)
-  p   <- predict(fit, d[1:5, ], agg = "mean")
+  p   <- predict(fit, d[1:5, ])
   expect_type(p, "double")
   expect_true(length(p) == 5)
 })
@@ -71,7 +71,7 @@ test_that("SVEMnet relaxed path runs", {
   })
 
   ## --- BINOMIAL: uncertainty + aggregation ------------------------------------
-  test_that("SVEMnet binomial uncertainty (se/interval) and agg modes", {
+  test_that("Binomial percentile intervals widen with the requested level", {
     skip_if_not_installed("SVEMnet")
 
     set.seed(9)
@@ -91,19 +91,22 @@ test_that("SVEMnet relaxed path runs", {
       family = "binomial"
     )
 
-    # parms aggregation, response scale, with se/interval
+    # Probability-scale member summaries at two interval levels.
     out_parms <- predict(fit, d[1:12, ], type = "response",
-                         agg = "mean", se.fit = TRUE, interval = TRUE, level = 0.9)
+                         se.fit = TRUE, interval = TRUE, level = 0.9)
     expect_named(out_parms, c("fit","se.fit","lwr","upr"))
     expect_true(all(out_parms$fit >= 0 & out_parms$fit <= 1, na.rm = TRUE))
     expect_true(all(out_parms$lwr <= out_parms$upr, na.rm = TRUE))
     expect_length(out_parms$fit, 12L)
 
-    # mean aggregation
     out_mean <- predict(fit, d[1:12, ], type = "response",
-                        agg = "mean", se.fit = TRUE, interval = TRUE)
+                        se.fit = TRUE, interval = TRUE)
     expect_named(out_mean, c("fit","se.fit","lwr","upr"))
     expect_length(out_mean$fit, 12L)
+    expect_equal(out_mean$fit, out_parms$fit)
+    expect_equal(out_mean$se.fit, out_parms$se.fit)
+    expect_true(all(out_mean$lwr <= out_parms$lwr))
+    expect_true(all(out_mean$upr >= out_parms$upr))
   })
 
   ## --- BINOMIAL: class doesn't allow se/interval --------------------------------
@@ -198,8 +201,8 @@ test_that("SVEMnet relaxed path runs", {
     )
 
     # response probabilities and link
-    pr <- predict(fit, df[1:10, ], type = "response", agg = "mean")
-    lk <- predict(fit, df[1:10, ], type = "link", agg = "mean",
+    pr <- predict(fit, df[1:10, ], type = "response")
+    lk <- predict(fit, df[1:10, ], type = "link",
                   se.fit = TRUE, interval = TRUE, level = 0.9)
 
     expect_true(all(pr >= 0 & pr <= 1))

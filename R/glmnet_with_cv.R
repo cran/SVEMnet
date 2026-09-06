@@ -79,17 +79,16 @@
 #'   Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
 #'   \code{dfmax}, and \code{pmax} may be supplied directly for compatibility
 #'   or via \code{control = list(...)} with glmnet versions that support it;
-#'   they are routed in a version-compatible way when possible. If
-#'   \code{family} is supplied here, it is ignored in favor of the explicit
-#'   \code{family} argument. Argument names that the installed \code{glmnet}
+#'   they are routed in a version-compatible way when possible.
+#'   Argument names that the installed \code{glmnet}
 #'   does not recognize are ignored with a warning (misspelling protection).
 #'
 #' @details
 #' The basic workflow is:
 #' \enumerate{
-#'   \item For each \code{alpha} in \code{glmnet_alpha}, generate a set of CV
-#'         fold IDs (shared across alphas and repeats).
-#'   \item For that alpha, run \code{repeats} independent \code{cv.glmnet()}
+#'   \item Generate one set of CV fold IDs per repeat. Reuse each repeat's
+#'         folds across all values in \code{glmnet_alpha}.
+#'   \item For each alpha, run \code{repeats} \code{cv.glmnet()}
 #'         fits, align the lambda paths and, for relaxed fits, the gamma paths,
 #'         and aggregate the CV surfaces.
 #'   \item At each lambda-gamma point, compute a combined SE that accounts for
@@ -367,11 +366,6 @@ glmnet_with_cv <- function(formula, data,
 
   # --- Collect and sanitize dots ---
   dots <- list(...)
-
-  # drop any family accidentally passed via ...
-  if ("family" %in% names(dots)) {
-    dots$family <- NULL
-  }
 
   # User weights and offsets are not supported: the returned object is meant
   # for side-by-side comparison with SVEMnet() fits (whose weighting is
@@ -711,7 +705,7 @@ glmnet_with_cv <- function(formula, data,
     lst[setdiff(names(lst), reserved)]
   }
 
-  # Build one set of fold IDs reused across alphas and repeats (paired comparison)
+  # Build one set of fold IDs per repeat, reused across alphas (paired comparison)
   # For binomial models, use stratified folds to avoid placing all
   # observations of a class into a single fold (which can make the
   # corresponding training set one-class and cause glmnet to fail).

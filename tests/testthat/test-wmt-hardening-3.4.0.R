@@ -155,7 +155,7 @@ test_that("SHASHo right tails remain positive beyond CDF subtraction precision",
   expect_gt(p, 0)
   expect_equal(p, stats::pnorm(transformed, lower.tail = FALSE))
   expect_identical(
-    1 - gamlss.dist::pSHASHo(2, mu = 0, sigma = 1, nu = 0, tau = 2),
+    1 - stats::pnorm(transformed),
     0
   )
 })
@@ -212,8 +212,6 @@ test_that("private parallel WMT work leaves foreach registration unchanged", {
 })
 
 test_that("bounded WMT integration restores RNG and reports diagnostics", {
-  skip_if_not_installed("gamlss")
-  skip_if_not_installed("gamlss.dist")
   set.seed(3400)
   n <- 36L
   d <- data.frame(

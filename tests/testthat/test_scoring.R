@@ -221,7 +221,6 @@ test_that("svem_select_from_score_table can target uncertainty_measure", {
 })
 
 test_that("svem_score_random adds spec-based design-space columns", {
-  skip_on_cran()
   skip_if_not_installed("SVEMnet")
 
   set.seed(5)
@@ -278,7 +277,6 @@ test_that("svem_score_random adds spec-based design-space columns", {
 
 
 test_that("svem_score_random returns scored original data when data is supplied", {
-  skip_on_cran()
   skip_if_not_installed("SVEMnet")
 
   set.seed(6)
@@ -317,7 +315,6 @@ test_that("svem_score_random returns scored original data when data is supplied"
 
 
 test_that("svem_score_random errors when WMT is requested for binomial responses", {
-  skip_on_cran()
   skip_if_not_installed("SVEMnet")
 
   set.seed(7)
@@ -355,7 +352,6 @@ test_that("svem_score_random errors when WMT is requested for binomial responses
 })
 
 test_that("svem_score_random works with all-categorical predictors", {
-  skip_on_cran()
   skip_if_not_installed("SVEMnet")
 
   set.seed(8)
@@ -450,16 +446,8 @@ test_that("svem_score_random works with all-categorical predictors", {
   }
 
 })
-skip_on_cran()
-skip_if_not_installed("SVEMnet")
 
 test_that("discrete numeric from bigexp_spec is stored and honored through svem_score_random (multi-response)", {
-  skip_on_cran()
-  skip_if_not_installed("SVEMnet")
-
-  if (!exists("bigexp_terms", mode = "function")) {
-    skip("bigexp_terms() not available in this installation.")
-  }
 
   set.seed(101)
   n <- 140
@@ -575,12 +563,6 @@ test_that("discrete numeric from bigexp_spec is stored and honored through svem_
 
 
 test_that("discrete numeric predictors are forbidden as mixture variables (via svem_score_random)", {
-  skip_on_cran()
-  skip_if_not_installed("SVEMnet")
-
-  if (!exists("bigexp_terms", mode = "function")) {
-    skip("bigexp_terms() not available in this installation.")
-  }
 
   set.seed(102)
   n <- 120

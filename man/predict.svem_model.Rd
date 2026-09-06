@@ -42,12 +42,12 @@ computed from member predictions (requires \code{coef_matrix}). Not
 available for \code{type = "class"}. For Gaussian models, this forces use
 of bootstrap member predictions instead of aggregate coefficients.}
 
-\item{interval}{Logical; if \code{TRUE}, return percentile confidence
+\item{interval}{Logical; if \code{TRUE}, return percentile
 limits from member predictions (requires \code{coef_matrix}). Not
 available for \code{type = "class"}. For Gaussian models, this forces use
 of bootstrap member predictions instead of aggregate coefficients.}
 
-\item{level}{Confidence level for percentile intervals. Default
+\item{level}{Central probability mass for member-percentile intervals. Default
 \code{0.95}.}
 
 \item{...}{Currently unused.}
@@ -68,7 +68,7 @@ If \code{se.fit} and/or \code{interval} are \code{TRUE} (and
 \item \code{fit}: predictions on the requested scale.
 \item \code{se.fit}: bootstrap standard errors (when
 \code{se.fit = TRUE}).
-\item \code{lwr}, \code{upr}: percentile confidence limits (when
+\item \code{lwr}, \code{upr}: member-percentile limits (when
 \code{interval = TRUE}).
 }
 
@@ -156,6 +156,10 @@ standard deviations of member predictions on the requested scale. When
 predictions on the requested scale, using the requested \code{level}. Both
 require a non-null \code{coef_matrix}. For \code{type = "class"} (binomial),
 uncertainty summaries are not available.
+
+These summaries describe variation among bootstrap member predictions.
+They do not include new-observation noise, and the percentile limits
+alone do not establish calibrated confidence or prediction coverage.
 }
 
 \examples{

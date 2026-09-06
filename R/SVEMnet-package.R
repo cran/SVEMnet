@@ -8,6 +8,15 @@
 #' uncertainty-aware candidate generation for iterative formulation and
 #' process development.
 #'
+#' The primary package reference is Karl (2026),
+#' \doi{10.1016/j.chemolab.2026.105660}, published in
+#' \emph{Chemometrics and Intelligent Laboratory Systems}. It describes the
+#' elastic-net and relaxed elastic-net ensemble workflow, shared factor
+#' expansions, and multi-response optimization that form the package's core.
+#' The analyses in that paper used SVEMnet version 3.2.0; see the package
+#' NEWS for subsequent changes.
+#' Use \code{citation("SVEMnet")} for the package paper and related references.
+#'
 #' A typical workflow is:
 #' \enumerate{
 #'   \item Build a wide, deterministic factor expansion (optionally via
@@ -35,7 +44,7 @@
 #'         (including relaxed elastic net) on fractionally weighted bootstraps.}
 #'   \item{\code{\link{predict.svem_model}}}{Predict method for SVEM models
 #'         (ensemble-mean aggregation by default, optional debiasing, and
-#'         percentile prediction intervals when available).}
+#'         percentile intervals across bootstrap member predictions).}
 #'   \item{\code{\link{coef.svem_model}}}{Averaged (optionally debiased)
 #'         coefficients from an SVEM model.}
 #'   \item{\code{\link{svem_nonzero}}}{Bootstrap nonzero percentages for each
@@ -85,7 +94,7 @@
 #'   \item{\code{\link{svem_export_candidates_csv}}}{Concatenate one or more
 #'         selection objects from \code{\link{svem_select_from_score_table}}
 #'         and export candidate tables (with metadata, predictions, and
-#'         optional design-only trimming) to CSV or return them in-memory for
+#'         response columns) to CSV or return them in-memory for
 #'         inspection.}
 #' }
 #'
@@ -115,11 +124,28 @@
 #'         demonstrations.}
 #' }
 #'
+#' @section Extensions beyond the package paper:
+#' The package also includes newer methods for further study:
+#' \code{\link{svem_forward}} and its single-model benchmark
+#' \code{\link{forward_aicc}}, the bootstrap-member batch proposer
+#' \code{\link{svem_thompson_batch}}, and the FRW variance diagnostic
+#' \code{\link{svem_ij_variance}}. The opt-in
+#' \code{complexity = "edf"} selector in \code{\link{SVEMnet}} is also
+#' experimental; the published package workflow uses
+#' \code{complexity = "support"}. These extensions are not established by
+#' the results in the package paper.
+#' Opt-in polynomial centering in \code{\link{bigexp_terms}} is a later
+#' design-matrix construction option and was not evaluated in that paper.
+#'
+#' Bootstrap member-percentile intervals describe variation among member
+#' predictions. They do not include new-observation noise and do not by
+#' themselves provide calibrated confidence or prediction intervals.
+#'
 #' @section Families:
 #' SVEMnet currently supports:
 #' \itemize{
 #'   \item Gaussian responses (\code{family = "gaussian"}) with identity link
-#'         and optional debiasing / percentile prediction intervals.
+#'         and optional debiasing / bootstrap member-percentile intervals.
 #'   \item Binomial responses (\code{family = "binomial"}) with logit link.
 #'         The response must be 0/1 numeric or a two-level factor (first level
 #'         treated as 0). Use \code{predict(..., type = "response")} for event

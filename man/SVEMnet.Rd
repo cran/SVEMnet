@@ -241,6 +241,11 @@ minimized to select the penalty, and predictions are ensembled across
 replicates. Gaussian and binomial responses are supported.
 }
 \details{
+This is the core ensemble fitter described in Karl (2026),
+\doi{10.1016/j.chemolab.2026.105660}. The published package workflow uses
+the default \code{complexity = "support"}; the optional
+\code{complexity = "edf"} selector is an experimental extension.
+
 You can pass either:
 \itemize{
 \item a standard model formula, e.g.,
@@ -393,8 +398,8 @@ factor levels for use in random candidate generation for optimization.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
-used to assist with coding and roxygen documentation; all
+Generative AI tools were used to assist with coding and roxygen
+documentation; all
 content was reviewed and finalized by the author.
 }
 

@@ -51,18 +51,20 @@
 #'
 #' When no blocking information is present in \code{$sampling_schema} (for
 #' example for models fit without a \code{bigexp_spec} or without blocking),
-#' the behavior is unchanged from earlier versions: all predictors are sampled
-#' according to the rules described under "Sampling strategy".
+#' all predictors are sampled using their stored numeric ranges, discrete
+#' supports, or categorical levels and the chosen \code{numeric_sampler}.
 #'
 #' @param objects A list of fitted \code{svem_model} objects returned by
 #'   \code{SVEMnet()}. Each object must contain a valid \code{$sampling_schema}
-#'   produced by the updated \code{SVEMnet()} implementation. A single model is
+#'   produced by \code{SVEMnet()}. A single model is
 #'   also accepted and treated as a length-one list.
 #' @param n Number of random points to generate (rows in the output tables).
 #'   Default is \code{1000}.
 #' @param mixture_groups Optional list of mixture constraint groups. Each group
-#'   is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
-#'   (see \emph{Notes on mixtures}). Mixture variables must be numeric-like and
+#'   is a list with a character vector \code{vars}, numeric vectors
+#'   \code{lower} and \code{upper} in the same order as \code{vars}, and a
+#'   numeric scalar \code{total}. Bounds default to 0 and 1, and the total
+#'   defaults to 1. Mixture variables must be numeric-like and
 #'   must also appear in the models' \code{predictor_vars} (that is, they must
 #'   be used as predictors in all models).
 #' @param debias Logical; if \code{TRUE}, apply each model's calibration during
@@ -110,7 +112,7 @@
 #' \code{$sampling_schema}, this function will automatically respect it (no
 #' separate user argument).
 #'
-#' In the updated \code{SVEMnet()} implementation this information is stored as:
+#' This information is stored as:
 #' \itemize{
 #'   \item \code{$sampling_schema$discrete_numeric}: a character vector of discrete
 #'         numeric variable names; and
@@ -394,9 +396,6 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   }
 
   # Partition predictors by type and blocking
-  block_num <- intersect(blocking, all_num)
-  block_cat <- setdiff(blocking, block_num)
-
   is_num <- setdiff(all_num, blocking)
   is_cat <- setdiff(setdiff(predictor_vars, all_num), blocking)
 
@@ -447,6 +446,16 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     k <- length(lower)
     if (length(upper) != k)
       stop("upper must have the same length as lower.")
+    if (!is.numeric(lower) || !is.numeric(upper) || !k ||
+        any(!is.finite(lower)) || any(!is.finite(upper))) {
+      stop("Mixture lower and upper bounds must be nonempty finite numeric vectors.")
+    }
+    if (any(lower > upper)) {
+      stop("Mixture bounds must satisfy lower <= upper for every component.")
+    }
+    if (!is.numeric(total) || length(total) != 1L || !is.finite(total)) {
+      stop("Mixture total must be a single finite number.")
+    }
     if (is.null(alpha)) alpha <- rep(1, k)
     min_sum <- sum(lower); max_sum <- sum(upper)
     if (total < min_sum - 1e-12 || total > max_sum + 1e-12)
@@ -454,6 +463,21 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     avail <- total - min_sum
     if (avail <= 1e-12)
       return(matrix(rep(lower, each = n), nrow = n))
+    if (max_sum - total <= 1e-12)
+      return(matrix(rep(upper, each = n), nrow = n))
+
+    # Fixed components have zero probability under a continuous Dirichlet
+    # draw. Sample only the free components, then restore the fixed values.
+    fixed <- lower == upper
+    if (any(fixed)) {
+      res <- matrix(rep(lower, each = n), nrow = n)
+      res[, !fixed] <- .sample_trunc_dirichlet(
+        n, lower[!fixed], upper[!fixed], total - sum(lower[fixed]),
+        alpha = alpha[!fixed], oversample = oversample, max_tries = max_tries
+      )
+      return(res)
+    }
+
     res    <- matrix(NA_real_, nrow = n, ncol = k)
     filled <- 0L
     tries  <- 0L

@@ -1,7 +1,10 @@
 #' Propose a batch of runs by Thompson sampling from SVEM bootstrap ensembles
 #'
 #' @description
-#' Sequential-design proposer for multi-response SVEM workflows. Given fitted
+#' Experimental sequential-design proposer for multi-response SVEM workflows.
+#' This extends the core workflow described in Karl (2026),
+#' \doi{10.1016/j.chemolab.2026.105660}; its performance is not established
+#' by the results in that package paper. Given fitted
 #' \code{\link{SVEMnet}} models and per-response desirability goals,
 #' \code{svem_thompson_batch()} proposes \code{batch_size} new candidate runs
 #' by parallel Thompson sampling (Thompson, 1933; Kandasamy et al., 2018)
@@ -11,10 +14,10 @@
 #' score, and the candidate maximizing that score is added to the batch
 #' (previously selected candidates are excluded).
 #'
-#' Because each slot re-draws the bootstrap members, the batch naturally mixes
-#' exploitation (candidates most ensemble members like) with exploration
-#' concentrated where the posterior probability of being best is high, without
-#' requiring an explicit exploration parameter. This complements the
+#' Each slot re-draws the bootstrap members, allowing candidates preferred
+#' by different members to enter the batch without an explicit exploration
+#' parameter. Bootstrap members are used as heuristic function draws; they
+#' are not samples from a fitted Bayesian posterior. This complements the
 #' score/uncertainty workflow of \code{\link{svem_score_random}} and
 #' \code{\link{svem_select_from_score_table}}: CI-width exploration targets
 #' regions of large global uncertainty, while Thompson sampling refines the

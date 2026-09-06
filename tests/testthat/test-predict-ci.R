@@ -9,7 +9,7 @@ test_that("predict returns percentile CI when requested", {
   d  <- data.frame(y, X1, X2)
 
   fit <- SVEMnet::SVEMnet(y ~ X1 + X2, d, nBoot = 40, glmnet_alpha = 1)
-  pr  <- predict(fit, d[1:5, ], debias = FALSE, agg = "mean", interval = TRUE, level = 0.95)
+  pr  <- predict(fit, d[1:5, ], debias = FALSE, interval = TRUE, level = 0.95)
 
   expect_true(is.list(pr))
   expect_true(all(c("fit","lwr","upr") %in% names(pr)))

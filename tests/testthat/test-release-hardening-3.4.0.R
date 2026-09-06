@@ -1,5 +1,3 @@
-skip_on_cran()
-
 test_that("citation version cannot drift from package metadata", {
   ver <- as.character(utils::packageVersion("SVEMnet"))
   cit <- utils::citation("SVEMnet")

@@ -93,9 +93,8 @@ observation weights or offsets.
 Glmnet algorithm-control values such as \code{maxit}, \code{thresh},
 \code{dfmax}, and \code{pmax} may be supplied directly for compatibility
 or via \code{control = list(...)} with glmnet versions that support it;
-they are routed in a version-compatible way when possible. If
-\code{family} is supplied here, it is ignored in favor of the explicit
-\code{family} argument. Argument names that the installed \code{glmnet}
+they are routed in a version-compatible way when possible.
+Argument names that the installed \code{glmnet}
 does not recognize are ignored with a warning (misspelling protection).}
 }
 \value{
@@ -176,9 +175,9 @@ It is not called internally by the SVEM bootstrap routines.
 
 The basic workflow is:
 \enumerate{
-\item For each \code{alpha} in \code{glmnet_alpha}, generate a set of CV
-fold IDs (shared across alphas and repeats).
-\item For that alpha, run \code{repeats} independent \code{cv.glmnet()}
+\item Generate one set of CV fold IDs per repeat. Reuse each repeat's
+folds across all values in \code{glmnet_alpha}.
+\item For each alpha, run \code{repeats} \code{cv.glmnet()}
 fits, align the lambda paths and, for relaxed fits, the gamma paths,
 and aggregate the CV surfaces.
 \item At each lambda-gamma point, compute a combined SE that accounts for
@@ -231,8 +230,8 @@ SVEM-style bootstrap weighting or ensembling.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
-used to assist with coding and roxygen documentation; all
+Generative AI tools were used to assist with coding and roxygen
+documentation; all
 content was reviewed and finalized by the author.
 }
 

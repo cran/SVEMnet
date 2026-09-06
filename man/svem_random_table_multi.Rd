@@ -16,15 +16,17 @@ svem_random_table_multi(
 \arguments{
 \item{objects}{A list of fitted \code{svem_model} objects returned by
 \code{SVEMnet()}. Each object must contain a valid \code{$sampling_schema}
-produced by the updated \code{SVEMnet()} implementation. A single model is
+produced by \code{SVEMnet()}. A single model is
 also accepted and treated as a length-one list.}
 
 \item{n}{Number of random points to generate (rows in the output tables).
 Default is \code{1000}.}
 
 \item{mixture_groups}{Optional list of mixture constraint groups. Each group
-is a list with elements \code{vars}, \code{lower}, \code{upper}, \code{total}
-(see \emph{Notes on mixtures}). Mixture variables must be numeric-like and
+is a list with a character vector \code{vars}, numeric vectors
+\code{lower} and \code{upper} in the same order as \code{vars}, and a
+numeric scalar \code{total}. Bounds default to 0 and 1, and the total
+defaults to 1. Mixture variables must be numeric-like and
 must also appear in the models' \code{predictor_vars} (that is, they must
 be used as predictors in all models).}
 
@@ -86,7 +88,7 @@ If any supplied model stores discrete-numeric sampling information in its
 \code{$sampling_schema}, this function will automatically respect it (no
 separate user argument).
 
-In the updated \code{SVEMnet()} implementation this information is stored as:
+This information is stored as:
 \itemize{
 \item \code{$sampling_schema$discrete_numeric}: a character vector of discrete
 numeric variable names; and
@@ -150,7 +152,7 @@ an error.
 
 When no blocking information is present in \code{$sampling_schema} (for
 example for models fit without a \code{bigexp_spec} or without blocking),
-the behavior is unchanged from earlier versions: all predictors are sampled
-according to the rules described under "Sampling strategy".
+all predictors are sampled using their stored numeric ranges, discrete
+supports, or categorical levels and the chosen \code{numeric_sampler}.
 }
 

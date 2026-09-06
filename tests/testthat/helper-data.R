@@ -1,5 +1,6 @@
 # Helper utilities and toy data generators for SVEMnet tests
-# (Kept lightweight; all test files call skip_on_cran() at the top.)
+# Heavy regression files use skip_on_cran(); lightweight smoke and helper
+# checks also run during CRAN checks.
 suppressPackageStartupMessages({
   library(testthat)
 })

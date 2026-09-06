@@ -1,6 +1,4 @@
-if (getRversion() >= "2.15.1") {
-  utils::globalVariables(c(
-    "jloop",
+utils::globalVariables(c(
     # plot.svem_model
     "Actual", "Predicted", "Type",
     # plot.svem_binomial
@@ -10,7 +8,4 @@ if (getRversion() >= "2.15.1") {
     "Group", "D", "Source_Type", "Response",
     # svem_nonzero
     "Order", "PercentNonzero", "Variable"
-  ))
-}
-
-`%||%` <- function(a, b) if (!is.null(a)) a else b
+))

@@ -1,0 +1,23 @@
+SHASHo density and score formulas in R/shasho_fit.R are adapted from
+R/SHASHo.R in gamlss.dist version 6.1-1, distributed by CRAN under
+GPL-2 | GPL-3, the same license alternatives as SVEMnet.
+
+Upstream authors (as credited in man/SHASH.Rd): Robert (Bob) Rigby,
+Mikis Stasinopoulos, and Fiona McElduff. The upstream DESCRIPTION names
+Mikis Stasinopoulos as copyright holder. These credits apply to the
+adapted formulas, not to the SVEMnet fitting engine or other package code.
+
+Source: https://cran.r-project.org/src/contrib/gamlss.dist_6.1-1.tar.gz
+Retrieved 2026-09-06; archive SHA-256:
+d2db3a7658799c2ef212aa18cb75a3ecf4f73faf8c13dfdc3c14b21ae0129069
+Original source comment: "This is the original SHASH distribution from
+Jones and Pewse3y (2009) Biometrika. 1-20"; "see page 2 equation (2) of the
+paper (divided by sigma for the density of the unstandardized variable)".
+
+SVEMnet changes (2026-09-06): log-cosh evaluation for numerical stability,
+analytic scores expressed on log-scale/log-tail parameter coordinates,
+and a new, deterministic, multiple-start intercept-only optimizer using
+stats::optim. No GAMLSS family or regression fitting engine is included.
+
+The mathematical distribution is described in Jones, M. C. and Pewsey, A.
+(2009), "Sinh-arcsinh distributions", Biometrika 96(4), 761-780.

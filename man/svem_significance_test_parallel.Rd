@@ -128,8 +128,7 @@ deterministic factor coding.}
 \code{glmnet()} (for example: \code{penalty.factor},
 \code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
 The \code{relaxed} setting is controlled by the \code{relaxed} argument of
-this function and any \code{relaxed} value passed via \code{...} is ignored
-with a warning. User \code{weights} and \code{offset} are not supported
+this function. User \code{weights} and \code{offset} are not supported
 (SVEM controls its own weighting). Argument names that neither
 \code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
 with a warning (misspelling protection).}
@@ -144,7 +143,13 @@ components:
 per-fit \eqn{p}-values.
 \item \code{d_Y}: numeric vector of distances for the original SVEM fits.
 \item \code{d_pi_Y}: numeric vector of distances for the permutation fits.
-\item \code{distribution_fit}: fitted SHASHo distribution object.
+\item \code{distribution_fit}: an \code{svem_shasho_fit} list with
+\code{parameters} (\code{mu}, \code{sigma}, \code{nu}, \code{tau}
+on their natural scales), \code{loglik}, \code{n}, \code{converged},
+\code{method}, and optimizer diagnostics. This is not a GAMLSS object.
+\code{coef(distribution_fit, what = "mu")} (or \code{"sigma"},
+\code{"nu"}, \code{"tau"}) returns the intercept on the link scale,
+as in earlier versions: identity for mu/nu, log for sigma/tau.
 \item \code{data_d}: data frame of distances and source labels
 (original vs permutation), suitable for plotting.
 \item \code{diagnostics}: RNG mode, deterministic retry counts and
@@ -190,6 +195,14 @@ aborts with a failure summary rather than silently reducing \code{nSVEM} or
 \code{nPerm}.
 Likewise, a non-converged SHASHo null-distribution fit is reported as an
 error rather than being used to calculate a whole-model \eqn{p}-value.
+The SHASHo null distribution is fitted by an internal maximum-likelihood
+routine using \code{stats::optim()}, with deterministic multiple starts
+and an analytic gradient. The distribution and distance statistic are
+unchanged, but fitted parameters and p-values can differ from versions
+before 3.6.0, which used the GAMLSS fitting algorithm.
+A fit must satisfy both the optimizer's convergence criterion and a small
+likelihood gradient. If these checks fail, no p-value is returned;
+increasing \code{nPerm} can help resolve a small reference sample.
 
 The function can optionally reuse a deterministic, locked expansion built
 with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -204,8 +217,8 @@ in that setting.
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
-used to assist with coding and roxygen documentation; all
+Generative AI tools were used to assist with coding and roxygen
+documentation; all
 content was reviewed and finalized by the author.
 }
 

@@ -68,8 +68,8 @@ process-mean specifications via the \code{specs} argument of
 }
 \section{Acknowledgments}{
 
-OpenAI's GPT models (starting with GPT o1-preview through GPT-5.5 Pro and Claude Fable 5) were
-used to assist with coding and roxygen documentation; all
+Generative AI tools were used to assist with coding and roxygen
+documentation; all
 content was reviewed and finalized by the author.
 }
 

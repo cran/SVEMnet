@@ -418,6 +418,59 @@ test_that("badly scaled predictors survive acceptance and refit consistently", {
   expect_true(sfit$parms[["ts"]] != 0)
 })
 
+test_that("small independent directions are checked by exact refitting", {
+  # Variation is meaningful but its norm relative to the timestamp origin
+  # is below the projection shortcut's 1e-8 gate. The exact QR solver still
+  # resolves it; silently skipping the term loses almost all of the signal.
+  set.seed(81)
+  n <- 40L
+  ts <- 1.7e9 + seq(0, 30, length.out = n)
+  x <- ts - mean(ts)
+  y <- 3 + 0.5 * x + rnorm(n, 0, 0.1)
+  dat <- data.frame(y, ts, x)
+
+  fit <- forward_aicc(y ~ ts, dat)
+  reference <- stats::lm(y ~ x, dat)
+  expect_identical(fit$selected_terms, "ts")
+  expect_equal(unname(fit$y_pred), unname(stats::fitted(reference)),
+               tolerance = 1e-5)
+  expect_lt(fit$selection_path$rss[1], 1)
+
+  # The same fallback applies independently in each weighted SVEM path;
+  # centering an ordinary linear predictor provides a stable oracle without
+  # changing its model space, weights, objective, or selected model size.
+  set.seed(82)
+  sfit <- svem_forward(y ~ ts, dat, nBoot = 6)
+  set.seed(82)
+  sref <- svem_forward(y ~ x, dat, nBoot = 6)
+  expect_equal(sfit$best_ks, sref$best_ks)
+  expect_equal(sfit$diagnostics$selection_frequencies[["ts"]], 1)
+  expect_equal(unname(sfit$y_pred), unname(sref$y_pred), tolerance = 1e-5)
+})
+
+test_that("ambiguous multi-column terms retain whole-group rank checks", {
+  set.seed(83)
+  n <- 50L
+  ts <- 1.7e9 + seq(0, 30, length.out = n)
+  x <- ts - mean(ts)
+  z <- rnorm(n)
+  y <- 3 + 0.5 * x + 2 * z + rnorm(n, 0, 0.1)
+  dat <- data.frame(y, ts, x, z)
+
+  fit <- forward_aicc(y ~ cbind(ts, z), dat)
+  reference <- stats::lm(y ~ x + z, dat)
+  expect_identical(fit$selected_terms, "cbind(ts, z)")
+  expect_equal(unname(fit$y_pred), unname(stats::fitted(reference)),
+               tolerance = 1e-5)
+  expect_equal(fit$selection_path$k, 3L)
+
+  # An actually rank-deficient block must still be skipped as a whole,
+  # even when one of its directions alone would predict the response.
+  bad <- forward_aicc(y ~ cbind(ts, ts), dat)
+  expect_length(bad$selected_terms, 0L)
+  expect_equal(unname(bad$y_pred), rep(mean(y), n), tolerance = 1e-10)
+})
+
 test_that("near-perfect candidate fits are compared by exact RSS", {
   # The projected RSS update is cancellation noise for near-perfect fits;
   # the exact-refit guard must pick the candidate with the smaller true RSS.

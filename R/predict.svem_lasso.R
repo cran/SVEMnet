@@ -75,6 +75,10 @@
 #' require a non-null \code{coef_matrix}. For \code{type = "class"} (binomial),
 #' uncertainty summaries are not available.
 #'
+#' These summaries describe variation among bootstrap member predictions.
+#' They do not include new-observation noise, and the percentile limits
+#' alone do not establish calibrated confidence or prediction coverage.
+#'
 #' @param object A fitted SVEM model (class \code{svem_model}; binomial models
 #'   typically also inherit class \code{svem_binomial}). Created by
 #'   \code{SVEMnet()}.
@@ -96,11 +100,11 @@
 #'   computed from member predictions (requires \code{coef_matrix}). Not
 #'   available for \code{type = "class"}. For Gaussian models, this forces use
 #'   of bootstrap member predictions instead of aggregate coefficients.
-#' @param interval Logical; if \code{TRUE}, return percentile confidence
+#' @param interval Logical; if \code{TRUE}, return percentile
 #'   limits from member predictions (requires \code{coef_matrix}). Not
 #'   available for \code{type = "class"}. For Gaussian models, this forces use
 #'   of bootstrap member predictions instead of aggregate coefficients.
-#' @param level Confidence level for percentile intervals. Default
+#' @param level Central probability mass for member-percentile intervals. Default
 #'   \code{0.95}.
 #' @param ... Currently unused.
 #'
@@ -120,7 +124,7 @@
 #'   \item \code{fit}: predictions on the requested scale.
 #'   \item \code{se.fit}: bootstrap standard errors (when
 #'         \code{se.fit = TRUE}).
-#'   \item \code{lwr}, \code{upr}: percentile confidence limits (when
+#'   \item \code{lwr}, \code{upr}: member-percentile limits (when
 #'         \code{interval = TRUE}).
 #' }
 #'

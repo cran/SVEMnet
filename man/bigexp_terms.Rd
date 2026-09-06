@@ -18,7 +18,9 @@ bigexp_terms(
   audit_numeric_rate = 0.9,
   audit_unique_ratio = 0.8,
   audit_min_n = 12L,
-  report = TRUE
+  report = TRUE,
+  center_polynomials = FALSE,
+  mixture_vars = NULL
 )
 }
 \arguments{
@@ -110,6 +112,16 @@ before audits are applied.}
 \item{report}{Logical. If \code{TRUE} (default), print a compact summary of the
 inferred predictor types and settings (via \code{print.bigexp_spec}) when
 \code{bigexp_terms()} returns.}
+
+\item{center_polynomials}{Logical; default \code{FALSE}. If \code{TRUE},
+subtract each eligible predictor's fixed training-data mean before
+raising it to a power. Applies to numeric, non-blocking predictors except
+those in \code{mixture_vars}. See \emph{Centered polynomial powers}.}
+
+\item{mixture_vars}{Optional character vector naming numeric, non-blocking
+predictors whose polynomial powers must remain uncentered. This only
+excludes them from polynomial centering; it does not impose mixture sum
+constraints or replace \code{mixture_groups} in downstream sampling.}
 }
 \value{
 An object of class \code{"bigexp_spec"} with components:
@@ -128,7 +140,10 @@ treated as categorical (\code{TRUE}) versus continuous (\code{FALSE}).
 \code{factorial_order}, \code{polynomial_order},
 \code{include_pc_2way},
 \code{include_pc_3way}, \code{intercept}, \code{blocking}, and
-stored contrast information.
+stored contrast information. When polynomial centering or mixture
+exclusions are requested, also records \code{center_polynomials},
+the named numeric vector \code{polynomial_centers}, and
+\code{mixture_vars}.
 }
 }
 \description{
@@ -174,6 +189,29 @@ expansions for new datasets via \code{\link{bigexp_prepare}} and
 the same spec applied to different data produces design matrices with the
 same columns in the same order (up to missing levels for specific batches).
 }
+\section{Centered polynomial powers}{
+
+With \code{center_polynomials = TRUE}, a power \code{I(X^k)} is replaced
+by \code{I((X - c)^k)}, where \code{c} is the arithmetic mean of the
+finite values of \code{X} in the data supplied to \code{bigexp_terms()}.
+The same replacement is used wherever that power occurs in a partial-cubic
+term. Main effects, ordinary factorial interactions, and the non-powered
+factors in partial-cubic terms remain on their original scales.
+
+Each center is computed separately from its predictor, without excluding
+rows because another predictor or response is missing. This keeps the
+expansion independent of the response used to build the spec. The constants
+are recorded in \code{spec$settings$polynomial_centers} and embedded in the
+formula; \code{bigexp_prepare()}, \code{bigexp_formula()}, and prediction
+reuse them without recentering new data. Predictor ranges, discrete sampling
+levels, and supplied data values are unchanged. Only design-matrix
+construction changes; fitting algorithms are unchanged, although selecting
+or penalizing terms in the new basis can change the fitted model.
+
+Predictors named in \code{mixture_vars} retain raw powers. Mixture membership
+is explicit and is not inferred from names, ranges, or observed sums.
+}
+
 \section{Typical workflow}{
 
 In a typical multi-response workflow you:
@@ -211,6 +249,16 @@ spec <- bigexp_terms(
 )
 
 print(spec)
+
+## Optional centering of powers using fixed training-data means
+spec_centered <- bigexp_terms(
+  y ~ X1 + X2 + G, data = df,
+  factorial_order = 2, polynomial_order = 2,
+  center_polynomials = TRUE
+)
+spec_centered$settings$polynomial_centers
+## For mixture-process data, also supply mixture_vars = c("A", "B", "C")
+## to keep the named mixture components' powers on their raw scales.
 
 ## Example 2: pure main effects (no interactions, no polynomial terms)
 spec_main <- bigexp_terms(
@@ -268,8 +316,7 @@ spec_disc <- bigexp_terms(
 )
 
 
-# Fit. The discrete support is expected to propagate into fit$sampling_schema
-# (assuming the updated SVEMnet implementation that stores sampling_schema).
+# Fit. The discrete support is retained in fit$sampling_schema.
 fit_disc <- SVEMnet(spec_disc, df_disc, nBoot = 8,
                     glmnet_alpha = 1, relaxed = FALSE)
 

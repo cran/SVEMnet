@@ -2,19 +2,26 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.5.0
-Date: 2026-08-08
+Version: 3.6.0
+Date: 2026-09-06
 Authors@R: 
-    person(given = "Andrew T.",
+    c(person(given = "Andrew T.",
            family = "Karl",
            email = "akarl@asu.edu",
            role = c("cre", "aut"),
-           comment = c(ORCID = "0000-0002-5933-8706"))
-Description: Tools for fitting self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) in small-sample design-of-experiments and related workflows, using elastic net and relaxed elastic net regression via 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions, and a batch sequential-design proposer based on Thompson sampling from the bootstrap ensemble (Thompson (1933) <doi:10.1093/biomet/25.3-4.285>; Kandasamy et al. (2018) <doi:10.48550/arXiv.1705.09236>). Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). The package and its workflows are described in Karl (2026) <doi:10.1016/j.chemolab.2026.105660>. Package code was drafted with assistance from generative AI tools.
-URL: https://arxiv.org/abs/2511.20968
+           comment = c(ORCID = "0000-0002-5933-8706")),
+      person("Robert", "Rigby", role = "ctb",
+             comment = "SHASHo density and score formulas from gamlss.dist"),
+      person("Mikis", "Stasinopoulos", role = c("ctb", "cph"),
+             comment = "SHASHo density and score formulas from gamlss.dist"),
+      person("Fiona", "McElduff", role = "ctb",
+             comment = "SHASHo density and score formulas from gamlss.dist"))
+Description: Implements the self-validated elastic-net and relaxed elastic-net ensemble modeling and multi-response optimization workflow described in Karl (2026) <doi:10.1016/j.chemolab.2026.105660>. Self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) are fitted for small-sample design-of-experiments and related workflows using 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Package code was drafted with assistance from generative AI tools.
+URL: https://doi.org/10.1016/j.chemolab.2026.105660,
+        https://arxiv.org/abs/2511.20968
 Depends: R (>= 4.0.0)
 Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, lhs, parallel,
-        gamlss, gamlss.dist, utils
+        utils
 Suggests: foreach, testthat (>= 3.0.0), RhpcBLASctl
 License: GPL-2 | GPL-3
 Encoding: UTF-8
@@ -22,9 +29,14 @@ Config/testthat/edition: 3
 LazyData: true
 Config/roxygen2/version: 8.0.0
 NeedsCompilation: no
-Packaged: 2026-08-19 18:52:51 UTC; andre
+Packaged: 2026-09-06 16:21:12 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
-    <https://orcid.org/0000-0002-5933-8706>)
+    <https://orcid.org/0000-0002-5933-8706>),
+  Robert Rigby [ctb] (SHASHo density and score formulas from gamlss.dist),
+  Mikis Stasinopoulos [ctb, cph] (SHASHo density and score formulas from
+    gamlss.dist),
+  Fiona McElduff [ctb] (SHASHo density and score formulas from
+    gamlss.dist)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2026-08-20 08:52:12 UTC
+Date/Publication: 2026-09-06 16:40:02 UTC

@@ -308,6 +308,14 @@
 #' \code{nPerm}.
 #' Likewise, a non-converged SHASHo null-distribution fit is reported as an
 #' error rather than being used to calculate a whole-model \eqn{p}-value.
+#' The SHASHo null distribution is fitted by an internal maximum-likelihood
+#' routine using \code{stats::optim()}, with deterministic multiple starts
+#' and an analytic gradient. The distribution and distance statistic are
+#' unchanged, but fitted parameters and p-values can differ from versions
+#' before 3.6.0, which used the GAMLSS fitting algorithm.
+#' A fit must satisfy both the optimizer's convergence criterion and a small
+#' likelihood gradient. If these checks fail, no p-value is returned;
+#' increasing \code{nPerm} can help resolve a small reference sample.
 #'
 #' The function can optionally reuse a deterministic, locked expansion built
 #' with \code{bigexp_terms()}. Supply \code{spec} (and optionally
@@ -401,8 +409,7 @@
 #'   \code{glmnet()} (for example: \code{penalty.factor},
 #'   \code{lower.limits}, \code{upper.limits}, \code{standardize.response}, etc.).
 #'   The \code{relaxed} setting is controlled by the \code{relaxed} argument of
-#'   this function and any \code{relaxed} value passed via \code{...} is ignored
-#'   with a warning. User \code{weights} and \code{offset} are not supported
+#'   this function. User \code{weights} and \code{offset} are not supported
 #'   (SVEM controls its own weighting). Argument names that neither
 #'   \code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
 #'   with a warning (misspelling protection).
@@ -416,7 +423,13 @@
 #'       per-fit \eqn{p}-values.
 #'     \item \code{d_Y}: numeric vector of distances for the original SVEM fits.
 #'     \item \code{d_pi_Y}: numeric vector of distances for the permutation fits.
-#'     \item \code{distribution_fit}: fitted SHASHo distribution object.
+#'     \item \code{distribution_fit}: an \code{svem_shasho_fit} list with
+#'       \code{parameters} (\code{mu}, \code{sigma}, \code{nu}, \code{tau}
+#'       on their natural scales), \code{loglik}, \code{n}, \code{converged},
+#'       \code{method}, and optimizer diagnostics. This is not a GAMLSS object.
+#'       \code{coef(distribution_fit, what = "mu")} (or \code{"sigma"},
+#'       \code{"nu"}, \code{"tau"}) returns the intercept on the link scale,
+#'       as in earlier versions: identity for mu/nu, log for sigma/tau.
 #'     \item \code{data_d}: data frame of distances and source labels
 #'       (original vs permutation), suitable for plotting.
 #'     \item \code{diagnostics}: RNG mode, deterministic retry counts and
@@ -428,8 +441,6 @@
 #'   \code{\link{bigexp_formula}}
 #' @template ref-svem
 #' @importFrom lhs maximinLHS
-#' @importFrom gamlss gamlss gamlss.control
-#' @importFrom gamlss.dist SHASHo
 #' @importFrom stats model.frame model.response model.matrix delete.response terms
 #' @importFrom stats median complete.cases rgamma coef predict sd
 #' @importFrom parallel makeCluster stopCluster clusterCall parLapplyLB
@@ -688,11 +699,6 @@ svem_significance_test_parallel <- function(
     }
   }
 
-  if ("relaxed" %in% names(dots)) {
-    warning("Ignoring 'relaxed' in '...'; use the 'relaxed' argument of svem_significance_test_parallel().")
-    dots$relaxed <- NULL
-  }
-
   if ("complexity" %in% names(dots)) {
     warning("Ignoring 'complexity' in '...'; the whole-model test always uses ",
             "the support-count complexity measure of Karl (2024).")
@@ -886,6 +892,16 @@ svem_significance_test_parallel <- function(
                                       alpha = NULL, oversample = 4L, max_tries = 10000L) {
     k <- length(lower)
     if (length(upper) != k) stop("upper must have the same length as lower.")
+    if (!is.numeric(lower) || !is.numeric(upper) || !k ||
+        any(!is.finite(lower)) || any(!is.finite(upper))) {
+      stop("Mixture lower and upper bounds must be nonempty finite numeric vectors.")
+    }
+    if (any(lower > upper)) {
+      stop("Mixture bounds must satisfy lower <= upper for every component.")
+    }
+    if (!is.numeric(total) || length(total) != 1L || !is.finite(total)) {
+      stop("Mixture total must be a single finite number.")
+    }
     if (is.null(alpha)) alpha <- rep(1, k)
 
     min_sum <- sum(lower); max_sum <- sum(upper)
@@ -896,6 +912,21 @@ svem_significance_test_parallel <- function(
     avail <- total - min_sum
     if (avail <= 1e-12) {
       return(matrix(rep(lower, each = n), nrow = n))
+    }
+    if (max_sum - total <= 1e-12) {
+      return(matrix(rep(upper, each = n), nrow = n))
+    }
+
+    # Fixed components have zero probability under a continuous Dirichlet
+    # draw. Sample only the free components, then restore the fixed values.
+    fixed <- lower == upper
+    if (any(fixed)) {
+      res <- matrix(rep(lower, each = n), nrow = n)
+      res[, !fixed] <- .sample_trunc_dirichlet(
+        n, lower[!fixed], upper[!fixed], total - sum(lower[fixed]),
+        alpha = alpha[!fixed], oversample = oversample, max_tries = max_tries
+      )
+      return(res)
     }
 
     res <- matrix(NA_real_, nrow = n, ncol = k)
@@ -1097,14 +1128,7 @@ svem_significance_test_parallel <- function(
   distribution_fit <- suppressMessages(
     withCallingHandlers(
       tryCatch(
-        gamlss::gamlss(
-          d_pi_Y ~ 1,
-          family = gamlss.dist::SHASHo(
-            mu.link = "identity", sigma.link = "log",
-            nu.link = "identity", tau.link = "log"
-          ),
-          control = gamlss::gamlss.control(n.cyc = 1000, trace = FALSE)
-        ),
+        .svem_wmt_fit_shasho(d_pi_Y),
         error = function(e) {
           shasho_error <<- conditionMessage(e)
           NULL
@@ -1150,9 +1174,8 @@ svem_significance_test_parallel <- function(
   nu    <- as.numeric(stats::coef(distribution_fit, what = "nu"))
   tau   <- exp(as.numeric(stats::coef(distribution_fit, what = "tau")))
 
-  # pSHASHo(lower.tail = FALSE) currently computes 1 - CDF internally, which
-  # loses extreme right-tail probabilities to cancellation. The transformed
-  # normal survival probability is algebraically identical to SHASHo's CDF.
+  # Evaluate the transformed-normal survival probability directly to avoid
+  # subtractive cancellation in extreme right tails.
   p_values <- .svem_wmt_shasho_upper_tail(
     d_Y, mu = mu, sigma = sigma, nu = nu, tau = tau
   )
@@ -1197,6 +1220,8 @@ svem_significance_test_parallel <- function(
       retry_failure_reasons = retry_failure_counts,
       shasho_converged = TRUE,
       shasho_warnings = shasho_warnings,
+      shasho_method = distribution_fit$method,
+      shasho_gradient_max = distribution_fit$gradient_max,
       removed_grid_columns = reduction$removed_grid_columns,
       retained_grid_columns = reduction$retained_grid_columns,
       retained_components = reduction$retained_components
