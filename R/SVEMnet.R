@@ -88,9 +88,15 @@
 #'       point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
 #'       parameter \eqn{\alpha < 1}, the penalized fit's effective df is the
 #'       ridge-type trace
-#'       \eqn{\sum_j e_j / (e_j + n\lambda(1-\alpha))}, where \eqn{e_j} are
+#'       \eqn{\sum_j e_j / (e_j + n(\lambda/s_{y,w})(1-\alpha))}, where \eqn{e_j} are
 #'       the eigenvalues of the weighted, standardized Gram matrix of the
-#'       active columns; the relaxed refit's df is the rank of the active
+#'       active columns, and \eqn{s_{y,w}} is the training-weighted response
+#'       standard deviation. This conditional trace holds the active set and
+#'       tuning choices fixed; it does not include their adaptation cost.
+#'       Nonuniform penalty factors enter the corresponding diagonal ridge
+#'       matrix. Finite coefficient bounds are not supported for EDF selection;
+#'       support-selected bounded fits report EDF as unavailable.
+#'       The relaxed refit's df is the rank of the active
 #'       design. The blended complexity for relaxed mixing parameter
 #'       \eqn{\gamma} is
 #'       \eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
@@ -937,55 +943,10 @@ SVEMnet <- function(formula, data,
   training_weights  <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
   validation_weights <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
 
-  ## ---- capture and sanitize user '...' ----
-  dots <- list(...)
-  if (length(dots)) {
-    if ("weights" %in% names(dots)) {
-      warning("Ignoring user 'weights'; SVEM uses bootstrap weights.")
-      dots$weights <- NULL
-    }
-    if ("standardize" %in% names(dots)) {
-      warning("Ignoring user 'standardize'; SVEMnet always standardizes.")
-      dots$standardize <- NULL
-    }
-    if ("offset" %in% names(dots)) {
-      warning("Ignoring user 'offset'; SVEMnet does not support offsets.")
-      dots$offset <- NULL
-    }
-    protected <- c("x","y","alpha","intercept","relax","standardize",
-                   "nlambda","lambda.min.ratio","lambda","family")
-    dropped_reserved <- intersect(names(dots), protected)
-    if (length(dropped_reserved)) {
-      warning("Ignoring reserved glmnet argument(s) managed by SVEMnet: ",
-              paste(dropped_reserved, collapse = ", "), ".")
-    }
-    dots <- dots[setdiff(names(dots), protected)]
-
-    # glmnet() silently swallows unknown arguments; catch misspellings here
-    unknown <- .svem_unknown_glmnet_args(dots, funs = list(glmnet::glmnet),
-                                         context = "glmnet via SVEMnet")
-    if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]
-  }
-
-  exclude_user <- dots$exclude
-  dots$exclude <- NULL
-  glmnet_design <- .svem_prepare_glmnet_design(
-    X, args = dots, exclude = exclude_user
-  )
+  setup <- .svem_glmnet_setup(X, list(...), fam_name, relax_flag)
+  glmnet_design <- setup$design
   X_glm <- glmnet_design$x
-  dots <- glmnet_design$args
-
-  glmnet_base_args <- .glmnet_prepare_call_args(
-    c(list(intercept = TRUE,
-           standardize = TRUE,
-           nlambda = 500,
-           relax = isTRUE(relax_flag),
-           family = fam_name,
-           exclude = glmnet_design$exclude),
-      dots),
-    glmnet::glmnet,
-    default_control = list(maxit = 1e6)
-  )
+  glmnet_base_args <- setup$args
 
   .support_size_one <- function(beta_col,
                                 base_tol        = 1e-7,
@@ -1068,18 +1029,10 @@ SVEMnet <- function(formula, data,
       next
     }
 
-    ## complexity = "edf": per-replicate weighted standardized design and a
-    ## per-replicate eigenvalue cache keyed by active set. The Gram-matrix
-    ## eigenvalues depend only on the active set (not on lambda, alpha, or
-    ## gamma, which all enter the df formula analytically), so each unique
-    ## active set along the paths is decomposed once per replicate.
     if (fam_name == "gaussian") {
-      mw  <- colSums(X * w_train) / n
-      Xc  <- sweep(X, 2, mw, "-")
-      vw  <- colSums(Xc^2 * w_train) / n
-      sdw <- sqrt(pmax(vw, .Machine$double.eps))
-      Xs_edf    <- sweep(Xc, 2, sdw, "/") * sqrt(w_train)
-      edf_cache <- new.env(parent = emptyenv())
+      edf_context <- .svem_edf_context(X, y_vec, w_train,
+                                     glmnet_base_args, ncol(X_glm))
+      if (use_edf && !is.null(edf_context$reason)) stop(edf_context$reason)
     }
 
     best_val_score <- Inf
@@ -1096,41 +1049,15 @@ SVEMnet <- function(formula, data,
     relax_gamma_grid <- if (isTRUE(relax_flag)) c( 0.2, 0.6,  1) else 1
 
     for (alpha in glmnet_alpha) {
-      fit <- tryCatch({
-        withCallingHandlers({
-          do.call(glmnet::glmnet,
-                  c(list(x = X_glm, y = y_vec,
-                         alpha = alpha,
-                         weights = w_train),
-                    glmnet_base_args))
-        }, warning = function(w) base::invokeRestart("muffleWarning"))
-      }, error = function(e) {
-        attempt_reasons <<- c(attempt_reasons, conditionMessage(e))
-        NULL
-      })
-      if (is.null(fit) || !length(fit$lambda)) {
-        if (is.null(fit)) next
-        attempt_reasons <- c(attempt_reasons, "glmnet returned an empty lambda path")
-        next
-      }
-
-      for (relax_g in relax_gamma_grid) {
-        coef_path <- tryCatch({
-          if (isTRUE(relax_flag)) {
-            as.matrix(stats::coef(fit, s = fit$lambda, gamma = relax_g))
-          } else {
-            as.matrix(stats::coef(fit, s = fit$lambda))
-          }
-        }, error = function(e) {
-          attempt_reasons <<- c(attempt_reasons, conditionMessage(e))
-          NULL
-        })
-        if (!is.null(coef_path)) {
-          coef_path <- .svem_strip_glmnet_sentinel(
-            coef_path, glmnet_design$sentinel
-          )
-        }
-        if (is.null(coef_path) || nrow(coef_path) != (p + 1L)) next
+      bundle <- .svem_glmnet_path(X_glm, y_vec, w_train, alpha,
+                                  glmnet_base_args, relax_gamma_grid,
+                                  glmnet_design$sentinel)
+      attempt_reasons <- c(attempt_reasons, bundle$errors)
+      fit <- bundle$fit
+      for (path in bundle$paths) {
+        relax_g <- path$gamma
+        coef_path <- path$coefficients
+        if (nrow(coef_path) != p + 1L) next
         L <- ncol(coef_path); if (L == 0L) next
 
         pred_link <- tryCatch({
@@ -1173,30 +1100,10 @@ SVEMnet <- function(formula, data,
         k_pen <- k_eff
         edf_path <- if (fam_name == "gaussian") as.numeric(k_eff) else
           rep(NA_real_, L)
-        if (use_edf && alpha < 1 && length(fit$lambda) == L) {
-          k_pen <- as.numeric(k_eff)
-          lam2  <- n * fit$lambda * (1 - alpha)
-          adm   <- which(k_slope < n_eff_adm & k_slope > 0L)
-          for (jj in adm) {
-            slope <- coef_path[-1L, jj]
-            okf   <- is.finite(slope)
-            ms    <- if (any(okf)) max(abs(slope[okf])) else 0
-            tolj  <- max(1e-7 * max(1, ms), 1e-7)
-            act   <- which(okf & abs(slope) > tolj)
-            if (!length(act)) next
-            key <- paste(act, collapse = ",")
-            ev  <- edf_cache[[key]]
-            if (is.null(ev)) {
-              G  <- crossprod(Xs_edf[, act, drop = FALSE])
-              ev <- eigen(G, symmetric = TRUE, only.values = TRUE)$values
-              ev <- pmax(ev, 0)
-              edf_cache[[key]] <- ev
-            }
-            df_pen <- sum(ev / (ev + lam2[jj]))
-            r_act  <- sum(ev > ev[1L] * 1e-10)
-            k_pen[jj] <- 1 + relax_g * df_pen + (1 - relax_g) * r_act
-          }
-          edf_path <- k_pen
+        if (use_edf && length(fit$lambda) == L) {
+          edf_path <- .svem_conditional_edf(edf_context, coef_path,
+                                           fit$lambda, alpha, relax_g)
+          k_pen <- edf_path
         }
 
         if (fam_name == "gaussian") {
@@ -1247,27 +1154,10 @@ SVEMnet <- function(formula, data,
         selected_edf <- if (fam_name == "gaussian") {
           as.numeric(edf_path[idx_min])
         } else NA_real_
-        if (fam_name == "gaussian" && !use_edf && alpha < 1 &&
-            length(fit$lambda) == L) {
-          slope <- coef_path[-1L, idx_min]
-          okf   <- is.finite(slope)
-          ms    <- if (any(okf)) max(abs(slope[okf])) else 0
-          tolj  <- max(1e-7 * max(1, ms), 1e-7)
-          act   <- which(okf & abs(slope) > tolj)
-          if (length(act)) {
-            key <- paste(act, collapse = ",")
-            ev  <- edf_cache[[key]]
-            if (is.null(ev)) {
-              G  <- crossprod(Xs_edf[, act, drop = FALSE])
-              ev <- eigen(G, symmetric = TRUE, only.values = TRUE)$values
-              ev <- pmax(ev, 0)
-              edf_cache[[key]] <- ev
-            }
-            lam2 <- n * fit$lambda[idx_min] * (1 - alpha)
-            df_pen <- sum(ev / (ev + lam2))
-            r_act  <- sum(ev > ev[1L] * 1e-10)
-            selected_edf <- 1 + relax_g * df_pen + (1 - relax_g) * r_act
-          }
+        if (fam_name == "gaussian" && !use_edf && length(fit$lambda) == L) {
+          selected_edf <- .svem_conditional_edf(
+            edf_context, coef_path[, idx_min, drop = FALSE],
+            fit$lambda[idx_min], alpha, relax_g)
         }
 
         if (is.finite(val_score) && val_score < best_val_score) {

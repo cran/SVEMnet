@@ -258,18 +258,6 @@
   )
 }
 
-.svem_wmt_shasho_upper_tail <- function(q, mu, sigma, nu, tau) {
-  if (any(!is.finite(c(q, mu, sigma, nu, tau))) ||
-      any(sigma <= 0) || any(tau <= 0)) {
-    stop("SHASHo tail inputs must be finite with positive sigma and tau.",
-         call. = FALSE)
-  }
-  z <- (q - mu) / sigma
-  transformed <- suppressWarnings(sinh(tau * asinh(z) - nu))
-  p <- stats::pnorm(transformed, lower.tail = FALSE)
-  pmin(1, pmax(0, p))
-}
-
 #' SVEM whole-model significance test with mixture support (parallel)
 #'
 #' Perform a permutation-based whole-model significance test for a continuous
@@ -308,13 +296,17 @@
 #' \code{nPerm}.
 #' Likewise, a non-converged SHASHo null-distribution fit is reported as an
 #' error rather than being used to calculate a whole-model \eqn{p}-value.
-#' The SHASHo null distribution is fitted by an internal maximum-likelihood
-#' routine using \code{stats::optim()}, with deterministic multiple starts
-#' and an analytic gradient. The distribution and distance statistic are
-#' unchanged, but fitted parameters and p-values can differ from versions
-#' before 3.6.0, which used the GAMLSS fitting algorithm.
+#' The SHASHo null distribution is fitted by independently written
+#' maximum-likelihood code based on the sinh-arcsinh-normal transformation
+#' of Jones and Pewsey (2009), \doi{10.1093/biomet/asp053}. It uses
+#' \code{stats::nlminb()}, deterministic multiple starts, and numerical
+#' derivatives. No source code from the former GAMLSS dependencies is used.
+#' The distribution and distance statistic are unchanged, but fitted
+#' parameters and p-values can differ from versions before 3.6.1, which
+#' used a different fitting algorithm.
 #' A fit must satisfy both the optimizer's convergence criterion and a small
-#' likelihood gradient. If these checks fail, no p-value is returned;
+#' numerical likelihood gradient in the internally normalized coordinates
+#' (location, log(scale/tail), skew, log(tail)). If these checks fail, no p-value is returned;
 #' increasing \code{nPerm} can help resolve a small reference sample.
 #'
 #' The function can optionally reuse a deterministic, locked expansion built

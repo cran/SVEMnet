@@ -161,32 +161,37 @@ test_that("SHASHo right tails remain positive beyond CDF subtraction precision",
 })
 
 test_that("legacy WMT seed schedule is stable", {
-  old_kind <- RNGkind()
-  had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-  old_seed <- if (had_seed) .Random.seed else NULL
-  on.exit({
-    suppressWarnings(RNGkind(
-      kind = old_kind[1L], normal.kind = old_kind[2L],
-      sample.kind = old_kind[3L]
-    ))
-    if (had_seed) {
-      assign(".Random.seed", old_seed, envir = .GlobalEnv)
-    } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-      rm(".Random.seed", envir = .GlobalEnv)
-    }
-  }, add = TRUE)
+  before_kind <- RNGkind()
+  # on.exit() must belong to a function call, not testthat's eval context.
+  (function() {
+    old_kind <- RNGkind()
+    had_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+    old_seed <- if (had_seed) .Random.seed else NULL
+    on.exit({
+      suppressWarnings(RNGkind(
+        kind = old_kind[1L], normal.kind = old_kind[2L],
+        sample.kind = old_kind[3L]
+      ))
+      if (had_seed) {
+        assign(".Random.seed", old_seed, envir = .GlobalEnv)
+      } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+        rm(".Random.seed", envir = .GlobalEnv)
+      }
+    }, add = TRUE)
 
-  legacy <- SVEMnet:::.svem_wmt_make_iter_seeds(
-    5L, base_seed = 123L, sample_kind = "Rounding"
-  )
-  modern <- SVEMnet:::.svem_wmt_make_iter_seeds(
-    5L, base_seed = 123L, sample_kind = "Rejection"
-  )
-  expect_identical(
-    legacy,
-    c(357285908L, 837187176L, 1631958398L, 1339477030L, 2000937474L)
-  )
-  expect_false(identical(modern, legacy))
+    legacy <- SVEMnet:::.svem_wmt_make_iter_seeds(
+      5L, base_seed = 123L, sample_kind = "Rounding"
+    )
+    modern <- SVEMnet:::.svem_wmt_make_iter_seeds(
+      5L, base_seed = 123L, sample_kind = "Rejection"
+    )
+    expect_identical(
+      legacy,
+      c(357285908L, 837187176L, 1631958398L, 1339477030L, 2000937474L)
+    )
+    expect_false(identical(modern, legacy))
+  })()
+  expect_identical(RNGkind(), before_kind)
 })
 
 test_that("private parallel WMT work leaves foreach registration unchanged", {

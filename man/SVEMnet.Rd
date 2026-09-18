@@ -97,9 +97,15 @@ gamma-blended effective degrees of freedom. For an elastic-net path
 point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
 parameter \eqn{\alpha < 1}, the penalized fit's effective df is the
 ridge-type trace
-\eqn{\sum_j e_j / (e_j + n\lambda(1-\alpha))}, where \eqn{e_j} are
+\eqn{\sum_j e_j / (e_j + n(\lambda/s_{y,w})(1-\alpha))}, where \eqn{e_j} are
 the eigenvalues of the weighted, standardized Gram matrix of the
-active columns; the relaxed refit's df is the rank of the active
+active columns, and \eqn{s_{y,w}} is the training-weighted response
+standard deviation. This conditional trace holds the active set and
+tuning choices fixed; it does not include their adaptation cost.
+Nonuniform penalty factors enter the corresponding diagonal ridge
+matrix. Finite coefficient bounds are not supported for EDF selection;
+support-selected bounded fits report EDF as unavailable.
+The relaxed refit's df is the rank of the active
 design. The blended complexity for relaxed mixing parameter
 \eqn{\gamma} is
 \eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
