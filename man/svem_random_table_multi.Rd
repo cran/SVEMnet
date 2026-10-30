@@ -69,6 +69,8 @@ a deterministic factor expansion (for example via a shared
 \details{
 No refitting is performed. Predictions are obtained by
 averaging per-bootstrap member predictions on the requested scale.
+Intercept-only models return \code{n} rows with no predictor columns
+and constant predictions.
 
 All models must share an identical predictor schema. Specifically, their
 \code{$sampling_schema} entries must agree on:

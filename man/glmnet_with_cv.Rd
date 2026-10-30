@@ -58,7 +58,13 @@ ridge fallback, if used).}
 
 \item{exclude}{Optional vector or function for \code{glmnet}'s
 \code{exclude=} argument. If a function, \code{cv.glmnet()} applies it
-inside each training fold (requires \code{glmnet} >= 4.1-2).}
+inside each training fold (requires \code{glmnet} >= 4.1-2).
+The callback receives the original design columns, without any internal
+compatibility column, and the current fit's response and weights.
+Numerically constant columns remain excluded. When applying this mask
+or handling a one-column design, callback returns are checked against
+the original column indices (or an aligned logical vector); other
+callbacks retain \code{glmnet}'s validation.}
 
 \item{relaxed}{Logical; if \code{TRUE}, call \code{glmnet()} and
 \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
@@ -322,4 +328,7 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }

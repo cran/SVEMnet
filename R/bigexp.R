@@ -494,6 +494,7 @@ bigexp_terms <- function(formula, data,
 
   mf <- stats::model.frame(formula, data, na.action = stats::na.pass)
   tt <- attr(mf, "terms")
+  .svem_reject_formula_offset(tt, "bigexp_terms")
 
   if (attr(tt, "response") != 1L) {
     stop("Formula must be of the form y ~ X1 + X2 + ... (two-sided).")

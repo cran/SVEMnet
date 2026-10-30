@@ -80,6 +80,7 @@
   } else {
     f_use <- formula
     mf    <- stats::model.frame(f_use, data, na.action = stats::na.omit)
+    mf <- .svem_drop_unused_frame_levels(mf)
     if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
     contrasts_opts_used <- getOption("contrasts")
     X        <- stats::model.matrix(f_use, mf)
@@ -90,6 +91,8 @@
   y <- stats::model.response(mf)
 
   terms_full <- attr(mf, "terms")
+  .svem_reject_formula_offset(terms_full, fun_name)
+  model_frame_schema <- .svem_model_frame_schema(mf)
   if (!identical(attr(terms_full, "intercept"), 1L) ||
       (using_spec && identical(spec$settings$intercept, FALSE))) {
     stop(
@@ -155,14 +158,17 @@
     f_use, terms_full, data_names = names(schema_data)
   )
   f_store     <- compact_formula$formula
-  terms_clean <- compact_formula$terms
+  terms_clean <- .svem_freeze_factor_predvars(compact_formula$terms, schema_data)
   schema_data_used <- schema_data
   omitted_rows <- as.integer(attr(mf, "na.action"))
   if (length(omitted_rows) && nrow(schema_data_used) >= max(omitted_rows)) {
     schema_data_used <- schema_data_used[-omitted_rows, , drop = FALSE]
   }
 
-  predictor_vars <- base::all.vars(stats::delete.response(terms_full))
+  predictor_vars <- .svem_raw_predictor_vars(terms_full, names(schema_data))
+  if (!using_spec) {
+    schema_data_used <- .svem_drop_unused_raw_levels(schema_data_used, predictor_vars)
+  }
 
   resp_vars   <- .svem_response_vars(f_use)
   resp_in_rhs <- intersect(resp_vars, predictor_vars)
@@ -175,7 +181,7 @@
   }
 
   var_classes <- stats::setNames(vapply(predictor_vars, function(v) {
-    if (v %in% names(schema_data)) class(schema_data[[v]])[1] else NA_character_
+    if (v %in% names(data)) class(data[[v]])[1] else NA_character_
   }, character(1)), predictor_vars)
 
   xlevels <- list()
@@ -184,11 +190,14 @@
     if (v %in% names(schema_data_used)) {
       if (is.factor(schema_data_used[[v]])) {
         xlevels[[v]] <- levels(schema_data_used[[v]])
-        factor_levels[[v]] <- levels(schema_data_used[[v]])
+        lev <- levels(schema_data_used[[v]])
+        factor_levels[[v]] <- lev[lev %in% as.character(schema_data_used[[v]])]
       } else if (is.character(schema_data_used[[v]])) {
         lev <- sort(unique(as.character(schema_data_used[[v]])))
         xlevels[[v]] <- lev
         factor_levels[[v]] <- lev
+      } else if (is.logical(schema_data_used[[v]])) {
+        factor_levels[[v]] <- c("FALSE", "TRUE")[c(FALSE, TRUE) %in% schema_data_used[[v]]]
       }
     }
   }
@@ -200,7 +209,8 @@
     x_chr <- as.character(x)
     x_chr <- x_chr[!is.na(x_chr)]
     if (!length(x_chr)) return(NA_character_)
-    tab <- table(x_chr)
+    lev <- if (is.factor(x)) levels(x) else sort(unique(x_chr))
+    tab <- table(factor(x_chr, levels = lev))
     if (!length(tab)) return(NA_character_)
     maxfreq <- max(tab)
     modes <- names(tab)[tab == maxfreq]
@@ -241,7 +251,7 @@
                                    !spec$is_cat[predictor_vars]]
     } else {
       num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
-        v %in% colnames(mf) && is.numeric(mf[[v]])
+        v %in% names(schema_data_used) && is.numeric(schema_data_used[[v]])
       }, logical(1))]
     }
 
@@ -254,21 +264,15 @@
                            dimnames = list(c("min", "max"), NULL))
     }
 
-    if (!is.null(spec$levels) && length(spec$levels)) {
-      fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
-      fl <- fl[!vapply(fl, is.null, logical(1))]
-      if (length(fl)) factor_levels <- fl
-    }
-
   } else {
     num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
-      v %in% colnames(mf) && is.numeric(mf[[v]])
+      v %in% names(schema_data_used) && is.numeric(schema_data_used[[v]])
     }, logical(1))]
     if (length(num_vars)) {
       rng_mat <- vapply(num_vars, function(v) {
-        r <- range(mf[[v]], na.rm = TRUE)
+        r <- range(schema_data_used[[v]], na.rm = TRUE)
         if (!all(is.finite(r)) || r[1] == r[2]) {
-          r <- c(min(mf[[v]], na.rm = TRUE), max(mf[[v]], na.rm = TRUE))
+          r <- c(min(schema_data_used[[v]], na.rm = TRUE), max(schema_data_used[[v]], na.rm = TRUE))
         }
         r
       }, numeric(2))
@@ -278,6 +282,12 @@
       num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
                            dimnames = list(c("min", "max"), NULL))
     }
+  }
+
+  if (using_spec && !is.null(spec$levels) && length(spec$levels)) {
+    fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
+    fl <- fl[!vapply(fl, is.null, logical(1))]
+    if (length(fl)) factor_levels <- fl
   }
 
   discrete_numeric_vars   <- character(0L)
@@ -302,6 +312,12 @@
     if (length(dn)) discrete_numeric_vars <- dn
   }
 
+  direct_support <- .svem_direct_factor_support(terms_clean, schema_data_used)
+  for (v in setdiff(names(direct_support), names(discrete_numeric_levels))) {
+    discrete_numeric_levels[[v]] <- direct_support[[v]]
+  }
+  discrete_numeric_vars <- union(discrete_numeric_vars, names(direct_support))
+
   feature_names <- colnames(X)
   terms_str <- tryCatch(
     paste(deparse(stats::delete.response(terms_clean)), collapse = " "),
@@ -313,6 +329,7 @@
     sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
   }
   schema <- list(
+    model_frame       = model_frame_schema,
     feature_names     = feature_names,
     terms_str         = terms_str,
     xlevels           = xlevels,
@@ -334,6 +351,7 @@
 
   list(
     X = X, y_vec = y_vec, n = n, p = p,
+    numerically_constant_columns = .svem_numerically_constant_columns(X),
     groups = groups,
     f_store = f_store, terms_clean = terms_clean,
     xlevels = xlevels,
@@ -384,8 +402,10 @@
   rss_current <- sum(resid^2)
 
   out <- rep(NA_real_, length(candidate_groups))
+  rank_deficient <- integer()
   if (rss_current <= dust) {
-    return(list(rss = out, rss_current = rss_current, near_perfect = TRUE))
+    return(list(rss = out, rss_current = rss_current, near_perfect = TRUE,
+                rank_deficient = rank_deficient))
   }
 
   for (gi in seq_along(candidate_groups)) {
@@ -422,22 +442,27 @@
       ## avoids cancellation in RSS updates for near-perfect candidate fits.
       exact <- .svem_forward_refit(Xmat, yvec,
                                    c(path_idx, candidate_groups[[gi]]))
-      if (!is.finite(exact$rss)) next
+      if (!is.finite(exact$rss)) {
+        if (exact$rank > length(path_idx)) rank_deficient <- c(rank_deficient, gi)
+        next
+      }
       rss_new <- exact$rss
     }
     out[gi] <- max(rss_new, 0)
   }
-  list(rss = out, rss_current = rss_current, near_perfect = FALSE)
+  list(rss = out, rss_current = rss_current, near_perfect = FALSE,
+       rank_deficient = rank_deficient)
 }
 
 ## Exact least-squares refit of one column subset (unique solution expected;
 ## rank-deficient subsets surface as NA coefficients for the caller to handle).
 .svem_forward_refit <- function(Xmat, yvec, idx) {
   sub <- Xmat[, idx, drop = FALSE]
-  cf  <- qr.coef(qr(sub, tol = .svem_forward_qr_tol), yvec)
+  qr_sub <- qr(sub, tol = .svem_forward_qr_tol)
+  cf  <- qr.coef(qr_sub, yvec)
   fitted <- if (anyNA(cf)) rep(NA_real_, length(yvec)) else as.vector(sub %*% cf)
   rss <- if (anyNA(cf)) NA_real_ else sum((yvec - fitted)^2)
-  list(coefficients = cf, rss = rss)
+  list(coefficients = cf, rss = rss, rank = qr_sub$rank)
 }
 
 ## Gaussian least-squares information criteria, computed up to the additive
@@ -470,6 +495,7 @@
   group_names  <- list(character(0L))
   selected     <- character(0L)
   truncated    <- FALSE
+  rank_deficient_terms <- character()
 
   int_col <- Xmat[, 1L]
   fit0    <- sum(int_col * yvec) / sum(int_col * int_col)
@@ -485,6 +511,8 @@
       break
     }
     step_eval <- .svem_forward_step(Xmat, yvec, path_idx, remaining, dust)
+    rank_deficient_terms <- union(rank_deficient_terms,
+                                   names(remaining)[step_eval$rank_deficient])
     if (step_eval$near_perfect) break
     rss <- step_eval$rss
     if (!any(is.finite(rss))) break
@@ -496,7 +524,16 @@
     remaining[[best_gi]] <- NULL
   }
 
-  list(points = points, group_names = group_names, truncated = truncated)
+  list(points = points, group_names = group_names, truncated = truncated,
+       rank_deficient_terms = rank_deficient_terms)
+}
+
+.svem_warn_aliased_terms <- function(terms) {
+  if (length(terms)) warning(
+    "Forward selection skipped partially aliased term(s): ",
+    paste(terms, collapse = ", "),
+    ". Check unused factor levels with droplevels() and empty interaction cells; ",
+    "whole terms must be jointly estimable.", call. = FALSE)
 }
 
 ## ----------------------------------------------------------------------------
@@ -609,6 +646,7 @@ forward_aicc <- function(formula, data,
   improvement_tolerance <- 1e-12
   path_idx       <- 1L
   selected_terms <- character(0L)
+  rank_deficient_terms <- character()
   remaining      <- groups
 
   mu0  <- mean(y_vec)
@@ -626,6 +664,8 @@ forward_aicc <- function(formula, data,
     step <- 1L
     while (length(remaining)) {
       step_eval <- .svem_forward_step(Xint, y_vec, path_idx, remaining, dust)
+      rank_deficient_terms <- union(rank_deficient_terms,
+                                     names(remaining)[step_eval$rank_deficient])
       if (step_eval$near_perfect) {
         if (length(remaining)) {
           warning("forward_aicc: selection stopped because the residual sum ",
@@ -692,6 +732,7 @@ forward_aicc <- function(formula, data,
 
   coef_matrix <- matrix(coef_full, nrow = 1L,
                         dimnames = list(NULL, names(coef_full)))
+  .svem_warn_aliased_terms(rank_deficient_terms)
 
   result <- list(
     parms            = coef_full,
@@ -711,9 +752,11 @@ forward_aicc <- function(formula, data,
     selected_terms   = selected_terms,
     selection_path   = selection_path,
     diagnostics      = list(
+      numerically_constant_columns = colnames(X)[design$numerically_constant_columns],
       k_summary       = c(k_median = length(path_idx), k_iqr = 0),
       fallback_rate   = 0,
       fallback_reasons = integer(0L),
+      rank_deficient_terms = rank_deficient_terms,
       candidate_terms = names(design$groups)
     ),
     actual_y         = y_vec,
@@ -785,6 +828,14 @@ forward_aicc <- function(formula, data,
 #'   \code{"Identity"} with \code{nBoot = 1} yields a single deterministic
 #'   forward-selection fit tuned by the chosen information criterion on the
 #'   training data.
+#'   The support guard does not guarantee positive residual degrees of
+#'   freedom. In particular, \code{"Identity"} gives \eqn{n_{eff,adm} = n},
+#'   so the wAIC/wBIC rule admits saturated path points with \eqn{k = n}.
+#'   A forward path can then interpolate the training data and be selected
+#'   by the log-scale criterion. Such members are flagged in
+#'   \code{member_diagnostics}. By comparison, \code{forward_aicc()} skips
+#'   models with nonpositive residual degrees of freedom for AIC/BIC;
+#'   its AICc criterion requires at least three residual degrees of freedom.
 #' @param response Optional character. When \code{formula} is a
 #'   \code{bigexp_spec}, names the response column to use on the left-hand
 #'   side.
@@ -880,7 +931,8 @@ svem_forward <- function(formula, data,
   objective_used <- if (auto_used) "wAIC" else objective
   auto_decision  <- if (auto_used) objective_used else NA_character_
 
-  structural_intercept_only <- p == 0L || length(unique(y_vec)) < 2L
+  structural_intercept_only <- length(design$numerically_constant_columns) == p ||
+    length(unique(y_vec)) < 2L
 
   coef_matrix <- matrix(NA_real_, nrow = nBoot, ncol = p + 1L)
   colnames(coef_matrix) <- c("(Intercept)", colnames(X))
@@ -889,6 +941,7 @@ svem_forward <- function(formula, data,
   fallback_reason <- rep(NA_character_, nBoot)
   n_eff_keep      <- numeric(nBoot)
   path_len_vec    <- integer(nBoot)
+  rank_deficient_terms <- character()
   trunc_vec       <- logical(nBoot)
   sel_counts      <- stats::setNames(numeric(length(groups)), names(groups))
   objective_value <- rep(NA_real_, nBoot)
@@ -933,8 +986,8 @@ svem_forward <- function(formula, data,
       objective_value[i] <- switch(
         objective_used,
         "wSSE" = sse_i,
-        "wAIC" = sumw * log(max(sse_i, eps) / sumw) + 2,
-        "wBIC" = sumw * log(max(sse_i, eps) / sumw) + log(n_eff_adm)
+      "wAIC" = sumw * log(max(sse_i, .Machine$double.xmin) / sumw) + 2,
+      "wBIC" = sumw * log(max(sse_i, .Machine$double.xmin) / sumw) + log(n_eff_adm)
       )
       next
     }
@@ -945,6 +998,7 @@ svem_forward <- function(formula, data,
 
     ceiling_k <- if (objective_used %in% c("wAIC", "wBIC")) n_eff_adm else NULL
     path <- .svem_forward_grow(Xw, yw, groups, k_slope_ceiling = ceiling_k)
+    rank_deficient_terms <- union(rank_deficient_terms, path$rank_deficient_terms)
     path_len_vec[i] <- length(path$points)
     trunc_vec[i]    <- path$truncated
 
@@ -968,9 +1022,9 @@ svem_forward <- function(formula, data,
       coef_list[[j]] <- cf
     }
 
-    sse_adj <- pmax(sse_w, eps)
+    sse_adj <- pmax(sse_w, .Machine$double.xmin)
     if (objective_used == "wSSE") {
-      scores <- sse_adj
+      scores <- sse_w
     } else {
       k_slope <- pmax(kvals - 1L, 0L)
       adm     <- k_slope < n_eff_adm
@@ -1058,11 +1112,13 @@ svem_forward <- function(formula, data,
   debias_fit      <- NULL
   y_pred_debiased <- NULL
   parms_debiased  <- avg_coefficients
+  calibration <- list(fit = NULL, reason = NULL)
 
   if (nBoot_used >= 10 && stats::var(y_pred) > 0) {
-    debias_fit <- stats::lm(y_vec ~ y_pred)
-    y_pred_debiased <- stats::predict(debias_fit)
-    ab <- try(stats::coef(debias_fit), silent = TRUE)
+    calibration <- .svem_fit_calibration(y_vec, y_pred, X, avg_coefficients)
+    debias_fit <- calibration$fit
+    y_pred_debiased <- if (!is.null(debias_fit)) stats::predict(debias_fit) else NULL
+    ab <- try(.svem_calibration_coefficients(debias_fit), silent = TRUE)
     if (!inherits(ab, "try-error") &&
         length(ab) >= 2 &&
         is.finite(ab[1]) && is.finite(ab[2])) {
@@ -1082,6 +1138,9 @@ svem_forward <- function(formula, data,
   }
 
   diagnostics <- list(
+    numerically_constant_columns = colnames(X)[design$numerically_constant_columns],
+    calibration_skip_reason = calibration$reason,
+    rank_deficient_terms = rank_deficient_terms,
     k_summary = c(k_median = stats::median(k_sel_vec),
                   k_iqr    = stats::IQR(k_sel_vec)),
     fallback_rate    = mean(fallbacks),
@@ -1091,6 +1150,7 @@ svem_forward <- function(formula, data,
     admissibility_truncation_rate = mean(trunc_vec),
     selection_frequencies = sort(sel_counts / nBoot_used, decreasing = TRUE)
   )
+  .svem_warn_aliased_terms(rank_deficient_terms)
 
   n_eff_adm_keep <- pmax(2, pmin(n, n_eff_keep))
   residual_df_support <- n - k_sel_vec

@@ -49,6 +49,12 @@
 #' @param exclude Optional vector or function for \code{glmnet}'s
 #'   \code{exclude=} argument. If a function, \code{cv.glmnet()} applies it
 #'   inside each training fold (requires \code{glmnet} >= 4.1-2).
+#'   The callback receives the original design columns, without any internal
+#'   compatibility column, and the current fit's response and weights.
+#'   Numerically constant columns remain excluded. When applying this mask
+#'   or handling a one-column design, callback returns are checked against
+#'   the original column indices (or an aligned logical vector); other
+#'   callbacks retain \code{glmnet}'s validation.
 #' @param relaxed Logical; if \code{TRUE}, call \code{glmnet()} and
 #'   \code{cv.glmnet()} with \code{relax = TRUE} and optionally a
 #'   \code{gamma} path (default \code{FALSE}). The repeated CV criterion is
@@ -286,38 +292,9 @@ glmnet_with_cv <- function(formula, data,
          call. = FALSE)
   }
 
-  # --- Helper: support size (number of active coefficients) ---
-  .support_size_one <- function(beta_col,
-                                base_tol        = 1e-7,
-                                count_intercept = TRUE) {
-    if (!is.numeric(beta_col) || length(beta_col) < 1L) {
-      return(NA_integer_)
-    }
-
-    if (length(beta_col) == 1L) {
-      return(if (count_intercept) 1L else 0L)
-    }
-
-    slope <- beta_col[-1L]
-    slope <- slope[is.finite(slope)]
-
-    if (!length(slope)) {
-      return(if (count_intercept) 1L else 0L)
-    }
-
-    max_slope <- max(abs(slope))
-    tol_rel   <- base_tol * max(1, max_slope)
-    tol_abs   <- base_tol
-    tol_j     <- max(tol_rel, tol_abs)
-
-    k_slope <- sum(abs(slope) > tol_j)
-
-    (if (count_intercept) 1L else 0L) + k_slope
-  }
-
-
   # --- Build model frame & matrix ---
   mf <- stats::model.frame(formula, data, na.action = stats::na.omit)
+  mf <- .svem_drop_unused_frame_levels(mf)
   if (nrow(mf) < 2L) {
     stop("glmnet_with_cv() requires at least two complete observations.",
          call. = FALSE)
@@ -327,6 +304,8 @@ glmnet_with_cv <- function(formula, data,
 
   y <- stats::model.response(mf)
   terms_full <- attr(mf, "terms")
+  .svem_reject_formula_offset(terms_full, "glmnet_with_cv")
+  model_frame_schema <- .svem_model_frame_schema(mf)
   if (!identical(attr(terms_full, "intercept"), 1L)) {
     stop(
       "glmnet_with_cv() follows the published intercept convention; formulas using `~ 0` or `- 1` are not supported.",
@@ -342,7 +321,7 @@ glmnet_with_cv <- function(formula, data,
     formula, terms_full, data_names = names(as.data.frame(data))
   )
   formula_store <- compact_formula$formula
-  terms_store <- compact_formula$terms
+  terms_store <- .svem_freeze_factor_predvars(compact_formula$terms, as.data.frame(data))
 
   X <- stats::model.matrix(formula, mf)
   # Capture the contrasts attribute BEFORE dropping the intercept column:
@@ -353,13 +332,14 @@ glmnet_with_cv <- function(formula, data,
   if (length(intercept_col)) X <- X[, -intercept_col, drop = FALSE]
   n <- nrow(X); p <- ncol(X)
 
-  predictor_vars <- base::all.vars(stats::delete.response(terms_full))
+  predictor_vars <- .svem_raw_predictor_vars(terms_full, names(as.data.frame(data)))
   data_frame <- as.data.frame(data)
   data_frame_used <- data_frame
   omitted_rows <- as.integer(attr(mf, "na.action"))
   if (length(omitted_rows) && nrow(data_frame_used) >= max(omitted_rows)) {
     data_frame_used <- data_frame_used[-omitted_rows, , drop = FALSE]
   }
+  data_frame_used <- .svem_drop_unused_raw_levels(data_frame_used, predictor_vars)
   var_classes <- stats::setNames(vapply(predictor_vars, function(v) {
     if (v %in% names(data_frame)) class(data_frame[[v]])[1L] else NA_character_
   }, character(1L)), predictor_vars)
@@ -447,6 +427,8 @@ glmnet_with_cv <- function(formula, data,
          call. = FALSE)
   }
   storage.mode(X) <- "double"
+  numerically_constant <- .svem_numerically_constant_columns(X)
+  calibration <- list(fit = NULL, reason = NULL)
 
   # --- Helper for intercept-only returns (used in both places) ---
   .cv_return_intercept_only <- function(
@@ -496,6 +478,7 @@ glmnet_with_cv <- function(formula, data,
       sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
     }
     schema <- list(
+      model_frame   = model_frame_schema,
       feature_names = feature_names,
       terms_str     = terms_str,
       xlevels       = xlevels,
@@ -512,13 +495,18 @@ glmnet_with_cv <- function(formula, data,
     k_final  <- 1L
     k_final0 <- 0L
     diagnostics <- list(
+      numerically_constant_columns = colnames(X)[numerically_constant],
+      calibration_skip_reason = calibration$reason,
       k_final              = k_final,
       k_final_no_intercept = k_final0,
       selected_gamma       = NA_real_
     )
 
     res <- list(
-      parms = c("(Intercept)" = intercept),
+      parms = c("(Intercept)" = intercept,
+                if (length(numerically_constant) == ncol(X)) {
+                  stats::setNames(numeric(ncol(X)), colnames(X))
+                }),
       glmnet_alpha = glmnet_alpha,
       best_alpha = NA_real_,
       best_lambda = NA_real_,
@@ -553,7 +541,7 @@ glmnet_with_cv <- function(formula, data,
   }
 
   # --- Intercept-only path (early return) ---
-  if (p == 0L) {
+  if (length(numerically_constant) == p) {
     return(.cv_return_intercept_only(
       fam         = fam,
       y_glm       = y_glm,
@@ -658,7 +646,8 @@ glmnet_with_cv <- function(formula, data,
   }
 
   glmnet_design <- .svem_prepare_glmnet_design(
-    X, args = dots, exclude = exclude
+    X, args = dots, exclude = exclude,
+    numerically_constant = numerically_constant
   )
   X_fit <- glmnet_design$x
   dots <- glmnet_design$args
@@ -1051,7 +1040,10 @@ glmnet_with_cv <- function(formula, data,
     best_coefs <- drop(coef_mat); names(best_coefs) <- rownames(coef_mat)
     y_pred <- drop(stats::predict(final_ridge, newx = X_fit, s = best_lambda, type = "response"))
 
-    debias_fit <- if (is_gaussian && length(y_glm) >= 10 && stats::var(y_pred) > 0) stats::lm(y_glm ~ y_pred) else NULL
+    calibration <- if (is_gaussian && length(y_glm) >= 10 && stats::var(y_pred) > 0) {
+      .svem_fit_calibration(y_glm, y_pred, X, best_coefs)
+    } else list(fit = NULL, reason = NULL)
+    debias_fit <- calibration$fit
     y_pred_debiased <- if (!is.null(debias_fit)) stats::predict(debias_fit) else NULL
 
     # Build schema
@@ -1083,6 +1075,7 @@ glmnet_with_cv <- function(formula, data,
       sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
     }
     schema <- list(
+      model_frame   = model_frame_schema,
       feature_names = feature_names,
       terms_str     = terms_str,
       xlevels       = xlevels,
@@ -1093,9 +1086,11 @@ glmnet_with_cv <- function(formula, data,
     )
 
     # Diagnostics: model size from ridge fallback
-    k_final  <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = TRUE)
-    k_final0 <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = FALSE)
+    k_final  <- .svem_solver_support(best_coefs, count_intercept = TRUE)
+    k_final0 <- .svem_solver_support(best_coefs, count_intercept = FALSE)
     diagnostics <- list(
+      numerically_constant_columns = colnames(X)[numerically_constant],
+      calibration_skip_reason = calibration$reason,
       k_final              = k_final,
       k_final_no_intercept = k_final0,
       selected_gamma       = 1
@@ -1228,10 +1223,13 @@ glmnet_with_cv <- function(formula, data,
   }
 
   # Diagnostics: model size for final selected model
-  k_final  <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = TRUE)
-  k_final0 <- .support_size_one(best_coefs, base_tol = 1e-7, count_intercept = FALSE)
+  k_final  <- .svem_solver_support(best_coefs, count_intercept = TRUE)
+  k_final0 <- .svem_solver_support(best_coefs, count_intercept = FALSE)
 
-  debias_fit <- if (is_gaussian && length(y_glm) >= 10 && stats::var(y_pred) > 0) stats::lm(y_glm ~ y_pred) else NULL
+  calibration <- if (is_gaussian && length(y_glm) >= 10 && stats::var(y_pred) > 0) {
+    .svem_fit_calibration(y_glm, y_pred, X, best_coefs)
+  } else list(fit = NULL, reason = NULL)
+  debias_fit <- calibration$fit
   y_pred_debiased <- if (!is.null(debias_fit)) stats::predict(debias_fit) else NULL
 
   cv_summary <- lapply(per_alpha, function(agg) {
@@ -1278,6 +1276,7 @@ glmnet_with_cv <- function(formula, data,
     sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
   }
   schema <- list(
+    model_frame   = model_frame_schema,
     feature_names = feature_names,
     terms_str     = terms_str,
     xlevels       = xlevels,
@@ -1288,6 +1287,8 @@ glmnet_with_cv <- function(formula, data,
   )
 
   diagnostics <- list(
+    numerically_constant_columns = colnames(X)[numerically_constant],
+    calibration_skip_reason = calibration$reason,
     k_final              = k_final,
     k_final_no_intercept = k_final0,
     selected_gamma       = best_gamma

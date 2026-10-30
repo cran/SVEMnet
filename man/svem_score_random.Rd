@@ -60,7 +60,9 @@ appended. When \code{specs} is supplied and the spec-limit augmentation
 succeeds, the same mean-level spec columns as in \code{score_table}
 (per-response \code{<resp>_p_in_spec_mean}, \code{<resp>_in_spec_point},
 and joint \code{p_joint_mean}, \code{joint_in_spec_point}) are appended
-as well.}
+as well. Recognized columns from an earlier scoring round are replaced
+with a warning. A generated output name that collides with a model
+predictor or an observed response variable is rejected before sampling.}
 
 \item{n}{Number of random samples to draw in the predictor space. This is
 the number of rows in the sampled table used for scoring.}
@@ -159,7 +161,7 @@ SVEM bootstrap ensemble via \code{svem_append_design_space_cols}.
 These quantities reflect uncertainty on the \emph{process mean} at each sampled
 setting under the fitted SVEM models, not unit-level predictive
 probabilities. If any error occurs in this spec-limit augmentation, it is
-caught; a message may be issued when \code{verbose = TRUE}, and the
+caught with a warning regardless of \code{verbose}, and the
 affected table(s) are returned without the spec-related columns.
 }
 \details{
@@ -278,6 +280,10 @@ of intervals may share \code{uncertainty_measure = 1}. Use a raw interval
 width column such as
 \code{<response>_ciw = <response>_upr - <response>_lwr} when selecting the
 single widest interval.
+If a model has fewer than two bootstrap members or its interval prediction
+fails, the CI columns are \code{NA}. Its uncertainty contribution is the
+neutral value \code{0.5} times its user weight, and a warning identifies the
+affected response. These fallback values do not measure fitted uncertainty.
 }
 
 \subsection{Spec-limit mean-level probabilities}{
@@ -306,8 +312,8 @@ These probabilities are defined on the \emph{conditional means} at each sampled
 setting, not on individual units or lots, and are best interpreted as
 ensemble-based assurance measures under the SVEM + FRW pipeline. If the
 augmentation step fails for any reason (for example, missing predictor
-columns or incompatible models), the error is caught; a message may be
-issued when \code{verbose = TRUE}, and \code{score_table} and/or
+columns or incompatible models), the error is caught with a warning
+regardless of \code{verbose}, and \code{score_table} and/or
 \code{original_data_scored} are returned without the spec-related columns.
 }
 }
@@ -540,6 +546,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }
 \seealso{
 \code{\link{SVEMnet}},

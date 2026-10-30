@@ -29,7 +29,10 @@ svem_significance_test_parallel(
 }
 \arguments{
 \item{formula}{A model formula. If \code{spec} is provided, the right-hand
-side is ignored and replaced by the locked expansion in \code{spec}.}
+side is ignored and replaced by the locked expansion in \code{spec}.
+A \code{bigexp_spec} attached by \code{bigexp_formula()} or stored on
+\code{spec$formula} is also honored. Response transformations are retained
+unless \code{response} explicitly overrides the response column.}
 
 \item{data}{A data frame containing the variables in the model.}
 
@@ -97,10 +100,10 @@ unbiased discrete sampler. Use \code{"Rounding"} to reproduce legacy WMT
 streams from SVEMnet 3.3.1 and earlier.}
 
 \item{spec}{Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
-If provided, the test reuses its locked expansion. The working formula
-becomes \code{bigexp_formula(spec, response_name)}, where
-\code{response_name} is taken from \code{response} if supplied, otherwise
-from the left-hand side of \code{formula}. Categorical sampling uses
+If provided, the test reuses its locked expansion while preserving the
+left-hand side of \code{formula}, unless \code{response} is supplied.
+If omitted, a valid spec attached to \code{formula} is used automatically.
+Categorical sampling uses
 \code{spec$levels}, and numeric sampling prefers \code{spec$num_range}
 when available.
 Discrete numeric predictors recorded by \code{bigexp_terms()}
@@ -347,6 +350,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }
 \seealso{
 \code{\link{SVEMnet}}, \code{\link{bigexp_terms}},

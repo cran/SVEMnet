@@ -322,6 +322,9 @@
 #'
 #' @param formula A model formula. If \code{spec} is provided, the right-hand
 #'   side is ignored and replaced by the locked expansion in \code{spec}.
+#'   A \code{bigexp_spec} attached by \code{bigexp_formula()} or stored on
+#'   \code{spec$formula} is also honored. Response transformations are retained
+#'   unless \code{response} explicitly overrides the response column.
 #' @param data A data frame containing the variables in the model.
 #' @param mixture_groups Optional list describing one or more mixture-factor
 #'   groups. Each element should be a list with components:
@@ -373,10 +376,10 @@
 #'   unbiased discrete sampler. Use \code{"Rounding"} to reproduce legacy WMT
 #'   streams from SVEMnet 3.3.1 and earlier.
 #' @param spec Optional \code{bigexp_spec} created by \code{bigexp_terms()}.
-#'   If provided, the test reuses its locked expansion. The working formula
-#'   becomes \code{bigexp_formula(spec, response_name)}, where
-#'   \code{response_name} is taken from \code{response} if supplied, otherwise
-#'   from the left-hand side of \code{formula}. Categorical sampling uses
+#'   If provided, the test reuses its locked expansion while preserving the
+#'   left-hand side of \code{formula}, unless \code{response} is supplied.
+#'   If omitted, a valid spec attached to \code{formula} is used automatically.
+#'   Categorical sampling uses
 #'   \code{spec$levels}, and numeric sampling prefers \code{spec$num_range}
 #'   when available.
 #'   Discrete numeric predictors recorded by \code{bigexp_terms()}
@@ -593,23 +596,46 @@ svem_significance_test_parallel <- function(
     rv
   }
 
+  # Formula helpers carry the same sampling contract as an explicit spec.
+  # Retain the formula's own LHS, including transformations, unless the caller
+  # explicitly requests a different response column.
+  spec_from_attr <- FALSE
+  if (is.null(spec)) {
+    attached_spec <- attr(formula, "bigexp_spec", exact = TRUE)
+    if (inherits(attached_spec, "bigexp_spec")) {
+      spec <- attached_spec
+      spec_from_attr <- TRUE
+    }
+  }
+
   # Determine response and working formula (optionally from spec)
   if (!is.null(spec)) {
+    if (!inherits(spec, "bigexp_spec")) {
+      stop("`spec` must be a bigexp_spec created by bigexp_terms().", call. = FALSE)
+    }
     resp_name <- if (!is.null(response)) {
-      if (!is.character(response) || length(response) != 1L || !nzchar(response))
+      if (!is.character(response) || length(response) != 1L ||
+          is.na(response) || !nzchar(response))
         stop("response must be a non-empty character scalar when provided.")
       response
     } else {
       .resp_var_from_formula(formula)
     }
     if (!resp_name %in% names(data)) stop("Response '", resp_name, "' not found in 'data'.")
-    f_use <- bigexp_formula(spec, resp_name)
+    if (!is.null(response)) {
+      f_use <- bigexp_formula(spec, resp_name)
+    } else {
+      f_use <- formula
+      if (!spec_from_attr) f_use[[3L]] <- spec$formula[[3L]]
+      attr(f_use, "bigexp_spec") <- spec
+    }
   } else {
     f_use <- formula
     resp_name <- .resp_var_from_formula(formula)
   }
 
   wmt_terms <- stats::terms(f_use, data = data)
+  .svem_reject_formula_offset(wmt_terms, "svem_significance_test_parallel")
   if (!identical(attr(wmt_terms, "intercept"), 1L) ||
       (!is.null(spec) && identical(spec$settings$intercept, FALSE))) {
     stop(
@@ -764,7 +790,7 @@ svem_significance_test_parallel <- function(
     categorical_vars  <- setdiff(categorical_vars, blocking_vars)
     continuous_vars   <- setdiff(continuous_vars, blocking_vars)
   } else {
-    predictor_vars   <- base::all.vars(stats::delete.response(stats::terms(f_use, data = data_fit)))
+    predictor_vars   <- .svem_raw_predictor_vars(wmt_terms, names(data_fit))
     # is.factor() (not class(z)[1L]) so ordered factors are categorical too;
     # class(ordered)[1L] is "ordered", which previously fell through to the
     # continuous sampler and produced all-NA predictions.
@@ -773,8 +799,8 @@ svem_significance_test_parallel <- function(
     }, logical(1L))
     categorical_vars <- predictor_vars[is_cat_col]
     continuous_vars  <- setdiff(predictor_vars, categorical_vars)
-    disc_vars        <- character(0L)
-    disc_levels      <- list()
+    disc_levels      <- .svem_direct_factor_support(wmt_terms, data_fit)
+    disc_vars        <- names(disc_levels)
     blocking_vars    <- character(0L)
   }
 

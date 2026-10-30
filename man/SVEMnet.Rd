@@ -90,8 +90,9 @@ penalty term. One of:
 \itemize{
 \item \code{"support"} (default): the number of nonzero coefficients
 (including the intercept), as described in the package references.
-This is the classical unbiased degrees-of-freedom estimator for the
-lasso (Zou, Hastie, and Tibshirani 2007).
+It is a model-size proxy. For a fixed lasso tuning parameter it
+estimates degrees of freedom under the usual full-rank assumptions;
+collinearity and adaptive tuning require additional care.
 \item \code{"edf"} (experimental, provided for further study): a
 gamma-blended effective degrees of freedom. For an elastic-net path
 point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
@@ -109,23 +110,35 @@ The relaxed refit's df is the rank of the active
 design. The blended complexity for relaxed mixing parameter
 \eqn{\gamma} is
 \eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
-For \eqn{\alpha = 1} (lasso) this reduces exactly to the support
-count, so \code{"edf"} differs from \code{"support"} only for
-\eqn{\alpha < 1} path points, whose support count overstates their
-effective complexity. Implemented for \code{family = "gaussian"}
+For \eqn{\alpha = 1} (lasso) this reduces to one plus the rank of
+the centered active design (Tibshirani and Taylor, 2012), equal to
+support when those columns are linearly independent. The numerical
+rank uses Gram eigenvalues exceeding \eqn{10^{-10}} times the largest
+eigenvalue; very ill-conditioned columns can therefore count as
+dependent. Support also overstates the conditional trace for
+\eqn{\alpha < 1}. Implemented for \code{family = "gaussian"}
 only; binomial fits fall back to \code{"support"} with a warning.
 }
-The admissibility guardrail (path points with more than
-\eqn{n_{eff,adm}} nonzero non-intercept coefficients are excluded) and
+The admissibility guardrail (the nonzero non-intercept count must be
+strictly less than \eqn{n_{eff,adm}}) and
 the reported model-size diagnostics always use the support count,
 regardless of this setting. \code{"edf"} changes only the complexity
 value inserted into the wAIC/wBIC penalty and is intended for simulation
 study of the alpha/gamma comparison; the published SVEM results use
-\code{"support"}.}
+\code{"support"}.
+This separate conservative constraint can exclude elastic-net models
+with many nonzeros even when their conditional EDF is small.}
 
 \item{...}{Additional arguments passed to \code{glmnet()}, such as
 \code{penalty.factor}, \code{lower.limits}, \code{upper.limits}, or
-\code{standardize.response}. Any user-supplied \code{weights} are ignored
+\code{standardize.response}. An \code{exclude} callback receives the
+original design columns and the current fit's response and weights;
+an internal compatibility column is never passed to it. Numerically
+constant columns remain excluded in addition to user exclusions. When
+applying this mask or handling a one-column design, the package checks
+that callback returns index the original columns (or form an aligned
+logical vector); other callbacks retain \code{glmnet}'s validation.
+Any user-supplied \code{weights} are ignored
 (SVEM supplies its own fractional random weights), any user-supplied
 \code{offset} is ignored (SVEMnet does not support offsets), and any
 user-supplied \code{standardize} is ignored; SVEMnet always calls
@@ -321,21 +334,35 @@ effective sample size \eqn{n_eff = (\sum_i w_i^{valid})^2 /
 to form \eqn{n_eff_adm}. The AIC-style selector uses a \eqn{2 k} penalty;
 the BIC-style selector uses a \eqn{\log(n_eff_adm) k} penalty, so that the
 loss term is scaled by total validation weight while the complexity penalty
-reflects the effective amount of information under unequal weights. For
-\code{"wAIC"} and \code{"wBIC"}, path points with more than
-\eqn{n_eff_adm} non-intercept coefficients are treated as inadmissible when
-evaluating the criterion.
+uses a weight-concentration adjustment. For \code{"wAIC"} and
+\code{"wBIC"}, the number of non-intercept coefficients must be strictly
+less than \eqn{n_eff_adm}; equality is inadmissible.
 
 Because the FRW validation weights are random rather than fixed design
 weights, these information-criterion scores are used heuristically for
 relative model comparison within each FRW replicate, rather than as exact
 AIC/BIC values.
+The training and validation copies reuse the same responses; they are not
+independent held-out samples. Kish size measures weight concentration for
+a weighted mean, not regression rank, leverage or selection complexity.
+The name \code{wAIC} does not refer to Bayesian WAIC. Also,
+\code{wBIC} has a smaller per-coefficient penalty than \code{wAIC} when
+\eqn{n_eff_adm < \exp(2)}. Normalizing weights to total \code{n} defines
+the loss-to-penalty scale; substituting Kish size in the loss would be a
+different selection rule.
 
 For diagnostics, SVEMnet reports the raw Kish effective sizes across
 bootstraps (see \code{diagnostics$n_eff_summary}), while \eqn{n_eff_adm}
 is used internally in the penalty and model-size guardrail. Near-interpolating
 path points are screened out via a simple model size guardrail before
-minimization. When \code{objective = "auto"}, SVEMnet uses \code{"wAIC"}.
+minimization. When \code{objective = "auto"}, Gaussian fits use
+\code{"wAIC"} and binomial fits use \code{"wBIC"}.
+This guard is a heuristic cap, not a guarantee of positive residual
+degrees of freedom. With \code{weight_scheme = "Identity"}, support may
+reach \code{n}; shrunken fits can still have positive SSE, while exact
+interpolation makes the Gaussian profile likelihood singular.
+Nonpositive support-based residual denominators are flagged in
+\code{member_diagnostics}.
 
 This structure (pseudo-likelihood using total weight and BIC penalty using a
 Kish-type effective sample size) parallels survey-weighted information
@@ -578,6 +605,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 
 Zou, H., Hastie, T., & Tibshirani, R. (2007). On the "degrees of freedom"
 of the lasso. \emph{The Annals of Statistics}, 35(5), 2173–2192.

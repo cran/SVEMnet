@@ -81,8 +81,9 @@
 #'   \itemize{
 #'     \item \code{"support"} (default): the number of nonzero coefficients
 #'       (including the intercept), as described in the package references.
-#'       This is the classical unbiased degrees-of-freedom estimator for the
-#'       lasso (Zou, Hastie, and Tibshirani 2007).
+#'       It is a model-size proxy. For a fixed lasso tuning parameter it
+#'       estimates degrees of freedom under the usual full-rank assumptions;
+#'       collinearity and adaptive tuning require additional care.
 #'     \item \code{"edf"} (experimental, provided for further study): a
 #'       gamma-blended effective degrees of freedom. For an elastic-net path
 #'       point with active set \eqn{A}, penalty \eqn{\lambda}, and mixing
@@ -100,19 +101,24 @@
 #'       design. The blended complexity for relaxed mixing parameter
 #'       \eqn{\gamma} is
 #'       \eqn{1 + \gamma \, df_{enet} + (1-\gamma) \, rank(A)}.
-#'       For \eqn{\alpha = 1} (lasso) this reduces exactly to the support
-#'       count, so \code{"edf"} differs from \code{"support"} only for
-#'       \eqn{\alpha < 1} path points, whose support count overstates their
-#'       effective complexity. Implemented for \code{family = "gaussian"}
+#'       For \eqn{\alpha = 1} (lasso) this reduces to one plus the rank of
+#'       the centered active design (Tibshirani and Taylor, 2012), equal to
+#'       support when those columns are linearly independent. The numerical
+#'       rank uses Gram eigenvalues exceeding \eqn{10^{-10}} times the largest
+#'       eigenvalue; very ill-conditioned columns can therefore count as
+#'       dependent. Support also overstates the conditional trace for
+#'       \eqn{\alpha < 1}. Implemented for \code{family = "gaussian"}
 #'       only; binomial fits fall back to \code{"support"} with a warning.
 #'   }
-#'   The admissibility guardrail (path points with more than
-#'   \eqn{n_{eff,adm}} nonzero non-intercept coefficients are excluded) and
+#'   The admissibility guardrail (the nonzero non-intercept count must be
+#'   strictly less than \eqn{n_{eff,adm}}) and
 #'   the reported model-size diagnostics always use the support count,
 #'   regardless of this setting. \code{"edf"} changes only the complexity
 #'   value inserted into the wAIC/wBIC penalty and is intended for simulation
 #'   study of the alpha/gamma comparison; the published SVEM results use
 #'   \code{"support"}.
+#'   This separate conservative constraint can exclude elastic-net models
+#'   with many nonzeros even when their conditional EDF is small.
 #' @param store_member_weights Logical; default \code{FALSE}. If \code{TRUE},
 #'   retain the exact per-member uniforms and the mean-one training and
 #'   validation weights in \code{member_weights}. This can materially increase
@@ -121,7 +127,14 @@
 #'   calibrated confidence or prediction intervals.
 #' @param ... Additional arguments passed to \code{glmnet()}, such as
 #'   \code{penalty.factor}, \code{lower.limits}, \code{upper.limits}, or
-#'   \code{standardize.response}. Any user-supplied \code{weights} are ignored
+#'   \code{standardize.response}. An \code{exclude} callback receives the
+#'   original design columns and the current fit's response and weights;
+#'   an internal compatibility column is never passed to it. Numerically
+#'   constant columns remain excluded in addition to user exclusions. When
+#'   applying this mask or handling a one-column design, the package checks
+#'   that callback returns index the original columns (or form an aligned
+#'   logical vector); other callbacks retain \code{glmnet}'s validation.
+#'   Any user-supplied \code{weights} are ignored
 #'   (SVEM supplies its own fractional random weights), any user-supplied
 #'   \code{offset} is ignored (SVEMnet does not support offsets), and any
 #'   user-supplied \code{standardize} is ignored; SVEMnet always calls
@@ -286,21 +299,35 @@
 #' to form \eqn{n_eff_adm}. The AIC-style selector uses a \eqn{2 k} penalty;
 #' the BIC-style selector uses a \eqn{\log(n_eff_adm) k} penalty, so that the
 #' loss term is scaled by total validation weight while the complexity penalty
-#' reflects the effective amount of information under unequal weights. For
-#' \code{"wAIC"} and \code{"wBIC"}, path points with more than
-#' \eqn{n_eff_adm} non-intercept coefficients are treated as inadmissible when
-#' evaluating the criterion.
+#' uses a weight-concentration adjustment. For \code{"wAIC"} and
+#' \code{"wBIC"}, the number of non-intercept coefficients must be strictly
+#' less than \eqn{n_eff_adm}; equality is inadmissible.
 #'
 #' Because the FRW validation weights are random rather than fixed design
 #' weights, these information-criterion scores are used heuristically for
 #' relative model comparison within each FRW replicate, rather than as exact
 #' AIC/BIC values.
+#' The training and validation copies reuse the same responses; they are not
+#' independent held-out samples. Kish size measures weight concentration for
+#' a weighted mean, not regression rank, leverage or selection complexity.
+#' The name \code{wAIC} does not refer to Bayesian WAIC. Also,
+#' \code{wBIC} has a smaller per-coefficient penalty than \code{wAIC} when
+#' \eqn{n_eff_adm < \exp(2)}. Normalizing weights to total \code{n} defines
+#' the loss-to-penalty scale; substituting Kish size in the loss would be a
+#' different selection rule.
 #'
 #' For diagnostics, SVEMnet reports the raw Kish effective sizes across
 #' bootstraps (see \code{diagnostics$n_eff_summary}), while \eqn{n_eff_adm}
 #' is used internally in the penalty and model-size guardrail. Near-interpolating
 #' path points are screened out via a simple model size guardrail before
-#' minimization. When \code{objective = "auto"}, SVEMnet uses \code{"wAIC"}.
+#' minimization. When \code{objective = "auto"}, Gaussian fits use
+#' \code{"wAIC"} and binomial fits use \code{"wBIC"}.
+#' This guard is a heuristic cap, not a guarantee of positive residual
+#' degrees of freedom. With \code{weight_scheme = "Identity"}, support may
+#' reach \code{n}; shrunken fits can still have positive SSE, while exact
+#' interpolation makes the Gaussian profile likelihood singular.
+#' Nonpositive support-based residual denominators are flagged in
+#' \code{member_diagnostics}.
 #'
 #' This structure (pseudo-likelihood using total weight and BIC penalty using a
 #' Kish-type effective sample size) parallels survey-weighted information
@@ -661,6 +688,7 @@ SVEMnet <- function(formula, data,
     # Plain formula path, no bigexp_spec
     f_use <- formula
     mf    <- stats::model.frame(f_use, data, na.action = stats::na.omit)
+    mf <- .svem_drop_unused_frame_levels(mf)
     if (nrow(mf) < 2L) stop("Not enough complete cases after NA removal.")
     contrasts_opts_used <- getOption("contrasts")
     X       <- stats::model.matrix(f_use, mf)
@@ -673,6 +701,8 @@ SVEMnet <- function(formula, data,
   y <- stats::model.response(mf)
 
   terms_full <- attr(mf, "terms")
+  .svem_reject_formula_offset(terms_full, "SVEMnet")
+  model_frame_schema <- .svem_model_frame_schema(mf)
   if (!identical(attr(terms_full, "intercept"), 1L) ||
       (using_spec && identical(spec$settings$intercept, FALSE))) {
     stop(
@@ -730,7 +760,8 @@ SVEMnet <- function(formula, data,
   storage.mode(X) <- "double"
 
   n <- nrow(X); p <- ncol(X); nobs <- n; nparm <- p + 1L
-  structural_intercept_only <- p == 0L ||
+  numerically_constant <- .svem_numerically_constant_columns(X)
+  structural_intercept_only <- length(numerically_constant) == p ||
     (fam_name == "gaussian" && length(unique(y_vec)) < 2L) ||
     (fam_name == "binomial" && length(unique(y_vec)) < 2L)
 
@@ -739,14 +770,17 @@ SVEMnet <- function(formula, data,
     f_use, terms_full, data_names = names(schema_data)
   )
   f_store <- compact_formula$formula
-  terms_clean <- compact_formula$terms
+  terms_clean <- .svem_freeze_factor_predvars(compact_formula$terms, schema_data)
   schema_data_used <- schema_data
   omitted_rows <- as.integer(attr(mf, "na.action"))
   if (length(omitted_rows) && nrow(schema_data_used) >= max(omitted_rows)) {
     schema_data_used <- schema_data_used[-omitted_rows, , drop = FALSE]
   }
 
-  predictor_vars <- base::all.vars(stats::delete.response(terms_full))
+  predictor_vars <- .svem_raw_predictor_vars(terms_full, names(schema_data))
+  if (!using_spec) {
+    schema_data_used <- .svem_drop_unused_raw_levels(schema_data_used, predictor_vars)
+  }
 
   ## ---- guard: response must not also be a predictor ----
   ## .svem_response_vars() handles transformed responses such as log(y),
@@ -763,7 +797,7 @@ SVEMnet <- function(formula, data,
   }
 
   var_classes <- setNames(vapply(predictor_vars, function(v) {
-    if (v %in% names(schema_data)) class(schema_data[[v]])[1] else NA_character_
+    if (v %in% names(data)) class(data[[v]])[1] else NA_character_
   }, character(1)), predictor_vars)
 
   xlevels <- list()
@@ -772,11 +806,14 @@ SVEMnet <- function(formula, data,
     if (v %in% names(schema_data_used)) {
       if (is.factor(schema_data_used[[v]])) {
         xlevels[[v]] <- levels(schema_data_used[[v]])
-        factor_levels[[v]] <- levels(schema_data_used[[v]])
+        lev <- levels(schema_data_used[[v]])
+        factor_levels[[v]] <- lev[lev %in% as.character(schema_data_used[[v]])]
       } else if (is.character(schema_data_used[[v]])) {
         lev <- sort(unique(as.character(schema_data_used[[v]])))
         xlevels[[v]] <- lev
         factor_levels[[v]] <- lev
+      } else if (is.logical(schema_data_used[[v]])) {
+        factor_levels[[v]] <- c("FALSE", "TRUE")[c(FALSE, TRUE) %in% schema_data_used[[v]]]
       }
     }
   }
@@ -790,7 +827,8 @@ SVEMnet <- function(formula, data,
     x_chr <- as.character(x)
     x_chr <- x_chr[!is.na(x_chr)]
     if (!length(x_chr)) return(NA_character_)
-    tab <- table(x_chr)
+    lev <- if (is.factor(x)) levels(x) else sort(unique(x_chr))
+    tab <- table(factor(x_chr, levels = lev))
     if (!length(tab)) return(NA_character_)
     maxfreq <- max(tab)
     modes <- names(tab)[tab == maxfreq]
@@ -838,7 +876,7 @@ SVEMnet <- function(formula, data,
       num_vars <- predictor_vars[predictor_vars %in% names(spec$is_cat) & !spec$is_cat[predictor_vars]]
     } else {
       num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
-        v %in% colnames(mf) && is.numeric(mf[[v]])
+        v %in% names(schema_data_used) && is.numeric(schema_data_used[[v]])
       }, logical(1))]
     }
 
@@ -851,22 +889,15 @@ SVEMnet <- function(formula, data,
                            dimnames = list(c("min","max"), NULL))
     }
 
-    # Prefer locked factor levels for sampling, too
-    if (!is.null(spec$levels) && length(spec$levels)) {
-      fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
-      fl <- fl[!vapply(fl, is.null, logical(1))]
-      if (length(fl)) factor_levels <- fl
-    }
-
   } else {
     num_vars <- predictor_vars[vapply(predictor_vars, function(v) {
-      v %in% colnames(mf) && is.numeric(mf[[v]])
+      v %in% names(schema_data_used) && is.numeric(schema_data_used[[v]])
     }, logical(1))]
     if (length(num_vars)) {
       rng_mat <- vapply(num_vars, function(v) {
-        r <- range(mf[[v]], na.rm = TRUE)
+        r <- range(schema_data_used[[v]], na.rm = TRUE)
         if (!all(is.finite(r)) || r[1] == r[2]) {
-          r <- c(min(mf[[v]], na.rm = TRUE), max(mf[[v]], na.rm = TRUE))
+          r <- c(min(schema_data_used[[v]], na.rm = TRUE), max(schema_data_used[[v]], na.rm = TRUE))
         }
         r
       }, numeric(2))
@@ -876,6 +907,13 @@ SVEMnet <- function(formula, data,
       num_ranges <- matrix(numeric(0), nrow = 2, ncol = 0,
                            dimnames = list(c("min","max"), NULL))
     }
+  }
+
+  # Locked categorical support applies even to factor-only specifications.
+  if (using_spec && !is.null(spec$levels) && length(spec$levels)) {
+    fl <- spec$levels[intersect(names(spec$levels), predictor_vars)]
+    fl <- fl[!vapply(fl, is.null, logical(1))]
+    if (length(fl)) factor_levels <- fl
   }
 
   # Discrete numeric levels recorded in a bigexp_spec (for downstream sampling only)
@@ -902,6 +940,12 @@ SVEMnet <- function(formula, data,
 
     if (length(dn)) discrete_numeric_vars <- dn
   }
+
+  direct_support <- .svem_direct_factor_support(terms_clean, schema_data_used)
+  for (v in setdiff(names(direct_support), names(discrete_numeric_levels))) {
+    discrete_numeric_levels[[v]] <- direct_support[[v]]
+  }
+  discrete_numeric_vars <- union(discrete_numeric_vars, names(direct_support))
 
 
 
@@ -943,39 +987,11 @@ SVEMnet <- function(formula, data,
   training_weights  <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
   validation_weights <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
 
-  setup <- .svem_glmnet_setup(X, list(...), fam_name, relax_flag)
+  setup <- .svem_glmnet_setup(X, list(...), fam_name, relax_flag,
+                             numerically_constant = numerically_constant)
   glmnet_design <- setup$design
   X_glm <- glmnet_design$x
   glmnet_base_args <- setup$args
-
-  .support_size_one <- function(beta_col,
-                                base_tol        = 1e-7,
-                                count_intercept = TRUE) {
-    if (!is.numeric(beta_col) || length(beta_col) < 1L) {
-      return(NA_integer_)
-    }
-
-    if (length(beta_col) == 1L) {
-      return(if (count_intercept) 1L else 0L)
-    }
-
-    slope <- beta_col[-1L]
-    slope <- slope[is.finite(slope)]
-
-    if (!length(slope)) {
-      return(if (count_intercept) 1L else 0L)
-    }
-
-    max_slope <- max(abs(slope))
-    tol_rel   <- base_tol * max(1, max_slope)
-    tol_abs   <- base_tol
-    tol_j     <- max(tol_rel, tol_abs)
-
-    k_slope <- sum(abs(slope) > tol_j)
-
-    (if (count_intercept) 1L else 0L) + k_slope
-  }
-
 
   ## ---- bootstrap loop ----
   for (i in seq_len(nBoot)) {
@@ -1022,8 +1038,8 @@ SVEMnet <- function(formula, data,
         objective_value[i] <- switch(
           objective_used,
           "wSSE" = sse_i,
-          "wAIC" = sumw * log(max(sse_i, eps) / sumw) + 2,
-          "wBIC" = sumw * log(max(sse_i, eps) / sumw) + log(n_eff_adm)
+          "wAIC" = sumw * log(max(sse_i, .Machine$double.xmin) / sumw) + 2,
+          "wBIC" = sumw * log(max(sse_i, .Machine$double.xmin) / sumw) + log(n_eff_adm)
         )
       }
       next
@@ -1071,7 +1087,7 @@ SVEMnet <- function(formula, data,
           res <- pred_link - y_vec
           val_core <- as.vector(crossprod(w_valid, res^2))  # weighted SSE
           val_core[!is.finite(val_core)] <- Inf
-          adj_val_core <- pmax(val_core, .Machine$double.eps)
+          adj_val_core <- pmax(val_core, .Machine$double.xmin)
         } else {  # binomial: negative log-likelihood
           mu <- 1 / (1 + exp(-pred_link))
           mu <- pmin(pmax(mu, 1e-8), 1 - 1e-8)
@@ -1082,21 +1098,17 @@ SVEMnet <- function(formula, data,
           adj_val_core <- pmax(val_core, .Machine$double.eps)
         }
 
-        k_raw <- integer(L)
-        for (jj in seq_len(L)) {
-          k_raw[jj] <- .support_size_one(coef_path[, jj], 1e-7, TRUE)
-        }
+        k_raw <- as.integer(.svem_solver_support_path(coef_path))
         if (length(k_raw) != length(adj_val_core)) next
 
         k_slope <- pmax(0L, k_raw - 1L)
         k_eff   <- 1L + k_slope
         logN_pen <- log(n_eff_adm)
 
-        ## complexity penalty values: identical to k_eff for "support" and
-        ## for lasso (alpha = 1) paths, where the support count is already
-        ## the classical lasso df (Zou, Hastie, and Tibshirani 2007).
-        ## For "edf" with alpha < 1, replace the count with the
-        ## gamma-blended effective df at each admissible path point.
+        ## The "support" penalty uses k_eff. Conditional "edf" uses one
+        ## plus the numerical rank of the active weighted, centered design
+        ## at alpha = 1, equal to support only for independent active columns.
+        ## At alpha < 1 it uses the gamma-blended conditional trace.
         k_pen <- k_eff
         edf_path <- if (fam_name == "gaussian") as.numeric(k_eff) else
           rep(NA_real_, L)
@@ -1110,7 +1122,7 @@ SVEMnet <- function(formula, data,
           n_like <- sumw
           mse_w  <- adj_val_core / n_like
           metric <- switch(objective_used,
-                           "wSSE" = adj_val_core,
+                           "wSSE" = val_core,
                            "wAIC" = {
                              out <- rep(Inf, L)
                              mask <- (k_slope < n_eff_adm)
@@ -1291,12 +1303,14 @@ SVEMnet <- function(formula, data,
   debias_fit <- NULL
   y_pred_debiased <- NULL
   parms_debiased  <- avg_coefficients
+  calibration <- list(fit = NULL, reason = NULL)
 
   if (fam_name == "gaussian" && nBoot_used >= 10 && stats::var(y_pred) > 0) {  # fix #2
-    debias_fit <- stats::lm(y_vec ~ y_pred)
-    y_pred_debiased <- stats::predict(debias_fit)
+    calibration <- .svem_fit_calibration(y_vec, y_pred, X, avg_coefficients)
+    debias_fit <- calibration$fit
+    y_pred_debiased <- if (!is.null(debias_fit)) stats::predict(debias_fit) else NULL
     parms_debiased <- avg_coefficients
-    ab <- try(stats::coef(debias_fit), silent = TRUE)
+    ab <- try(.svem_calibration_coefficients(debias_fit), silent = TRUE)
     if (!inherits(ab, "try-error") &&
         length(ab) >= 2 &&
         is.finite(ab[1]) && is.finite(ab[2])) {
@@ -1316,6 +1330,8 @@ SVEMnet <- function(formula, data,
   }
 
   diagnostics <- list(
+    numerically_constant_columns = colnames(X)[numerically_constant],
+    calibration_skip_reason = calibration$reason,
     k_summary = c(k_median = stats::median(k_sel_vec),
                   k_iqr    = stats::IQR(k_sel_vec)),
     fallback_rate = mean(fallbacks),
@@ -1395,6 +1411,7 @@ SVEMnet <- function(formula, data,
     sprintf("h%08x_%d", sum(as.integer(bytes)), length(bytes))
   }
   schema <- list(
+    model_frame       = model_frame_schema,
     feature_names     = feature_names,
     terms_str         = terms_str,
     xlevels           = xlevels,

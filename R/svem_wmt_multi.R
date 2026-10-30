@@ -37,6 +37,13 @@
 #'   \code{\link{svem_significance_test_parallel}}. By default this is
 #'   \code{list(seed = 123)} so that WMT calls are reproducible; you may
 #'   override or extend this (e.g. \code{list(seed = 999, nPerm = 300)}).
+#'   A nonempty list must be fully named. Arguments \code{formula},
+#'   \code{data}, \code{mixture_groups}, and \code{response} are controlled by
+#'   this wrapper and ignored with a warning; each response, including any
+#'   transformation, comes from its formula. Other duplicated names are rejected.
+#'   A shared \code{spec} is allowed: it supplies the expansion and sampling
+#'   schema for every formula, takes precedence over attached specifications,
+#'   and preserves each formula's left-hand side.
 #'   The WMT is serial by default. Pass \code{nCore} explicitly to opt into
 #'   parallel execution, and use \code{rng_sample_kind = "Rounding"} only when
 #'   reproducing the legacy pre-3.4.0 random stream.
@@ -57,10 +64,13 @@
 #'   \item{\code{p_values}}{Named numeric vector of per-response p-values
 #'         (bounded away from 0/1), or \code{NA} when unavailable.}
 #'   \item{\code{multipliers}}{Named numeric vector of per-response WMT
-#'         multipliers derived from the p-values using \code{wmt_transform}.}
+#'         multipliers derived from the p-values using \code{wmt_transform}.
+#'         Failed tests retain multiplier 1 and emit a warning regardless of
+#'         \code{verbose}; this fallback is not evidence of model significance.}
 #'   \item{\code{wmt_transform}}{The transformation used.}
-#'   \item{\code{wmt_control}}{The list of arguments passed through to
-#'         \code{svem_significance_test_parallel()}.}
+#'   \item{\code{wmt_control}}{The remaining arguments passed through to
+#'         \code{svem_significance_test_parallel()} after removing the
+#'         wrapper-controlled entries.}
 #' }
 #'
 #' @seealso
@@ -134,6 +144,13 @@ svem_wmt_multi <- function(formulas,
   if (!is.list(wmt_control)) {
     stop("`wmt_control` must be a list (or an empty list).")
   }
+  control_names <- names(wmt_control)
+  if (length(wmt_control) &&
+      (is.null(control_names) || anyNA(control_names) ||
+       any(!nzchar(control_names)))) {
+    stop("`wmt_control` must be a fully named list of ",
+         "svem_significance_test_parallel() arguments.", call. = FALSE)
+  }
 
   wmt_transform <- match.arg(wmt_transform)
 
@@ -161,14 +178,21 @@ svem_wmt_multi <- function(formulas,
   names(formulas) <- f_names
 
   # ---- protect required args from being overridden via wmt_control ----
-  protected <- c("formula", "data", "mixture_groups")
-  if (length(intersect(names(wmt_control), protected))) {
+  protected <- c("formula", "data", "mixture_groups", "response")
+  protected_entries <- control_names %in% protected
+  if (any(protected_entries)) {
     warning(
       "svem_wmt_multi(): ignoring the following entries in `wmt_control` because they ",
-      "are supplied by svem_wmt_multi itself: ",
-      paste(intersect(names(wmt_control), protected), collapse = ", ")
+      "are supplied by svem_wmt_multi itself (responses come from `formulas`): ",
+      paste(unique(control_names[protected_entries]), collapse = ", "),
+      call. = FALSE
     )
-    wmt_control[intersect(names(wmt_control), protected)] <- NULL
+    wmt_control <- wmt_control[!protected_entries]
+  }
+  duplicate_controls <- unique(names(wmt_control)[duplicated(names(wmt_control))])
+  if (length(duplicate_controls)) {
+    stop("`wmt_control` has duplicated entries: ",
+         paste(duplicate_controls, collapse = ", "), call. = FALSE)
   }
 
   # transform constants (aligned with svem_score_random)
@@ -196,7 +220,8 @@ svem_wmt_multi <- function(formulas,
       list(
         formula        = fml,
         data           = data,
-        mixture_groups = mixture_groups
+        mixture_groups = mixture_groups,
+        response       = NULL
       ),
       wmt_control
     )
@@ -204,9 +229,10 @@ svem_wmt_multi <- function(formulas,
     wmt_obj <- tryCatch(
       do.call(svem_significance_test_parallel, args),
       error = function(e) {
-        if (isTRUE(verbose)) {
-          cat(" -", nm, ": WMT error ->", conditionMessage(e), "\n")
-        }
+        warning("svem_wmt_multi(): whole-model test failed for response '", nm,
+                "': ", conditionMessage(e),
+                "; retaining NULL result, NA p-value, and multiplier 1.",
+                call. = FALSE)
         NULL
       }
     )

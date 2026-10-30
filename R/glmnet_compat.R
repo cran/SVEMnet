@@ -17,6 +17,273 @@
            error = function(e) NA_character_)
 }
 
+# Internal selection uses the solver's exact active set. glmnet returns exact
+# zeros at stored path knots; a raw-coefficient tolerance changes support when
+# predictor or response units change.
+.svem_solver_active <- function(beta) {
+  slope <- beta[-1L]
+  which(is.finite(slope) & slope != 0)
+}
+
+.svem_solver_support <- function(beta, count_intercept = TRUE) {
+  if (!is.numeric(beta) || !length(beta)) return(NA_integer_)
+  as.integer(length(.svem_solver_active(beta)) + as.integer(count_intercept))
+}
+
+.svem_solver_support_path <- function(coefficients, count_intercept = TRUE) {
+  slopes <- coefficients[-1L, , drop = FALSE]
+  as.integer(count_intercept) + colSums(is.finite(slopes) & slopes != 0)
+}
+
+.svem_reject_formula_offset <- function(terms, fun_name) {
+  if (length(attr(terms, "offset"))) {
+    stop(fun_name, " does not support formula offset() terms.", call. = FALSE)
+  }
+  invisible(NULL)
+}
+
+.svem_raw_predictor_vars <- function(terms, data_names) {
+  intersect(all.vars(stats::delete.response(terms)), data_names)
+}
+
+# Plain formulas estimate only levels present among complete training rows.
+# Frozen bigexp specifications deliberately bypass this preparation.
+.svem_drop_unused_frame_levels <- function(mf) {
+  vars <- names(mf)
+  if (isTRUE(attr(attr(mf, "terms"), "response") == 1L)) vars <- vars[-1L]
+  removed <- character()
+  for (v in vars) {
+    if (!is.factor(mf[[v]])) next
+    value <- droplevels(mf[[v]])
+    absent <- setdiff(levels(mf[[v]]), levels(value))
+    if (length(absent)) {
+      if (!is.null(attr(mf[[v]], "contrasts"))) {
+        stop("Cannot remove unobserved levels from predictor '", v,
+             "' with explicit contrasts. Drop unused levels before defining ",
+             "the contrasts, or use a locked bigexp specification.", call. = FALSE)
+      }
+      removed <- c(removed, paste0(v, " (", paste(absent, collapse = ", "), ")"))
+      mf[[v]] <- value
+    }
+  }
+  if (length(removed)) {
+    warning("Removed unobserved categorical level(s) from formula predictors: ",
+            paste(removed, collapse = "; "), ".", call. = FALSE)
+  }
+  mf
+}
+
+.svem_drop_unused_raw_levels <- function(data, predictor_vars) {
+  for (v in intersect(predictor_vars, names(data))) {
+    if (is.factor(data[[v]])) data[[v]] <- droplevels(data[[v]])
+  }
+  data
+}
+
+# Model-frame levels also cover expressions such as factor(x) and paste(a, b).
+# Keep these distinct from raw-variable levels and sampling supports.
+.svem_model_frame_schema <- function(mf) {
+  tt <- attr(mf, "terms")
+  vars <- names(mf)
+  if (isTRUE(attr(tt, "response") == 1L)) vars <- vars[-1L]
+  vars <- vars[vapply(mf[vars], function(x) is.factor(x) || is.character(x), logical(1))]
+  levels <- lapply(mf[vars], function(x) {
+    if (is.factor(x)) levels(x) else sort(unique(x[!is.na(x)]))
+  })
+  list(levels = levels,
+       ordered = vars[vapply(mf[vars], is.ordered, logical(1))])
+}
+
+.svem_harmonize_raw_levels <- function(object, newdata) {
+  xlev <- object$xlevels
+  if (is.null(xlev) || !is.list(xlev)) return(newdata)
+  classes <- .svem_training_var_classes(object)
+  for (v in intersect(names(xlev), names(newdata))) {
+    ordered <- !isTRUE(object$used_bigexp_spec) &&
+      (is.ordered(newdata[[v]]) || identical(unname(classes[v]), "ordered"))
+    newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]],
+                           ordered = ordered,
+                           exclude = if (anyNA(xlev[[v]])) NULL else NA)
+  }
+  newdata
+}
+
+.svem_harmonize_model_frame <- function(object, mf) {
+  saved <- object$schema$model_frame
+  # Old serialized objects have no evaluated-frame metadata.
+  if (is.null(saved) || is.null(saved$levels)) return(mf)
+  for (v in intersect(names(saved$levels), names(mf))) {
+    mf[[v]] <- factor(as.character(mf[[v]]), levels = saved$levels[[v]],
+                       ordered = v %in% saved$ordered,
+                       exclude = if (anyNA(saved$levels[[v]])) NULL else NA)
+  }
+  mf
+}
+
+# Only direct categorical conversions establish discrete numeric support.
+# A general transform such as cut(x, ...) does not make x itself discrete.
+.svem_base_factor_call <- function(expr, env) {
+  if (!is.call(expr)) return(NULL)
+  head <- expr[[1L]]
+  name <- if (is.symbol(head)) as.character(head) else ""
+  qualified <- is.call(head) && length(head) == 3L &&
+    as.character(head[[1L]]) %in% c("::", ":::") &&
+    identical(as.character(head[[2L]]), "base")
+  if (qualified) name <- as.character(head[[3L]])
+  if (!name %in% c("factor", "as.factor")) return(NULL)
+  base_fun <- get(name, baseenv())
+  if (!qualified && !identical(get0(name, envir = env, mode = "function",
+                                    inherits = TRUE), base_fun)) return(NULL)
+  list(name = name, call = match.call(base_fun, expr))
+}
+
+.svem_freeze_factor_predvars <- function(terms, data) {
+  env <- attr(terms, ".Environment")
+  walk <- function(expr) {
+    if (!is.call(expr)) return(expr)
+    conversion <- .svem_base_factor_call(expr, env)
+    if (!is.null(conversion)) {
+      matched <- conversion$call
+      if (is.symbol(matched$x) && as.character(matched$x) %in% names(data)) {
+        if (identical(conversion$name, "factor") &&
+            !"levels" %in% names(matched)) {
+          raw_call <- matched
+          raw_call[[1L]] <- quote(base::factor)
+          raw_call$labels <- NULL
+          raw_levels <- levels(eval(raw_call, data, env))
+          expr <- matched
+          expr[[1L]] <- quote(base::factor)
+          expr$levels <- raw_levels
+        } else if (identical(conversion$name, "as.factor")) {
+          value <- eval(matched, data, env)
+          expr <- as.call(list(quote(base::factor), x = matched$x,
+                              levels = levels(value), ordered = is.ordered(value),
+                              exclude = if (anyNA(levels(value))) NULL else NA))
+        }
+      }
+    }
+    # relevel(g, ref) also needs an omitted reference level to exist while
+    # the call is evaluated; the saved final frame still rejects that level.
+    head <- expr[[1L]]
+    is_relevel <- identical(head, as.name("relevel")) &&
+      identical(get0("relevel", envir = env, mode = "function", inherits = TRUE),
+                stats::relevel)
+    qualified_relevel <- is.call(head) && length(head) == 3L &&
+      as.character(head[[1L]]) %in% c("::", ":::") &&
+      identical(as.character(head[[2L]]), "stats") &&
+      identical(as.character(head[[3L]]), "relevel")
+    if (is_relevel || qualified_relevel) {
+      matched <- match.call(stats::relevel, expr)
+      if (is.symbol(matched$x) && as.character(matched$x) %in% names(data)) {
+        raw <- data[[as.character(matched$x)]]
+        if (identical(class(raw), "factor")) {
+          expr <- matched
+          expr$x <- as.call(list(quote(base::factor), x = matched$x,
+                                 levels = levels(raw),
+                                 exclude = if (anyNA(levels(raw))) NULL else NA))
+        }
+      }
+    }
+    for (j in seq_along(expr)[-1L]) expr[j] <- list(walk(expr[[j]]))
+    expr
+  }
+  pv <- attr(terms, "predvars")
+  if (!is.null(pv)) attr(terms, "predvars") <- walk(pv)
+  terms
+}
+
+.svem_direct_factor_support <- function(terms, data) {
+  found <- list()
+  env <- attr(terms, ".Environment")
+  walk <- function(expr) {
+    if (!is.call(expr)) return(invisible(NULL))
+    conversion <- .svem_base_factor_call(expr, env)
+    if (!is.null(conversion) && is.symbol(conversion$call$x)) {
+      v <- as.character(conversion$call$x)
+      if (v %in% names(data) && is.numeric(data[[v]])) {
+        converted <- eval(conversion$call, data, env)
+        support <- sort(unique(data[[v]][is.finite(data[[v]]) & !is.na(converted)]))
+        found[[v]] <<- if (is.null(found[[v]])) support else intersect(found[[v]], support)
+      }
+    }
+    for (j in seq_along(expr)[-1L]) walk(expr[[j]])
+    invisible(NULL)
+  }
+  variables <- as.list(attr(stats::delete.response(terms), "variables"))[-1L]
+  for (expr in variables) walk(expr)
+  found
+}
+
+.svem_numerically_constant_columns <- function(X) {
+  if (!ncol(X)) return(integer())
+  center <- colMeans(X)
+  variance <- colMeans(sweep(X, 2L, center, "-")^2)
+  neps <- nrow(X) * .Machine$double.eps
+  bound <- neps * variance + (neps * abs(center))^2
+  unname(which(is.finite(variance) & variance <= bound))
+}
+
+.svem_union_exclude <- function(exclude, fixed, p) {
+  if (!length(fixed)) return(exclude)
+  normalize <- function(value) {
+    if (is.logical(value)) {
+      if (length(value) != p || anyNA(value)) {
+        stop("Logical `exclude` must have one nonmissing value per design column.", call. = FALSE)
+      }
+      which(value)
+    } else value
+  }
+  if (is.function(exclude)) {
+    user_exclude <- exclude
+    return(function(...) unique(c(normalize(user_exclude(...)), fixed)))
+  }
+  unique(c(normalize(exclude), fixed))
+}
+
+.svem_fit_calibration <- function(y, y_pred, X, beta) {
+  center <- mean(y_pred)
+  spread <- max(abs(y_pred - center))
+  m_eps <- length(beta) * .Machine$double.eps
+  gamma <- m_eps / (1 - m_eps)
+  magnitude <- abs(beta[1L]) + as.vector(abs(X) %*% abs(beta[-1L]))
+  if (!is.finite(spread) || spread <= 2 * gamma * max(magnitude)) {
+    return(list(fit = NULL, reason = "prediction spread is at its rounding-error bound"))
+  }
+  form <- y ~ y_pred
+  environment(form) <- baseenv()
+  fit <- stats::lm(form, data = data.frame(y = y, y_pred = y_pred))
+  if (fit$rank == 2L && all(is.finite(stats::coef(fit)))) {
+    return(list(fit = fit, reason = NULL))
+  }
+  form <- stats::as.formula(substitute(y ~ I((y_pred - CENTER) / SCALE),
+                                       list(CENTER = center, SCALE = spread)),
+                            env = baseenv())
+  fit <- stats::lm(form, data = data.frame(y = y, y_pred = y_pred))
+  if (fit$rank != 2L || any(!is.finite(stats::coef(fit)))) {
+    return(list(fit = NULL, reason = "calibration has no finite rank-two fit"))
+  }
+  attr(fit, "svem_calibration_transform") <- c(center = center, scale = spread)
+  list(fit = fit, reason = NULL)
+}
+
+.svem_calibration_coefficients <- function(fit) {
+  ab <- stats::coef(fit)
+  transform <- attr(fit, "svem_calibration_transform")
+  if (!is.null(transform)) {
+    ab <- c(ab[1L] - ab[2L] * transform[["center"]] / transform[["scale"]],
+            ab[2L] / transform[["scale"]])
+  }
+  ab
+}
+
+.svem_apply_calibration <- function(fit, values) {
+  ab <- stats::coef(fit)
+  if (length(ab) < 2L || any(!is.finite(ab[1:2]))) return(values)
+  transform <- attr(fit, "svem_calibration_transform")
+  if (is.null(transform)) return(ab[1L] + ab[2L] * values)
+  ab[1L] + ab[2L] * ((values - transform[["center"]]) / transform[["scale"]])
+}
+
 # Build a small, self-contained evaluation environment for stored formulas and
 # terms objects.  The parent supplies the standard formula helpers (poly,
 # contrasts, etc.); only objects genuinely supplied by the formula environment
@@ -106,9 +373,62 @@
 # column only for the call into glmnet; user-visible designs and coefficients
 # never contain it.  penalty.factor is normalized so the real feature retains
 # the same effective penalty it has in a genuine one-feature fit.
-.svem_prepare_glmnet_design <- function(x, args = list(), exclude = NULL) {
+.svem_glmnet_callback_exclude <- function(callback, p, has_sentinel) {
+  force(callback); force(p); force(has_sentinel)
+  function(x, y, weights, ...) {
+    callback_x <- if (has_sentinel) x[, seq_len(p), drop = FALSE] else x
+    value <- callback(x = callback_x, y = y, weights = weights, ...)
+    if (is.null(value)) return(integer())
+    message <- paste0("`exclude` callback must return indices in 1..", p,
+                      " or a logical vector of length ", p, ".")
+    if (is.logical(value)) {
+      if (length(value) != p || anyNA(value)) stop(message, call. = FALSE)
+      return(which(value))
+    }
+    if (!is.numeric(value) || is.complex(value) || any(!is.finite(value)) ||
+        any(value != floor(value)) || any(value < 1 | value > p)) {
+      stop(message, call. = FALSE)
+    }
+    as.integer(value)
+  }
+}
+
+.svem_glmnet_callback_design <- function(design, callback, p) {
+  pf <- design$args$penalty.factor
+  if (is.null(pf)) pf <- rep(1, ncol(design$x))
+  if (!is.numeric(pf) || is.complex(pf) || length(pf) != ncol(design$x) || anyNA(pf)) {
+    stop("For an `exclude` callback, `penalty.factor` must be numeric, have ",
+         "one value per design column, and contain no missing values.", call. = FALSE)
+  }
+  has_sentinel <- !is.null(design$sentinel)
+  fixed <- c(design$numerically_constant_columns,
+             if (has_sentinel) ncol(design$x) else integer())
+  # glmnet checks callback exclusions before adding infinite-penalty exclusions,
+  # then resets every excluded penalty to one before normalization. This keeps
+  # our fixed exclusions out of its callback-only minimum-column check.
+  pf[fixed] <- Inf
+  design$args$penalty.factor <- pf
+  design$exclude <- .svem_glmnet_callback_exclude(callback, p, has_sentinel)
+  design
+}
+
+.svem_prepare_glmnet_design <- function(x, args = list(), exclude = NULL,
+                                        numerically_constant = NULL) {
+  if (is.null(numerically_constant)) {
+    numerically_constant <- .svem_numerically_constant_columns(x)
+  }
+  callback <- NULL
+  if (is.function(exclude) && (length(numerically_constant) || ncol(x) == 1L)) {
+    callback <- exclude
+    exclude <- NULL
+  } else {
+    exclude <- .svem_union_exclude(exclude, numerically_constant, ncol(x))
+  }
   if (!is.matrix(x) || ncol(x) != 1L) {
-    return(list(x = x, args = args, exclude = exclude, sentinel = NULL))
+    design <- list(x = x, args = args, exclude = exclude, sentinel = NULL,
+                   numerically_constant_columns = numerically_constant)
+    if (!is.null(callback)) design <- .svem_glmnet_callback_design(design, callback, ncol(x))
+    return(design)
   }
 
   sentinel <- ".svem_internal_zero_sentinel"
@@ -119,7 +439,7 @@
 
   if (!is.null(args$penalty.factor)) {
     pf <- args$penalty.factor
-    if (!is.numeric(pf) || length(pf) != 1L || !is.finite(pf) || pf <= 0) {
+    if (!is.numeric(pf) || is.complex(pf) || length(pf) != 1L || !is.finite(pf) || pf <= 0) {
       stop("For a one-predictor fit, `penalty.factor` must be one positive finite number.")
     }
     args$penalty.factor <- c(1, 1)
@@ -149,7 +469,10 @@
     stop("`exclude` must be NULL, numeric, logical, or a function.")
   }
 
-  list(x = x_fit, args = args, exclude = exclude, sentinel = sentinel)
+  design <- list(x = x_fit, args = args, exclude = exclude, sentinel = sentinel,
+                 numerically_constant_columns = numerically_constant)
+  if (!is.null(callback)) design <- .svem_glmnet_callback_design(design, callback, ncol(x))
+  design
 }
 
 .svem_strip_glmnet_sentinel <- function(coef_mat, sentinel = NULL) {
@@ -196,6 +519,13 @@
       logical = is.logical(value),
       inherits(value, expected)
     )
+    # bigexp_prepare() intentionally turns categorical inputs into plain
+    # factors. Accept both the original raw class and that prepared class.
+    categorical <- name %in% names(object$sampling_schema$factor_levels)
+    if (isTRUE(object$used_bigexp_spec) && categorical &&
+        expected %in% c("factor", "ordered", "character", "logical")) {
+      ok <- ok || (is.factor(value) && !is.ordered(value)) || is.character(value)
+    }
     if (!isTRUE(ok)) {
       stop(
         "Predictor '", name, "' was fitted as ", expected,

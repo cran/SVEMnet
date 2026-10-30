@@ -138,20 +138,7 @@ predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...
   }
 
   # Harmonize factor/character levels to training xlevels
-  xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else NULL
-  if (!is.null(xlev) && length(xlev)) {
-    for (v in names(xlev)) {
-      if (v %in% names(newdata)) {
-        if (is.factor(newdata[[v]])) {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        } else if (is.character(newdata[[v]])) {
-          newdata[[v]] <- factor(newdata[[v]], levels = xlev[[v]])
-        } else {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        }
-      }
-    }
-  }
+  newdata <- .svem_harmonize_raw_levels(object, newdata)
 
   # Build model frame/matrix with saved contrasts; allow NAs (unseen levels become NA)
   ctr <- if (!is.null(object$contrasts)) object$contrasts else NULL
@@ -163,6 +150,7 @@ predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...
   }
 
   mf_new <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
+  mf_new <- .svem_harmonize_model_frame(object, mf_new)
   mm_new <- stats::model.matrix(terms_obj, data = mf_new, contrasts.arg = ctr)
 
   # remove intercept: training_X is stored without it

@@ -126,7 +126,7 @@ test_that("svem_wmt_multi() infers names for transformed-response formulas", {
   # control so the test stays cheap (the WMT itself errors -> NULL entry)
   d <- gen_toy_df(30L)
   d$y <- abs(d$y) + 0.5
-  expect_error(
+  expect_warning(
     out <- svem_wmt_multi(
       formulas = list(log(y) ~ X1 + X2),
       data = d,
@@ -134,7 +134,7 @@ test_that("svem_wmt_multi() infers names for transformed-response formulas", {
       wmt_control = list(nPoint = 10, nSVEM = 2, nPerm = 2, nBoot = 6,
                          nCore = safe_ncores(), seed = 1, verbose = FALSE)
     ),
-    NA
+    "whole-model test failed for response.*nPerm"
   )
   expect_identical(names(out$p_values), "log(y)")
 })

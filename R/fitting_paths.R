@@ -24,7 +24,8 @@
   list(fit = fit, paths = paths, warnings = unique(messages), errors = unique(errors))
 }
 
-.svem_glmnet_setup <- function(X, dots, fam_name, relax_flag) {
+.svem_glmnet_setup <- function(X, dots, fam_name, relax_flag,
+                               numerically_constant = NULL) {
   ## ---- capture and sanitize user '...' ----
   if (length(dots)) {
     if ("weights" %in% names(dots)) {
@@ -57,7 +58,8 @@
   exclude_user <- dots$exclude
   dots$exclude <- NULL
   glmnet_design <- .svem_prepare_glmnet_design(
-    X, args = dots, exclude = exclude_user
+    X, args = dots, exclude = exclude_user,
+    numerically_constant = numerically_constant
   )
   X_glm <- glmnet_design$x
   dots <- glmnet_design$args

@@ -65,22 +65,10 @@
   }
 
   # Harmonize factor / character predictors to training levels
-  xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else list()
-  if (length(xlev)) {
-    for (v in names(xlev)) {
-      if (v %in% names(newdata)) {
-        if (is.factor(newdata[[v]])) {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        } else if (is.character(newdata[[v]])) {
-          newdata[[v]] <- factor(newdata[[v]], levels = xlev[[v]])
-        } else {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        }
-      }
-    }
-  }
+  newdata <- .svem_harmonize_raw_levels(object, newdata)
 
   mf <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
+  mf <- .svem_harmonize_model_frame(object, mf)
 
   # Use stored contrasts when available; otherwise restore fit-time contrast options
   ctr <- object$contrasts
@@ -136,7 +124,9 @@
 
   # Align columns with training_X; zero-fill missing columns
   train_cols <- colnames(object$training_X)
-  if (is.null(train_cols) || !length(train_cols)) {
+  if (ncol(object$training_X) == 0L) {
+    train_cols <- character()
+  } else if (is.null(train_cols) || !length(train_cols)) {
     stop("`object$training_X` must have column names.")
   }
 

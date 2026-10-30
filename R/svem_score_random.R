@@ -1,3 +1,22 @@
+.svem_generated_score_names <- function(responses) {
+  unique(c(unlist(lapply(responses, function(r) paste0(r, c(
+    "_pred", "_des", "_lwr", "_upr", "_ciw_w", "_p_in_spec_mean",
+    "_in_spec_point"
+  ))), use.names = FALSE), "score", "wmt_score", "uncertainty_measure",
+  "p_joint_mean", "joint_in_spec_point"))
+}
+
+.svem_check_output_collisions <- function(protected, generated, context) {
+  clash <- intersect(protected, generated)
+  if (length(clash)) {
+    stop(context, ": generated output column(s) would overwrite input variable(s): ",
+         paste(clash, collapse = ", "),
+         ". Rename these inputs or the response identifiers before proceeding.",
+         call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 .svem_align_goals <- function(goals, resp_names, key_to_resp) {
   if (!is.list(goals) || !length(goals)) {
     stop("`goals` must be a nonempty list of per-response goal specifications.",
@@ -194,7 +213,7 @@
 #' These quantities reflect uncertainty on the *process mean* at each sampled
 #' setting under the fitted SVEM models, not unit-level predictive
 #' probabilities. If any error occurs in this spec-limit augmentation, it is
-#' caught; a message may be issued when \code{verbose = TRUE}, and the
+#' caught with a warning regardless of \code{verbose}, and the
 #' affected table(s) are returned without the spec-related columns.
 #'
 #' @details
@@ -314,6 +333,10 @@
 #' width column such as
 #' \code{<response>_ciw = <response>_upr - <response>_lwr} when selecting the
 #' single widest interval.
+#' If a model has fewer than two bootstrap members or its interval prediction
+#' fails, the CI columns are \code{NA}. Its uncertainty contribution is the
+#' neutral value \code{0.5} times its user weight, and a warning identifies the
+#' affected response. These fallback values do not measure fitted uncertainty.
 #' }
 #'
 #' \subsection{Spec-limit mean-level probabilities}{
@@ -342,8 +365,8 @@
 #' setting, not on individual units or lots, and are best interpreted as
 #' ensemble-based assurance measures under the SVEM + FRW pipeline. If the
 #' augmentation step fails for any reason (for example, missing predictor
-#' columns or incompatible models), the error is caught; a message may be
-#' issued when \code{verbose = TRUE}, and \code{score_table} and/or
+#' columns or incompatible models), the error is caught with a warning
+#' regardless of \code{verbose}, and \code{score_table} and/or
 #' \code{original_data_scored} are returned without the spec-related columns.
 #' }
 #'
@@ -386,7 +409,9 @@
 #'   succeeds, the same mean-level spec columns as in \code{score_table}
 #'   (per-response \code{<resp>_p_in_spec_mean}, \code{<resp>_in_spec_point},
 #'   and joint \code{p_joint_mean}, \code{joint_in_spec_point}) are appended
-#'   as well.
+#'   as well. Recognized columns from an earlier scoring round are replaced
+#'   with a warning. A generated output name that collides with a model
+#'   predictor or an observed response variable is rejected before sampling.
 #' @param n Number of random samples to draw in the predictor space. This is
 #'   the number of rows in the sampled table used for scoring.
 #' @param mixture_groups Optional mixture and simplex constraints passed to
@@ -745,6 +770,48 @@ svem_score_random <- function(objects,
   # mapping: unambiguous object/LHS key -> canonical response name
   key_to_resp <- .svem_response_key_map(resp_names, lhs_names, valid_lhs)
 
+  # Generated names must never replace design factors or observed responses.
+  # Check both canonical response names and formula labels before drawing RNG.
+  generated_names <- .svem_generated_score_names(unique(c(
+    resp_names, lhs_names[valid_lhs]
+  )))
+  predictor_names <- unique(unlist(lapply(objects, function(o) {
+    o$sampling_schema$predictor_vars
+  }), use.names = FALSE))
+  .svem_check_output_collisions(predictor_names, generated_names,
+                                "svem_score_random()")
+  if (!is.null(data)) {
+    response_vars <- unique(unlist(lapply(objects, function(o) {
+      .svem_response_vars(o$formula)
+    }), use.names = FALSE))
+    .svem_check_output_collisions(
+      intersect(names(data), c(predictor_names, response_vars)),
+      generated_names, "svem_score_random() supplied data"
+    )
+    stale <- intersect(names(data), generated_names)
+    if (length(stale)) {
+      warning("svem_score_random(): replacing generated column(s) from a previous scoring round: ",
+              paste(stale, collapse = ", "), ".", call. = FALSE)
+      data <- data[, !names(data) %in% stale, drop = FALSE]
+    }
+  }
+
+  if (!is.null(specs) && length(specs)) {
+    if (!is.list(specs) || is.null(names(specs)) ||
+        anyNA(names(specs)) || any(!nzchar(names(specs)))) {
+      stop("`specs` must be a named list when provided.", call. = FALSE)
+    }
+    mapped <- names(specs)
+    known <- mapped %in% names(key_to_resp)
+    mapped[known] <- unname(key_to_resp[mapped[known]])
+    if (anyDuplicated(mapped)) {
+      stop("Spec names/aliases map to duplicate responses: ",
+           paste(unique(mapped[duplicated(mapped)]), collapse = ", "),
+           ". Supply at most one specification per response.", call. = FALSE)
+    }
+    names(specs) <- mapped
+  }
+
   mismatch <- nzchar(obj_names) & valid_lhs & (obj_names != lhs_names)
   if (any(mismatch, na.rm = TRUE)) {
     warning(
@@ -863,13 +930,15 @@ svem_score_random <- function(objects,
 
   # ---- warn once if any models cannot produce bootstrap intervals ----
   has_coef_mat <- vapply(objects, function(o) {
-    !is.null(o$coef_matrix) && is.matrix(o$coef_matrix) && nrow(o$coef_matrix) > 0L
+    !is.null(o$coef_matrix) && is.matrix(o$coef_matrix) && nrow(o$coef_matrix) >= 2L
   }, logical(1))
   missing_ci_models <- names(objects)[!has_coef_mat]
   if (length(missing_ci_models)) {
     warning(
-      "Some models lack coef_matrix; CI and uncertainty columns will be NA for: ",
-      paste(missing_ci_models, collapse = ", ")
+      "At least two bootstrap members are needed for intervals. CI columns will be NA for: ",
+      paste(missing_ci_models, collapse = ", "),
+      "; each missing response contributes a constant 0.5 times its user weight to uncertainty_measure.",
+      call. = FALSE
     )
   }
 
@@ -1098,13 +1167,19 @@ svem_score_random <- function(objects,
 
   for (r in resp_cols) {
     obj <- objects[[r]]
-    pr <- try(
+    pr <- if (!has_coef_mat[[r]]) NULL else tryCatch(
       predict(obj,
               newdata  = score_table[, predictor_cols, drop = FALSE],
               debias   = debias_flag,
               interval = TRUE,
               level    = level),
-      silent = TRUE
+      error = function(e) {
+        warning("svem_score_random(): interval prediction failed for response '", r,
+                "' in score_table: ", conditionMessage(e),
+                "; CI columns are NA and its uncertainty contribution is neutral.",
+                call. = FALSE)
+        NULL
+      }
     )
 
     lwr <- upr <- rep(NA_real_, nrow(score_table))
@@ -1148,17 +1223,27 @@ svem_score_random <- function(objects,
     ci_upr  <- list()
 
     for (r in resp_names) {
-      pr <- try(
+      pr <- if (!has_coef_mat[[r]]) NULL else tryCatch(
         predict(objects[[r]], newdata = data, debias = debias_flag,
                 interval = TRUE, level = level),
-        silent = TRUE
+        error = function(e) {
+          warning("svem_score_random(): interval prediction failed for response '", r,
+                  "' in supplied data: ", conditionMessage(e), ".", call. = FALSE)
+          NULL
+        }
       )
 
       fit_col <- if (!inherits(pr, "try-error") && is.list(pr) && !is.null(pr$fit)) {
         as.numeric(pr$fit)
       } else {
-        tmp <- try(predict(objects[[r]], newdata = data, debias = debias_flag), silent = TRUE)
-        if (inherits(tmp, "try-error")) rep(NA_real_, nrow(data)) else as.numeric(tmp)
+        tmp <- tryCatch(predict(objects[[r]], newdata = data, debias = debias_flag),
+                        error = function(e) {
+                          warning("svem_score_random(): point prediction failed for response '", r,
+                                  "' in supplied data: ", conditionMessage(e),
+                                  "; returning NA predictions.", call. = FALSE)
+                          NULL
+                        })
+        if (is.null(tmp)) rep(NA_real_, nrow(data)) else as.numeric(tmp)
       }
 
       if (isTRUE(is_binomial_resp[r])) fit_col <- pmin(pmax(fit_col, 0), 1)
@@ -1233,23 +1318,6 @@ svem_score_random <- function(objects,
     pred_mat <- pred_df0[resp_names]
     colnames(pred_mat) <- paste0(resp_names, "_pred")
 
-    # In the iterate-append-refit workflow, 'data' may still carry scored
-    # columns from a previous round's export; cbind would then create
-    # duplicate names and downstream name-based extraction would silently
-    # pick the STALE first copy.
-    appended_names <- c(colnames(pred_mat), names(des_cols),
-                        paste0(resp_names, "_lwr"), paste0(resp_names, "_upr"),
-                        paste0(resp_names, "_ciw_w"),
-                        "score", "wmt_score", "uncertainty_measure")
-    clash <- intersect(appended_names, colnames(data))
-    if (length(clash)) {
-      warning("svem_score_random(): 'data' already contains scored column(s): ",
-              paste(clash, collapse = ", "),
-              ". These look like outputs of a previous scoring round; remove them ",
-              "before scoring to avoid stale duplicates in original_data_scored.",
-              call. = FALSE)
-    }
-
     original_data_scored <- cbind(
       data,
       pred_mat,
@@ -1312,6 +1380,9 @@ svem_score_random <- function(objects,
   # store attributes for downstream helpers
   attr(score_table, "svem_predictor_cols") <- predictor_cols
   attr(score_table, "svem_resp_cols")      <- resp_cols
+  attr(score_table, "svem_response_vars") <- unique(unlist(lapply(
+    objects, function(o) .svem_response_vars(o$formula)
+  ), use.names = FALSE))
   if (!is.null(original_data_scored) && is.data.frame(original_data_scored)) {
     # restrict to the model's design factors: colnames(data) would include the
     # measured responses and any ID/notes columns, silently contaminating
@@ -1319,6 +1390,8 @@ svem_score_random <- function(objects,
     attr(original_data_scored, "svem_predictor_cols") <-
       intersect(predictor_cols, colnames(original_data_scored))
     attr(original_data_scored, "svem_resp_cols")      <- resp_cols
+    attr(original_data_scored, "svem_response_vars") <-
+      attr(score_table, "svem_response_vars")
   }
 
   list(

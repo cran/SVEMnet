@@ -33,7 +33,15 @@ the intercept.}
 \code{"FRW_plain"}, or \code{"Identity"}, as in \code{\link{SVEMnet}}.
 \code{"Identity"} with \code{nBoot = 1} yields a single deterministic
 forward-selection fit tuned by the chosen information criterion on the
-training data.}
+training data.
+The support guard does not guarantee positive residual degrees of
+freedom. In particular, \code{"Identity"} gives \eqn{n_{eff,adm} = n},
+so the wAIC/wBIC rule admits saturated path points with \eqn{k = n}.
+A forward path can then interpolate the training data and be selected
+by the log-scale criterion. Such members are flagged in
+\code{member_diagnostics}. By comparison, \code{forward_aicc()} skips
+models with nonpositive residual degrees of freedom for AIC/BIC;
+its AICc criterion requires at least three residual degrees of freedom.}
 
 \item{response}{Optional character. When \code{formula} is a
 \code{bigexp_spec}, names the response column to use on the left-hand

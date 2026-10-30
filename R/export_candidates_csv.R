@@ -117,6 +117,13 @@ svem_export_candidates_csv <- function(...,
   idx       <- 0L
 
   for (sel in sels) {
+    protected <- unique(c(attr(sel$best, "svem_predictor_cols"),
+                          attr(sel$best, "svem_response_vars"),
+                          attr(sel$candidates, "svem_predictor_cols"),
+                          attr(sel$candidates, "svem_response_vars")))
+    .svem_check_output_collisions(protected,
+                                  c("candidate_type", "selection_label"),
+                                  "svem_export_candidates_csv()")
     # Prefer the evaluated label stored in the selection object; fall back to
     # deparsing the call for objects created by older SVEMnet versions (note
     # that the deparse fallback yields the expression text, not its value,

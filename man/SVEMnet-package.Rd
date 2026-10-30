@@ -225,6 +225,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }
 \seealso{
 Useful links:

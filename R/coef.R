@@ -84,6 +84,10 @@ coef.svem_model <- function(object, debiased = FALSE, ...) {
 #'   \code{svem_cv} objects.
 #' @param tol Numeric tolerance for "nonzero". Coefficients with
 #'   \code{|beta| > tol} are counted as nonzero. Default is \code{1e-7}.
+#'   This is an absolute threshold in the raw coefficient units, so reports
+#'   using a positive tolerance depend on predictor and response units. Use
+#'   \code{tol = 0} for exact selection frequencies, matching the internal
+#'   support counts used for model selection.
 #' @param plot Logical; if \code{TRUE}, draws a quick \pkg{ggplot2} summary plot
 #'   of the nonzero percentages (default \code{TRUE}).
 #' @param print_table Logical; if \code{TRUE}, prints a compact table of

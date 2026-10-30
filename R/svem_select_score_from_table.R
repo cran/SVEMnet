@@ -133,6 +133,11 @@ svem_select_from_score_table <- function(score_table,
     if (!is.character(label) || length(label) != 1L || is.na(label)) {
       stop("`label` must be a single character string or NULL.")
     }
+    protected <- unique(c(predictor_cols,
+                          attr(score_table, "svem_predictor_cols"),
+                          attr(score_table, "svem_response_vars")))
+    .svem_check_output_collisions(protected, "Notes_from_SVEMnet",
+                                  "svem_select_from_score_table()")
   }
 
   # values for ranking
@@ -277,6 +282,11 @@ svem_select_from_score_table <- function(score_table,
 
     best       <- append_label(best)
     candidates <- append_label(candidates)
+  }
+
+  if (!is.null(predictor_cols)) {
+    attr(best, "svem_predictor_cols") <- predictor_cols
+    if (!is.null(candidates)) attr(candidates, "svem_predictor_cols") <- predictor_cols
   }
 
   list(

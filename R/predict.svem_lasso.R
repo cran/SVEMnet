@@ -263,22 +263,10 @@ predict.svem_model <- function(object, newdata,
   }
 
   # Harmonize factor columns to training xlevels BEFORE model.frame()
-  xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) object$xlevels else list()
-  if (length(xlev)) {
-    for (v in names(xlev)) {
-      if (v %in% names(newdata)) {
-        if (is.factor(newdata[[v]])) {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        } else if (is.character(newdata[[v]])) {
-          newdata[[v]] <- factor(newdata[[v]], levels = xlev[[v]])
-        } else {
-          newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-        }
-      }
-    }
-  }
+  newdata <- .svem_harmonize_raw_levels(object, newdata)
 
   mf  <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
+  mf <- .svem_harmonize_model_frame(object, mf)
 
   # Prefer exact per-factor contrasts saved at fit time
   ctr <- object$contrasts
@@ -415,10 +403,7 @@ predict.svem_model <- function(object, newdata,
 
   # Gaussian debias applies to members, too
   if (identical(fam, "gaussian") && isTRUE(debias) && !is.null(object$debias_fit)) {
-    ab <- stats::coef(object$debias_fit)
-    if (length(ab) >= 2 && all(is.finite(ab[1:2]))) {
-      eta_mat <- ab[1] + ab[2] * eta_mat
-    }
+    eta_mat <- .svem_apply_calibration(object$debias_fit, eta_mat)
   }
 
   # Binomial class: aggregate on prob scale, then threshold (no se/interval)

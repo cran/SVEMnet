@@ -2,8 +2,8 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.6.2
-Date: 2026-09-18
+Version: 3.6.3
+Date: 2026-10-29
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
@@ -16,16 +16,16 @@ URL: https://doi.org/10.1016/j.chemolab.2026.105660,
 Depends: R (>= 4.0.0)
 Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, lhs, parallel,
         utils
-Suggests: foreach, testthat (>= 3.0.0), RhpcBLASctl
+Suggests: foreach, testthat (>= 3.0.0), withr, RhpcBLASctl
 License: GPL-2 | GPL-3
 Encoding: UTF-8
 Config/testthat/edition: 3
 LazyData: true
-Config/roxygen2/version: 8.0.0
+Config/roxygen2/version: 8.1.1
 NeedsCompilation: no
-Packaged: 2026-09-18 12:29:19 UTC; andre
+Packaged: 2026-10-30 15:55:23 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2026-09-18 12:50:09 UTC
+Date/Publication: 2026-10-30 17:50:02 UTC

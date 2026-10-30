@@ -31,7 +31,10 @@ as \code{\link{svem_score_random}} (see Details).}
 
 \item{candidates}{Optional data frame of candidate settings containing the
 predictor columns required by the models. When \code{NULL} (default),
-\code{n} candidates are drawn with \code{\link{svem_random_table_multi}}.}
+\code{n} candidates are drawn with \code{\link{svem_random_table_multi}}.
+Supplied columns must not use generated output names (\code{slot},
+\code{ts_score}, or response \code{_draw}, \code{_des}, \code{_pred}
+columns); collisions are rejected to preserve candidate settings.}
 
 \item{n}{Number of random candidates to draw when \code{candidates} is
 \code{NULL}. Default \code{5000}.}
@@ -315,6 +318,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }
 \seealso{
 \code{\link{SVEMnet}}, \code{\link{svem_score_random}},

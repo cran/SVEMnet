@@ -8,6 +8,8 @@
 #'
 #' No refitting is performed. Predictions are obtained by
 #' averaging per-bootstrap member predictions on the requested scale.
+#' Intercept-only models return \code{n} rows with no predictor columns
+#' and constant predictions.
 #'
 #' @section Typical workflow:
 #' \enumerate{
@@ -162,7 +164,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   if (is.null(ref_blocking)) ref_blocking <- character(0L)
   ref_blocking   <- intersect(unique(as.character(ref_blocking)), ref_vars)
 
-  if (!length(ref_vars)) stop("No predictor variables found in reference sampling_schema.")
+  if (!("predictor_vars" %in% names(ref)))
+    stop("No predictor_vars field found in reference sampling_schema.")
 
   # Helper to compare numeric ranges with tolerance
   ranges_equal <- function(A, B, tol) {
@@ -608,7 +611,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   # ---- assemble predictors for non-blocking vars ----
   parts <- list(T_num_cont, T_num_disc, T_mix, T_cat)
   parts <- parts[!vapply(parts, is.null, logical(1))]
-  if (!length(parts) && !length(blocking))
+  if (!length(parts) && !length(blocking) && length(predictor_vars))
     stop("No predictors could be sampled from the schema.")
 
   # Robust init when only blocking (or only missing_pred fill) will populate columns
@@ -685,6 +688,13 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
                               ordered = identical(unname(var_classes[v]), "ordered"))
       }
     }
+  }
+
+  # Logical predictors use recorded categorical support, but prediction must
+  # receive the raw training class rather than the temporary factor above.
+  logical_vars <- names(var_classes)[var_classes == "logical"]
+  for (v in logical_vars) {
+    T_data[[v]] <- as.logical(as.character(T_data[[v]]))
   }
 
   # Order like predictor_vars and ensure blocking columns exist (constant)

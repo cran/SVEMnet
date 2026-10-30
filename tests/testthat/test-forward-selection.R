@@ -466,7 +466,8 @@ test_that("ambiguous multi-column terms retain whole-group rank checks", {
 
   # An actually rank-deficient block must still be skipped as a whole,
   # even when one of its directions alone would predict the response.
-  bad <- forward_aicc(y ~ cbind(ts, ts), dat)
+  expect_warning(bad <- forward_aicc(y ~ cbind(ts, ts), dat),
+                 "partially aliased")
   expect_length(bad$selected_terms, 0L)
   expect_equal(unname(bad$y_pred), rep(mean(y), n), tolerance = 1e-10)
 })

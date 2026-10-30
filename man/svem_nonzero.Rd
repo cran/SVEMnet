@@ -12,7 +12,11 @@ svem_nonzero(object, tol = 1e-07, plot = TRUE, print_table = TRUE, ...)
 \code{svem_cv} objects.}
 
 \item{tol}{Numeric tolerance for "nonzero". Coefficients with
-\code{|beta| > tol} are counted as nonzero. Default is \code{1e-7}.}
+\code{|beta| > tol} are counted as nonzero. Default is \code{1e-7}.
+This is an absolute threshold in the raw coefficient units, so reports
+using a positive tolerance depend on predictor and response units. Use
+\code{tol = 0} for exact selection frequencies, matching the internal
+support counts used for model selection.}
 
 \item{plot}{Logical; if \code{TRUE}, draws a quick \pkg{ggplot2} summary plot
 of the nonzero percentages (default \code{TRUE}).}

@@ -93,17 +93,9 @@ svem_ij_variance <- function(object, newdata, finite_B = TRUE) {
   if (identical(environment(terms_obj), baseenv())) {
     environment(terms_obj) <- asNamespace("stats")
   }
-  xlev <- if (!is.null(object$xlevels) && is.list(object$xlevels)) {
-    object$xlevels
-  } else list()
-  if (length(xlev)) {
-    for (v in names(xlev)) {
-      if (v %in% names(newdata)) {
-        newdata[[v]] <- factor(as.character(newdata[[v]]), levels = xlev[[v]])
-      }
-    }
-  }
+  newdata <- .svem_harmonize_raw_levels(object, newdata)
   mf <- stats::model.frame(terms_obj, data = newdata, na.action = stats::na.pass)
+  mf <- .svem_harmonize_model_frame(object, mf)
   ctr <- object$contrasts
   have_ctr <- !is.null(ctr)
   if (!have_ctr) {

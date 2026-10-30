@@ -22,10 +22,10 @@ test_that("complexity = 'support' is identical to the default", {
   expect_equal(fit_def$best_edfs, fit_sup$best_edfs)
 })
 
-test_that("edf reduces exactly to support for pure lasso (alpha = 1)", {
+test_that("edf equals support for pure lasso with independent active columns", {
   dat <- .edf_toy_data(seed = 102)
-  # With only alpha = 1 in the grid, the blended edf equals the support count
-  # at every path point, so the entire selection must be identical.
+  # This full-rank design has no aliased active columns, so the blended edf
+  # equals support and the entire selection must be identical.
   set.seed(8); fit_sup <- SVEMnet(y ~ (X1 + X2 + X3)^2, dat, nBoot = 25,
                                   glmnet_alpha = 1, complexity = "support")
   set.seed(8); fit_edf <- SVEMnet(y ~ (X1 + X2 + X3)^2, dat, nBoot = 25,

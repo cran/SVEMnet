@@ -15,6 +15,7 @@
   if (length(pf) != nvars || anyNA(pf) || any(pf == -Inf)) {
     reason <- "invalid penalty.factor for conditional EDF"
   } else {
+    pf[pf == Inf] <- 1  # glmnet excludes these columns before normalizing
     ex <- args$exclude
     if (is.function(ex)) {
       if (any(pf != 1)) reason <- "conditional EDF with nonuniform penalties requires a fixed exclude vector"
@@ -24,7 +25,6 @@
         reason <- "invalid exclude vector for conditional EDF"
       } else pf[ex] <- 1
     }
-    pf[pf == Inf] <- 1  # glmnet excludes these columns before normalizing
     pf <- pmax(pf, 0)
     if (sum(pf) <= 0) reason <- "conditional EDF requires a positive total penalty factor"
     else pf <- pf * nvars / sum(pf)
@@ -35,7 +35,11 @@
        cache = new.env(parent = emptyenv()), reason = reason)
 }
 
-.svem_active <- function(beta, tol = 1e-7) {
+.svem_active <- function(beta, tol = 0) {
+  tol <- .svem_numeric_scalar(tol, "tol", lower = 0)
+  if (tol == 0) return(.svem_solver_active(beta))
+  # Explicit positive tolerances retain the private research harness's
+  # historical raw-coefficient convention; production uses exact support.
   slope <- beta[-1L]
   finite <- is.finite(slope)
   m <- if (any(finite)) max(abs(slope[finite])) else 0
@@ -43,7 +47,8 @@
 }
 
 .svem_conditional_edf <- function(context, coefficients, lambda, alpha, gamma = 1,
-                                  coef_tol = 1e-7) {
+                                  coef_tol = 0) {
+  coef_tol <- .svem_numeric_scalar(coef_tol, "coef_tol", lower = 0)
   if (!is.matrix(coefficients)) coefficients <- matrix(coefficients, ncol = 1L)
   L <- ncol(coefficients)
   if (length(lambda) != L) stop("EDF lambda and coefficient paths are misaligned.")
@@ -51,9 +56,6 @@
   vapply(seq_len(L), function(j) {
     act <- .svem_active(coefficients[, j], coef_tol)
     if (!length(act)) return(1)
-    # Preserve the package's explicit pure-lasso support-count convention.
-    if (alpha == 1) return(as.numeric(1L + length(act)))
-    if (!is.finite(context$y_sd) || context$y_sd <= 0) return(NA_real_)
     key <- paste(act, collapse = ",")
     cached <- context$cache[[key]]
     if (is.null(cached)) {
@@ -68,6 +70,10 @@
       cached <- list(G = G, rank = rank, pf = pf, ridge_ev = ridge_ev)
       context$cache[[key]] <- cached
     }
+    # The conditional lasso projection has the active design's rank, which
+    # equals support only when its centered columns are independent.
+    if (alpha == 1) return(as.numeric(1L + cached$rank))
+    if (!is.finite(context$y_sd) || context$y_sd <= 0) return(NA_real_)
     # glmnet reports Gaussian lambda multiplied by its weighted response SD.
     rho <- context$n * (lambda[j] / context$y_sd) * (1 - alpha)
     if (!is.finite(rho) || rho < 0) return(NA_real_)

@@ -94,6 +94,9 @@
 #' @param candidates Optional data frame of candidate settings containing the
 #'   predictor columns required by the models. When \code{NULL} (default),
 #'   \code{n} candidates are drawn with \code{\link{svem_random_table_multi}}.
+#'   Supplied columns must not use generated output names (\code{slot},
+#'   \code{ts_score}, or response \code{_draw}, \code{_des}, \code{_pred}
+#'   columns); collisions are rejected to preserve candidate settings.
 #' @param n Number of random candidates to draw when \code{candidates} is
 #'   \code{NULL}. Default \code{5000}.
 #' @param mixture_groups Optional mixture and simplex constraints passed to
@@ -333,6 +336,19 @@ svem_thompson_batch <- function(objects,
   goals <- goal_info$goals
   goal_type <- goal_info$goal
   wts <- goal_info$normalized_weight
+
+  output_names <- unique(c("slot", "ts_score", unlist(lapply(
+    unique(c(resp_names, lhs_names[valid_lhs])),
+    function(r) paste0(r, c("_draw", "_des", "_pred"))
+  ), use.names = FALSE)))
+  protected <- if (is.null(candidates)) {
+    unlist(lapply(objects, function(o) o$sampling_schema$predictor_vars),
+           use.names = FALSE)
+  } else {
+    names(candidates)
+  }
+  .svem_check_output_collisions(protected, output_names,
+                                "svem_thompson_batch()")
 
   # ---- candidate table ----
   if (is.null(candidates)) {

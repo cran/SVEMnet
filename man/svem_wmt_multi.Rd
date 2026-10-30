@@ -37,6 +37,13 @@ Currently, \code{strength = 1} is used internally.}
 \code{\link{svem_significance_test_parallel}}. By default this is
 \code{list(seed = 123)} so that WMT calls are reproducible; you may
 override or extend this (e.g. \code{list(seed = 999, nPerm = 300)}).
+A nonempty list must be fully named. Arguments \code{formula},
+\code{data}, \code{mixture_groups}, and \code{response} are controlled by
+this wrapper and ignored with a warning; each response, including any
+transformation, comes from its formula. Other duplicated names are rejected.
+A shared \code{spec} is allowed: it supplies the expansion and sampling
+schema for every formula, takes precedence over attached specifications,
+and preserves each formula's left-hand side.
 The WMT is serial by default. Pass \code{nCore} explicitly to opt into
 parallel execution, and use \code{rng_sample_kind = "Rounding"} only when
 reproducing the legacy pre-3.4.0 random stream.
@@ -59,10 +66,13 @@ are \code{NULL} where a WMT call failed.}
 \item{\code{p_values}}{Named numeric vector of per-response p-values
 (bounded away from 0/1), or \code{NA} when unavailable.}
 \item{\code{multipliers}}{Named numeric vector of per-response WMT
-multipliers derived from the p-values using \code{wmt_transform}.}
+multipliers derived from the p-values using \code{wmt_transform}.
+Failed tests retain multiplier 1 and emit a warning regardless of
+\code{verbose}; this fallback is not evidence of model significance.}
 \item{\code{wmt_transform}}{The transformation used.}
-\item{\code{wmt_control}}{The list of arguments passed through to
-\code{svem_significance_test_parallel()}.}
+\item{\code{wmt_control}}{The remaining arguments passed through to
+\code{svem_significance_test_parallel()} after removing the
+wrapper-controlled entries.}
 }
 }
 \description{
@@ -172,6 +182,9 @@ Lumley, T. (2004). Analysis of complex survey samples.
 
 Lumley, T. and Scott, A. (2015). AIC and BIC for modelling with complex survey data.
 \emph{Journal of Survey Statistics and Methodology}, 3(1), 1–18.
+
+Tibshirani, R. J. and Taylor, J. (2012). Degrees of freedom in lasso problems.
+\emph{The Annals of Statistics}, 40(2), 1198–1232. \doi{10.1214/12-AOS1003}
 }
 \seealso{
 \code{\link{svem_significance_test_parallel}},
