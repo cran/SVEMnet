@@ -43,7 +43,8 @@
 #' @param strict Logical; if \code{TRUE}, enforce a strict column-name match
 #'   between the aligned design for \code{newdata} and the training design
 #'   (including the intercept position). Default \code{FALSE}.
-#' @param ... Additional arguments (currently unused).
+#' @param ... Additional arguments. An engine selector applies only to models
+#'   fitted with \code{SVEMnet()}; a CV fit has one prediction surface.
 #'
 #' @return A numeric vector of predictions on the response scale:
 #'   numeric fitted values for Gaussian models; probabilities in \code{[0,1]}
@@ -104,6 +105,10 @@ predict_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
 #' @export
 #' @method predict svem_cv
 predict.svem_cv <- function(object, newdata, debias = FALSE, strict = FALSE, ...) {
+  if ("engine" %in% names(match.call(expand.dots = FALSE)$...)) {
+    stop("glmnet_with_cv() fits one CV model. Use predict(fit, newdata) without an engine selector.",
+         call. = FALSE)
+  }
   if (!is.list(object)) stop("`object` must be a fitted svem_cv object.")
   if (!is.data.frame(newdata)) stop("`newdata` must be a data frame.")
   if (is.null(object$terms) || is.null(object$parms) || is.null(object$training_X)) {

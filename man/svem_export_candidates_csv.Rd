@@ -8,13 +8,19 @@ svem_export_candidates_csv(
   ...,
   file = NULL,
   overwrite = FALSE,
-  write_file = TRUE
+  write_file = TRUE,
+  planned_date = NULL,
+  preparation_prefix = NULL
 )
 }
 \arguments{
 \item{...}{One or more objects returned by
 \code{\link{svem_select_from_score_table}}. You may also pass a single
-list of such objects.}
+list of such objects. Alternatively, pass one run plan, budgeted scored result or
+its recognizable worklist data frame. These worklist forms cannot be
+combined with other arguments in \code{...}. A score result without a
+worklist is not exported: request \code{budget} when scoring or select
+rows with \code{svem_select_from_score_table()} first.}
 
 \item{file}{Character scalar; path to the CSV file to be written.
 Required only when \code{write_file = TRUE}.}
@@ -27,18 +33,49 @@ at \code{file} is overwritten. Only used when \code{write_file = TRUE}.}
 table to \code{file} as CSV and print the full path. If \code{FALSE},
 no file is written and \code{file} may be \code{NULL}; the concatenated
 \code{data.frame} is still returned (invisibly).}
+
+\item{planned_date}{Optional planned preparation date: one \code{Date} or
+an ISO date string such as \code{"2026-11-02"}. Adds a
+\code{planned_date} column. This is scheduling metadata, not the actual
+execution date, a predictor, or an automatically added blocking factor.}
+
+\item{preparation_prefix}{Optional nonempty string identifying this batch,
+for example \code{"studyA-20261102-round1"}. Adds \code{preparation_id}
+values formed from the prefix and \code{-001}, \code{-002}, and so on,
+in exported row order. Use a distinct prefix for every physical batch,
+including batches on the same date. IDs are unique within this export;
+the function does not maintain a global laboratory ID registry. Re-exporting
+the same plan with the same prefix reproduces its labels. Exporting an
+unlabeled subset renumbers its rows; to preserve previously assigned IDs,
+filter the returned labeled table and omit these labeling options on export.
+For a laboratory's
+own IDs, add a \code{preparation_id} column to the worklist instead.
+Existing columns are preserved; supplying either option when its output
+column already exists errors rather than overwriting it. With both options
+omitted, export columns and labels are unchanged, including legacy exports.}
 }
 \value{
 Invisibly, the \code{data.frame} that was written to CSV (or
 would be written, when \code{write_file = FALSE}).
 }
 \description{
-Given one or more selection objects returned by
+A plan from \code{\link{svem_plan_runs}}, or a scored result from
+\code{\link{svem_score_random}} with a budgeted
+\code{$worklist}, or that worklist data frame itself, exports the selected
+preparations in \code{slot} order. This path preserves \code{recipe_id},
+\code{slot}, \code{role}, \code{nominated_by}, and all other columns as
+supplied. It does not relabel exploration rows as best candidates. A direct
+worklist must have all four identity columns, unique nonmissing recipe IDs,
+positive unique integer-valued slots, and nonempty roles and endorsements.
+A short worklist exports only the available preparations; an empty worklist
+exports column headers. No rows are invented to fill a budget shortfall.
+
+Alternatively, given one or more selection objects returned by
 \code{\link{svem_select_from_score_table}}, concatenate their
 \code{$best} rows and \code{$candidates} and export a CSV suitable for
 planning new experimental runs.
 
-Each row is tagged with:
+On the legacy selection-object path, each row is tagged with:
 \itemize{
 \item \code{candidate_type}: \code{"best"} or \code{"medoid"}.
 \item \code{selection_label}: derived from the \code{label} argument
@@ -50,7 +87,7 @@ example, \code{Potency}, \code{Potency_pred}); it simply harmonizes
 columns across inputs (adding \code{NA}-filled columns where necessary),
 concatenates rows, and reorders a few metadata columns for readability.
 
-Any columns named \code{candidate_type}, \code{selection_label}, or
+On that legacy path, columns named \code{candidate_type}, \code{selection_label}, or
 \code{Notes_from_SVEMnet} that are present in the final data frame are moved to the
 leftmost positions in that order.
 }
@@ -82,5 +119,10 @@ exploratory <- svem_select_from_score_table(
 # Inspect the combined table without writing a file.
 cand_tbl <- svem_export_candidates_csv(optimal, exploratory, write_file = FALSE)
 head(cand_tbl)
+# Optional scheduling labels, separate from the formulation's recipe_id:
+labelled <- svem_export_candidates_csv(optimal, exploratory, write_file = FALSE,
+  planned_date = as.Date("2026-11-02"),
+  preparation_prefix = "studyA-20261102-round1")
+labelled[c("planned_date", "preparation_id", "selection_label")]
 
 }

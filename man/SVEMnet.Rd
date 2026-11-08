@@ -17,7 +17,11 @@ SVEMnet(
   family = c("gaussian", "binomial"),
   complexity = c("support", "edf"),
   ...,
-  store_member_weights = FALSE
+  store_member_weights = FALSE,
+  companions = FALSE,
+  companion_blocks = c("respect", "interacting"),
+  mixture_groups = NULL,
+  companion_continuous_blocks = character()
 )
 }
 \arguments{
@@ -56,11 +60,8 @@ diagnostics.
 
 \item{objective}{Character. One of \code{"auto"}, \code{"wAIC"},
 \code{"wBIC"}, or \code{"wSSE"}.
-\itemize{
-\item \code{"wAIC"}: Gaussian AIC-like criterion based on the weighted SSE.
-\item \code{"wBIC"}: Gaussian BIC-like criterion based on the weighted SSE.
-}
-See Details for the exact criteria in the Gaussian and binomial cases.}
+See Details for the automatic choices, the information criteria and the
+loss-only criterion for Gaussian and binomial responses.}
 
 \item{relaxed}{Logical or character. Default \code{"auto"}.
 If \code{TRUE}, use glmnet's relaxed elastic-net path and select both
@@ -149,7 +150,8 @@ when possible. The arguments \code{nlambda}, \code{lambda}, and
 \code{lambda.min.ratio} are reserved and managed by SVEMnet
 (\code{nlambda} is fixed at 500); user-supplied values are ignored with
 a warning. Argument names that the installed \code{glmnet} does not
-recognize are also ignored with a warning (misspelling protection).}
+recognize are also ignored with a warning (misspelling protection).
+Relaxed fits additionally accept \code{maxp} and \code{path}.}
 
 \item{store_member_weights}{Logical; default \code{FALSE}. If \code{TRUE},
 retain the exact per-member uniforms and the mean-one training and
@@ -157,6 +159,42 @@ validation weights in \code{member_weights}. This can materially increase
 object size. The stored weights support reproducibility and experimental
 ensemble-mean diagnostics; they do not make the member-percentile limits
 calibrated confidence or prediction intervals.}
+
+\item{companions}{Optional Gaussian-response companion fits. \code{FALSE}
+fits SVEM alone. \code{TRUE} requests both \pkg{GauPro} and \pkg{ranger}
+Extra Trees. A character vector can select \code{"gaupro"} or
+\code{"extra_trees"} individually. Companions use the original factors
+on the SVEM analysis rows. Requested fits and diagnostics are stored in
+\code{$companions}; an unavailable engine leaves the primary fit usable.
+The companion component retains the unique physical predictor rows used
+for that endpoint to identify previously prepared recipes at nomination.
+The Gaussian process uses GauPro's Matern 5/2 kernel on continuous
+coordinates and latent-factor kernels on nominal inputs. It estimates
+the nugget with one seeded optimization start. The fit records its seed,
+package version, kernel settings and attained GauPro deviance on its
+internally normalized response scale. That deviance is not comparable
+with earlier unnormalized fits. Printing the companion component reports
+how many fit notes were retained in its \code{warnings} field.}
+
+\item{companion_blocks}{With \code{"respect"} (default), a varying block
+declared in a BigExp specification makes the companion fits unsupported.
+\code{"interacting"} explicitly permits each companion to learn a
+different recipe surface per block. Numeric day, plate or batch IDs
+are nominal labels by default. Supply observed IDs when scoring them.
+An unreplicated numeric block triggers a diagnostic at fitting time.}
+
+\item{mixture_groups}{Optional list of fixed-sum mixture groups in
+\code{\link{svem_random_table_multi}} format. A BigExp fit inherits its
+groups from \code{\link{bigexp_terms}}. Companions use one fewer
+varying coordinate per group. They drop the last varying component in
+the declared order and check all components at prediction. The GP and forest
+can give different fits in a different choice of free coordinates.}
+
+\item{companion_continuous_blocks}{Names of measured numeric blocking
+covariates, such as ambient temperature, to treat as continuous inputs in
+an interacting companion. Such a covariate can be scored between observed
+values within its fitted range. Other blocks retain their nominal encoding.
+The SVEM formula and its block penalties are unaffected.}
 }
 \value{
 An object of class \code{"svem_model"} (and \code{"svem_binomial"}
@@ -274,6 +312,30 @@ case SVEMnet will build the design matrix deterministically (locked
 types, levels, and contrasts) and, if requested, swap the response
 to fit multiple independent responses over the same expansion.
 }
+
+The Gaussian SVEMnet elastic-net search requests 500 lambda values with
+glmnet's deviance-based early path stopping disabled (\code{fdev = 0},
+\code{devmax = 1}). Other solver limits can still shorten the requested path.
+Disabling these rules preserves solver convergence checks, coefficient limits and
+SVEM's validation-size support guard. Explicit algorithm controls are
+honored. These call-level defaults override session-level stopping settings.
+Use \code{control = list(fdev = 1e-5, devmax = 0.999)} to recover the
+former stopping policy. Modern glmnet uses per-call controls; older
+supported versions use a scoped override restored even on error.
+This default applies to Gaussian SVEMnet members, including fits inside
+the whole-model test. Binomial members and the separate \code{glmnet_with_cv()}
+comparison wrapper retain their former stopping defaults. To request the
+extended binomial path, supply \code{control = list(fdev = 0, devmax = 1)}. Retained
+solver warnings, their member count, the glmnet version and the effective
+call-level controls are available in \code{diagnostics}. Changing the path can
+change fits at any noise level and whole-model p-values or multipliers.
+Results are not uniformly better on new data: a small stress check saw
+some small-sample and wSSE fits worsen.
+
+GauPro companions normalize the response internally and return means and
+latent standard errors in the original response units. An unsupported
+single-factor input or a constant response is reported before claiming a
+usable GP fit. Engine messages are retained with companion warnings.
 
 SVEMnet implements Self-Validated Ensemble Models using elastic net and
 relaxed elastic net base learners from glmnet. Each bootstrap replicate

@@ -200,8 +200,9 @@
 #' Draw random points from the SVEM sampling schema, compute multi-response
 #' desirability scores and (optionally) whole-model-test (WMT) reweighted
 #' scores, and attach a scalar uncertainty measure based on percentile CI
-#' widths. This function does *not* choose candidates; see
-#' \code{\link{svem_select_from_score_table}} for selection and clustering.
+#' widths. Companion fits or an explicit preparation budget also return a
+#' worklist of recipes to test. For other selections from the scored table,
+#' see \code{\link{svem_select_from_score_table}}.
 #'
 #' Predictions used inside this scorer are always generated with debiasing
 #' disabled (i.e., \code{debias = FALSE}) regardless of whether the underlying
@@ -467,7 +468,11 @@
 #'     \code{uncertainty_measure}) are appended. When \code{specs} is supplied
 #'     and the spec-limit augmentation succeeds, additional columns
 #'     \code{<resp>_p_in_spec_mean}, \code{<resp>_in_spec_point},
-#'     \code{p_joint_mean}, and \code{joint_in_spec_point} are appended.}
+#'     \code{p_joint_mean}, and \code{joint_in_spec_point} are appended.
+#'     A supplied candidate pool or a worklist adds \code{recipe_id}.
+#'     A worklist also includes \code{<resp>_<engine>_pred} for each
+#'     requested companion, \code{<engine>_score} for its joint goal and,
+#'     when requested, \code{<resp>_gp_latent_sd} for GP exploration.}
 #'   \item{\code{original_data_scored}}{If \code{data} is supplied, that data
 #'     augmented with prediction columns \code{<resp>_pred}, per-response
 #'     desirabilities, \code{score}, optional \code{wmt_score}, and
@@ -483,6 +488,46 @@
 #'     otherwise \code{NULL}.}
 #'   \item{\code{wmt_multipliers}}{Named vector of per-response WMT multipliers
 #'     when \code{wmt} is supplied; otherwise \code{NULL}.}
+#' }
+#' With companions, \code{budget} or \code{gp_endpoint}, the result also includes:
+#' \describe{
+#'   \item{\code{worklist}}{Scored recipes in preparation order, with \code{slot},
+#'     \code{role}, \code{nominated_by} (all endorsing engines) and
+#'     \code{nearest_distance} to a previously prepared or earlier selected recipe.
+#'     SVEM spread exploration uses \code{maximum_spread} for a unique maximum and
+#'     \code{best_predicted_tie} when predicted desirability breaks a spread tie.}
+#'   \item{\code{nominations}}{One row per engine with its unrestricted and best
+#'     unprepared recipe IDs and tie counts. Status is \code{selected},
+#'     \code{dropped_by_budget}, \code{dropped_by_model_count},
+#'     \code{not_prioritized}, \code{not_supplied}, \code{no_finite_score} or
+#'     \code{no_unprepared_recipe}.
+#'     The \code{slot} column identifies the selected preparation and is missing
+#'     for omitted optima. Engines endorsing the same recipe share a slot.}
+#'   \item{\code{engine_status}}{Fit or prediction status and a diagnostic
+#'     message for each engine and response. A companion needs finite predictions
+#'     for every positively weighted response on the same recipe to nominate it.}
+#'   \item{\code{exploration}}{The best predicted and widest-spread recipes among
+#'     the maximum SVEM spread ties, with tie counts and desirability ranges.}
+#'   \item{\code{tie_endpoint_ranges}}{Ranges of endpoint predictions, raw
+#'     interval widths and weighted spread contributions among those ties.}
+#'   \item{\code{selections}}{Worklist rows formatted for \code{svem_export_candidates_csv()}.}
+#'   \item{\code{shortfall}}{Without explicit counts, the number of budgeted
+#'     preparations left unfilled. With \code{n_optima} or \code{n_explore},
+#'     the total model and exploration shortfall. Only an explicitly requested
+#'     model count can contribute a model shortfall. Unused physical capacity
+#'     is reported separately in \code{allocation_counts$unused_capacity}.}
+#'   \item{\code{historical_unmatched}}{Number of history rows with missing or
+#'     off-increment settings that could not be matched.}
+#'   \item{\code{history_source}}{Whether previous preparations came from supplied
+#'     data, all fitted response histories, some histories, or no history.}
+#' }
+#' With explicit counts, the result also includes:
+#' \describe{
+#'   \item{\code{allocation_counts}}{Requested, targeted and selected model
+#'     and exploration counts, distinct required repeats, role shortfalls,
+#'     unfilled model capacity and unused physical capacity.}
+#'   \item{\code{merged_nominations}}{Endorsements sharing a physical
+#'     preparation with an earlier role.}
 #' }
 #'
 #' @seealso
@@ -679,6 +724,130 @@
 #' }
 #'
 #' @export
+#' @param candidates Optional feasible recipe data frame to score in place of
+#'   random sampling. Include all predictors. A unique `recipe_id` is optional.
+#'   Repeated physical recipes collapse to the smallest supplied ID (numeric
+#'   order or bytewise order for character IDs). Without IDs the scorer assigns
+#'   ranks of sorted unique recipe keys, independent of the input row order.
+#'   For a worklist, hold each block at its planned operating level. Physical
+#'   recipe keys exclude those nuisance blocks.
+#' @param budget Optional positive physical preparation count for a worklist.
+#'   Under `allocation = "legacy"` it counts distinct new preparations. The
+#'   order is elastic-net SVEM, GauPro, Extra Trees, forward and spline optima
+#'   when supplied, then SVEM spread, GP latent SD and high-spread medoids.
+#'   Under `allocation = "portfolio"` it counts all physical preparations,
+#'   including incumbent and benchmark repeats. Shared optima use one place.
+#'   With unspecified exploration count, exploration can fill remaining slots.
+#'   Supply `data` to exclude previously prepared recipes across all blocks,
+#'   or use the recorded preparation settings in companion fits. A worklist's
+#'   `history_source` reports the coverage available for this exclusion.
+#'   For the legacy allocation, budget required controls separately.
+#' @param gp_endpoint Optional response name for GP exploration by latent SD.
+#'   A single Gaussian response is inferred automatically when GauPro was fitted.
+#' @param increments Optional named numeric vector of positive preparation
+#'   increments for an already discretized supplied pool, measured from zero.
+#'   For example, use 0.0001 for component fractions in basis points.
+#' @param forward Optional named list of Gaussian forward fits for the same
+#'   responses. They use the same desirability anchors and scientific weights.
+#' @param spline Optional named list of [svem_spline()] fits, one per response.
+#'   Scoring uses the same physical factors, block declarations, mixture
+#'   constraints, scientific weights and desirability anchors as the primary
+#'   fits. Supplying a spline adds its fitted means, joint score and nomination.
+#'   A spline treats known block levels as categories and is incompatible with
+#'   a primary fit that declares a continuous companion block.
+#'   This scorer uses previously fitted objects. Use [svem_plan_runs()] to fit
+#'   models and prepare a worklist together.
+#' @param n_optima Optional number of distinct new model nominations in
+#'   portfolio allocation. Duplicate model optima share one preparation and
+#'   the next distinct prioritized model can fill the requested count. With
+#'   `n_optima = NULL`, available models fill places left after required
+#'   repeats and reserved exploration. An unfilled automatic model place is
+#'   recorded as capacity.
+#' @param n_explore Optional exact number of uncertainty-medoid preparations.
+#'   If both counts are supplied, an omitted budget is their sum plus the
+#'   distinct required reference repeats. Supply a total `budget` when only
+#'   one count is specified. Reference repeats consume budget first. With `n_explore = NULL`, remaining
+#'   eligible slots are filled by exploration. Explicit counts can leave
+#'   capacity unused. Inspect `allocation_counts` and `merged_nominations`
+#'   for requested and obtained roles, shortages and shared physical recipes.
+#' @param allocation `"legacy"` preserves the existing new-recipe allocation.
+#'   `"portfolio"` uses the declared priority, then uncertainty medoids. The
+#'   default formulation workflow in [svem_plan_runs()] selects this policy.
+#' @param incumbent For portfolio allocation, `TRUE` repeats the best observed
+#'   preparation in the reference block context; `FALSE` omits it. A positive
+#'   integer specifies a row of `data` explicitly. The repeat consumes one slot.
+#'   Each historical row must represent an independent preparation; summarize
+#'   technical readings first. Selection uses observed outcomes, not fitted
+#'   historical means. Missing positively weighted outcomes are ineligible.
+#' @param benchmark Optional fixed historical benchmark, carried in addition to
+#'   the selected incumbent. Supply one row index of \code{data}, or a named
+#'   one-element list identifying a unique row, such as
+#'   \code{list(RunID = "original-control")}. The identifier form is convenient
+#'   across refits. The recipe must satisfy the current preparation constraints;
+#'   it need not have complete response observations. A requested benchmark is
+#'   mandatory and consumes a slot. If it is the same physical recipe as the
+#'   incumbent, one preparation carries both roles. Too small a budget errors.
+#' @param incumbent_summary How repeated independent preparations within a
+#'   reference context are ranked. The default \code{"best"} retains the
+#'   highest individual observation. A poor repeat cannot demote that stored
+#'   maximum. Use \code{"mean"} to score each physical recipe's mean observed
+#'   responses over complete preparations; technical readings must be summarized
+#'   beforehand. An explicit incumbent row always uses that row alone.
+#' @param reference Named list with one historical level of every blocking
+#'   factor for automatic incumbent selection. By default uses the planned
+#'   levels in `candidates`; raw observations from different blocks are not
+#'   pooled. An explicit incumbent row instead supplies its own source context.
+#' @param priority Portfolio nomination order. The usual order is incumbent,
+#'   elastic net, GauPro, Extra Trees and forward. The default order appends
+#'   spline after forward only when a spline fit list is supplied to this scorer.
+#'   A custom order can omit or reorder models. Shared optima consume one place.
+#' @param exploration_fraction Fraction of remaining eligible recipes offered
+#'   to uncertainty medoid selection in portfolio allocation, default 0.1.
+#'   The shortlist expands only enough to fill available slots when necessary;
+#'   `allocation_details` records that expansion. Use 0.25 for a wider sensitivity.
+#' @details When companions or a budget are requested, `score_table` also
+#'   contains one set of endpoint means and one comparable desirability per
+#'   available engine. The returned `worklist` has one row per distinct
+#'   nomination after excluding known preparations. Its
+#'   `selections` can be passed to `svem_export_candidates_csv()`.
+#'   `nominations` reports each engine's unrestricted and best unprepared
+#'   candidate. `exploration` contrasts best predicted desirability among tied
+#'   maximum SVEM spread scores with an unclipped standardized-width tie-break.
+#'   All engines use the original scientific weights and the same SVEM-resolved
+#'   desirability anchors. A sole max/min endpoint ranks by the raw fitted mean.
+#'   For several endpoints, equally desirable candidates remain tied even when
+#'   their predictions differ outside the specified desirability limits; a
+#'   stable recipe key resolves those ties. The scorer does not invent extra
+#'   utility beyond the declared goals. Mean-interval, WMT and specification
+#'   diagnostics remain specific to SVEM.
+#'
+#'   Portfolio results also return \code{uncertainty_anchors} and a
+#'   \code{uncertainty_eligibility} table with recipe IDs, informative-width
+#'   flags and unclipped standardized widths. Constant or unavailable interval
+#'   widths cannot support exploration. The worklist records its prediction
+#'   context and the incumbent's observed source context and rows. The
+#'   incumbent's \code{by_context} table reports observed winners separately,
+#'   without pooling or adjusting outcomes across blocks. The incumbent object
+#'   (not its \code{by_context} table) also records
+#'   \code{recipe_n_preparations} (all attempted preparations of the selected
+#'   physical recipe in its source context), \code{recipe_n_complete}, and
+#'   \code{recipe_mean_score}, the desirability of its complete-preparation
+#'   mean responses. These diagnostics do not change the default best-row
+#'   selection. \code{n_preparations} counts the source rows used by the selected
+#'   statistic, so it remains one for a best individual observation. The worklist
+#'   exposes the recipe counts and mean score with the prefix
+#'   \code{incumbent_recipe_}.
+#'
+#'   The companion worklist is a custom experimental confirmation workflow.
+#'   GauPro nominates an optimum by the fitted response mean or joint
+#'   desirability. A separate optional slot uses the largest latent standard
+#'   deviation for a chosen endpoint. A full Bayesian optimization workflow
+#'   specifies an acquisition rule and updates the choice as data arrive.
+#'   Expected improvement, for example, combines improvement and uncertainty
+#'   in one acquisition value (Jones, Schonlau and Welch, 1998,
+#'   \doi{10.1023/A:1008306431147}; Frazier, 2018,
+#'   \url{https://arxiv.org/abs/1807.02811}). Here the scientist allocates
+#'   preparations, measures the responses and requests the refit.
 svem_score_random <- function(objects,
                               goals,
                               data = NULL,
@@ -689,7 +858,20 @@ svem_score_random <- function(objects,
                               numeric_sampler = c("random", "uniform"),
                               wmt = NULL,
                               verbose = TRUE,
-                              specs   = NULL) {
+                              specs   = NULL,
+                              candidates = NULL,
+                              budget = NULL,
+                              gp_endpoint = NULL,
+                              increments = NULL,
+                              forward = NULL,
+                              allocation = c("legacy", "portfolio"),
+                              incumbent = FALSE,
+                              reference = NULL,
+                              priority = c("incumbent", "svemnet", "gaupro", "extra_trees", "forward"),
+                              exploration_fraction = .1,
+                              incumbent_summary = c("best", "mean"),
+                              benchmark = NULL,
+                              spline = NULL, n_optima = NULL, n_explore = NULL) {
 
   # ---- constants / defaults ----
   debias_flag         <- FALSE  # always off here by design
@@ -702,6 +884,24 @@ svem_score_random <- function(objects,
   .ds_span_abs_floor  <- 1e-6
   .ds_span_rel_floor  <- 0.05
 
+  use_default_priority <- missing(priority)
+  allocation <- match.arg(allocation)
+  # A scorer cannot fit: only supplied spline fits extend its default priority.
+  priority <- .svem_resolve_plan_priority(priority, use_default_priority && is.list(spline),
+                                          spline, n_optima, n_explore)
+  if ((!is.null(n_optima) || !is.null(n_explore)) && allocation != "portfolio") {
+    stop("Explicit allocation counts require allocation = 'portfolio'.", call. = FALSE)
+  }
+  .svem_validate_allocation_counts(budget, n_optima, n_explore, priority)
+  incumbent_summary <- match.arg(incumbent_summary)
+  carry <- !identical(incumbent, FALSE)
+  benchmark_row <- .svem_resolve_benchmark(benchmark, data)
+  if (!is.null(benchmark_row) && allocation != "portfolio") {
+    stop("A fixed benchmark requires allocation = 'portfolio'.")
+  }
+  if (carry && allocation != "portfolio") stop("An incumbent repeat requires allocation = 'portfolio'.")
+  exploration_fraction <- .svem_numeric_scalar(exploration_fraction, "exploration_fraction",
+                                               lower = 0, upper = 1, lower_open = TRUE)
   combine         <- match.arg(combine)
   numeric_sampler <- match.arg(numeric_sampler)
 
@@ -750,6 +950,33 @@ svem_score_random <- function(objects,
   if (length(empty_idx)) obj_names[empty_idx] <- lhs_names[empty_idx]
   names(objects) <- obj_names
 
+  engines <- intersect(c("gaupro", "extra_trees"),
+                       unique(unlist(lapply(objects, function(o) names(o$companions)))))
+  if (!is.null(forward)) {
+    if (!is.list(forward) || is.null(names(forward)) || anyDuplicated(names(forward)) ||
+        !setequal(names(forward), names(objects)) ||
+        !all(vapply(forward, inherits, logical(1), what = "svem_model"))) {
+      stop("forward must be a named list of fitted models for exactly the same responses.")
+    }
+    forward <- forward[names(objects)]
+    if (!all(vapply(forward, inherits, logical(1), what = "svem_forward"))) {
+      stop("forward must contain Gaussian svem_forward() fits, not other SVEM engines.")
+    }
+    matching <- vapply(names(objects), function(r) {
+      identical(.svem_response_label(forward[[r]]$formula),
+                .svem_response_label(objects[[r]]$formula))
+    }, logical(1))
+    if (!all(matching)) stop("Forward response labels must match their corresponding primary model responses.")
+    engines <- c(engines, "forward")
+  }
+  if (!is.null(spline)) {
+    spline <- .svem_spline_model_list(spline, names(objects), labels = unname(lhs_names))
+    .svem_spline_check_schema(spline, objects)
+    engines <- c(engines, "spline")
+  }
+  make_worklist <- length(engines) > 0L || !is.null(budget) || !is.null(gp_endpoint) || allocation == "portfolio"
+  if (!is.null(budget)) budget <- .svem_integer_scalar(budget, "budget", min = 1L)
+
   resp_names <- names(objects)
   if (any(!nzchar(resp_names))) {
     stop(
@@ -769,6 +996,13 @@ svem_score_random <- function(objects,
 
   # mapping: unambiguous object/LHS key -> canonical response name
   key_to_resp <- .svem_response_key_map(resp_names, lhs_names, valid_lhs)
+  if (!is.null(gp_endpoint)) {
+    if (!is.character(gp_endpoint) || length(gp_endpoint) != 1L ||
+        !gp_endpoint %in% names(key_to_resp)) stop("Unknown gp_endpoint response.")
+    gp_endpoint <- unname(key_to_resp[[gp_endpoint]])
+  } else if ("gaupro" %in% engines && length(resp_names) == 1L) {
+    gp_endpoint <- resp_names
+  }
 
   # Generated names must never replace design factors or observed responses.
   # Check both canonical response names and formula labels before drawing RNG.
@@ -778,6 +1012,11 @@ svem_score_random <- function(objects,
   predictor_names <- unique(unlist(lapply(objects, function(o) {
     o$sampling_schema$predictor_vars
   }), use.names = FALSE))
+  if (make_worklist || !is.null(candidates)) {
+    .svem_check_output_collisions(c(predictor_names, resp_names, generated_names),
+                                  .svem_worklist_names(resp_names, engines),
+                                  "svem_score_random() worklist")
+  }
   .svem_check_output_collisions(predictor_names, generated_names,
                                 "svem_score_random()")
   if (!is.null(data)) {
@@ -945,12 +1184,26 @@ svem_score_random <- function(objects,
   # ---- sample & predict ----
   # NOTE: svem_random_table_multi() auto-respects discrete numeric supports
   # stored in sampling_schema; no discrete argument is passed here.
+  prepared <- NULL
+  if (carry) {
+    prepared <- .svem_observed_pool(objects, data, candidates,
+      .svem_pool_groups(objects, mixture_groups), increments, incumbent, reference)
+    candidates <- prepared$candidates
+  }
+  benchmark_prepared <- NULL
+  if (!is.null(benchmark_row)) {
+    benchmark_prepared <- tryCatch(.svem_observed_pool(objects, data, candidates,
+      .svem_pool_groups(objects, mixture_groups), increments, benchmark_row, NULL),
+      error = function(e) stop("Benchmark cannot be prepared: ", conditionMessage(e), call. = FALSE))
+    candidates <- benchmark_prepared$candidates
+  }
   sampled_raw <- svem_random_table_multi(
     objects         = objects,
     n               = n,
     mixture_groups  = mixture_groups,
     debias          = debias_flag,
-    numeric_sampler = numeric_sampler
+    numeric_sampler = numeric_sampler,
+    candidates      = candidates
   )
 
   if (!is.list(sampled_raw) || is.null(sampled_raw$data) || is.null(sampled_raw$pred)) {
@@ -959,6 +1212,20 @@ svem_score_random <- function(objects,
 
   data_df <- as.data.frame(sampled_raw$data)
   pred_df <- as.data.frame(sampled_raw$pred, check.names = FALSE, optional = FALSE)
+  if (length(engines)) {
+    deployment <- .svem_worklist_numeric_blocks(objects, data_df, !is.null(candidates))
+    if (!identical(deployment, data_df)) {
+      data_df <- deployment
+      pred_df <- .svem_pool_predictions(objects, data_df, debias_flag)$pred
+    }
+  }
+  indexed <- make_worklist || !is.null(candidates) || !is.null(increments)
+  if (indexed) {
+    pool_index <- .svem_pool_index(data_df, candidates, increments,
+                                   if (make_worklist) objects[[1L]]$sampling_schema$blocking)
+    data_df <- data_df[pool_index$keep, , drop = FALSE]
+    pred_df <- pred_df[pool_index$keep, , drop = FALSE]
+  }
 
   # map response labels -> prediction columns in sampled_raw$pred
   resp_table_cols <- setNames(character(length(resp_names)), resp_names)
@@ -971,16 +1238,15 @@ svem_score_random <- function(objects,
       lhs <- .svem_response_label(obj$formula)
     }
 
-    candidates <- character(0L)
-    if (!is.na(lhs) && nzchar(lhs)) candidates <- c(candidates, paste0(lhs, "_pred"))
-    candidates <- unique(c(candidates, paste0(resp, "_pred")))
+    matching_cols <- unique(c(if (!is.na(lhs) && nzchar(lhs)) paste0(lhs, "_pred"),
+                              paste0(resp, "_pred")))
 
-    found <- candidates[candidates %in% colnames(pred_df)]
+    found <- matching_cols[matching_cols %in% colnames(pred_df)]
     if (!length(found)) {
       stop(
         "Could not match response '", resp,
         "' to prediction columns from svem_random_table_multi(). Expected one of: ",
-        paste(candidates, collapse = ", "),
+        paste(matching_cols, collapse = ", "),
         " in names(sampled_raw$pred)."
       )
     }
@@ -995,6 +1261,7 @@ svem_score_random <- function(objects,
   colnames(pred_mat) <- paste0(resp_names, "_pred")
 
   score_table <- cbind(data_df, pred_mat)
+  if (indexed) score_table$recipe_id <- pool_index$ids
 
   resp_cols       <- resp_names
   resp_pred_cols  <- setNames(paste0(resp_cols, "_pred"), resp_cols)
@@ -1394,7 +1661,7 @@ svem_score_random <- function(objects,
       attr(score_table, "svem_response_vars")
   }
 
-  list(
+  out <- list(
     score_table          = score_table,
     original_data_scored = original_data_scored,
     weights_original     = wts_user,
@@ -1402,4 +1669,106 @@ svem_score_random <- function(objects,
     wmt_p_values         = if (reweight_flag) wmt_p_vals else NULL,
     wmt_multipliers      = if (reweight_flag) wmt_mult   else NULL
   )
+  if (!make_worklist) return(out)
+  des <- function(y, p) {
+    switch(p$type,
+           max = .ds_max(y, p$L, p$U, p$s),
+           min = .ds_min(y, p$L, p$U, p$s),
+           target = .ds_target(y, p$T0, p$L, p$U, p$sL, p$sR))
+  }
+  cross <- .svem_engine_scores(out$score_table, data_df, objects, setdiff(engines, c("forward", "spline")),
+                               ds_params, des, wts_user, combine, geom_floor, gp_endpoint)
+  out$score_table <- cross$table
+  out$engine_status <- cross$status
+  if (!is.null(forward)) {
+    fw <- .svem_forward_scores(out$score_table, data_df, forward, ds_params, des,
+                                wts_user, combine, geom_floor)
+    out$score_table <- fw$table
+    out$engine_status <- rbind(out$engine_status, fw$status)
+  }
+  if (!is.null(spline)) {
+    sm <- .svem_spline_scores(out$score_table, data_df, spline, ds_params, des,
+                              wts_user, combine, geom_floor)
+    out$score_table <- sm$table
+    out$engine_status <- rbind(out$engine_status, sm$status)
+  }
+  incumbent_info <- NULL
+  if (carry) {
+    incumbent_info <- .svem_observed_choice(objects, data, prepared, ds_params, des,
+      wts_user, combine, geom_floor, goals, pool_index$keys, incumbent_summary)
+    incumbent_info$recipe_id <- out$score_table$recipe_id[incumbent_info$index]
+    incumbent_info$by_context$recipe_id <- as.character(out$score_table$recipe_id[
+      match(incumbent_info$by_context$recipe_key, pool_index$keys)])
+    if (isTRUE(verbose) && incumbent_info$higher_raw_in_other_context) {
+      message("A higher raw observed value exists in another block context. ",
+              "Raw values across blocks are not automatically comparable; ",
+              "inspect $incumbent$by_context or choose an explicit incumbent row.")
+    }
+  }
+  benchmark_info <- NULL
+  if (!is.null(benchmark_row)) {
+    benchmark_info <- list(index = match(benchmark_prepared$keys[1L], pool_index$keys),
+      source_row = benchmark_row, source_data = data[benchmark_row, , drop = FALSE],
+      source_context = .svem_context_label(data[benchmark_row, , drop = FALSE],
+        objects[[1L]]$sampling_schema$blocking), selector = benchmark)
+    if (is.na(benchmark_info$index)) stop("Fixed benchmark was not retained in the candidate pool.")
+    benchmark_info$recipe_id <- out$score_table$recipe_id[benchmark_info$index]
+  }
+  history <- data
+  history_source <- "supplied_data"
+  if (is.null(history)) {
+    tables <- lapply(objects, function(obj) attr(obj$companions, "prepared_recipes", exact = TRUE))
+    available <- vapply(tables, is.data.frame, logical(1))
+    history_source <- if (all(available)) "fitted_preparations" else if (any(available)) {
+      "partial_fitted_preparations"
+    } else "no_preparation_history"
+    if (any(available)) history <- unique(do.call(rbind, tables[available]))
+  }
+  out$history_source <- history_source
+  work <- .svem_worklist(out$score_table, history, pool_index$keys, increments,
+                         objects[[1L]]$sampling_schema, engines, goals, wts_user,
+                         wts_uncert, ciw_anchors, gp_endpoint, budget,
+                         allocation = allocation, priority = priority,
+                         exploration_fraction = exploration_fraction,
+                         incumbent = if (carry) incumbent_info$index else NULL,
+                         benchmark = if (!is.null(benchmark_info)) benchmark_info$index else NULL,
+                         n_optima = n_optima, n_explore = n_explore)
+  if (history_source == "partial_fitted_preparations") {
+    verified <- work$nominations$best_prepared
+    work$nominations$best_prepared[!is.na(verified) & !verified] <- NA
+  }
+  if (allocation == "portfolio") {
+    if (carry) work$nominations$best_ties[work$nominations$engine == "incumbent"] <- incumbent_info$ties
+    out$incumbent <- incumbent_info
+    out$benchmark <- benchmark_info
+    out$desirability_parameters <- ds_params
+    out$uncertainty_anchors <- ciw_anchors
+    context <- .svem_context_label(data_df, objects[[1L]]$sampling_schema$blocking)[1L]
+    work$worklist$prediction_context <- rep(context, nrow(work$worklist))
+    work$worklist$reference_context <- rep(NA_character_, nrow(work$worklist))
+    work$worklist$incumbent_source_rows <- rep(NA_character_, nrow(work$worklist))
+    work$worklist$incumbent_n_preparations <- rep(NA_integer_, nrow(work$worklist))
+    work$worklist$incumbent_recipe_n_preparations <- rep(NA_integer_, nrow(work$worklist))
+    work$worklist$incumbent_recipe_n_complete <- rep(NA_integer_, nrow(work$worklist))
+    work$worklist$incumbent_recipe_mean_score <- rep(NA_real_, nrow(work$worklist))
+    work$worklist$incumbent_summary <- rep(NA_character_, nrow(work$worklist))
+    work$worklist$benchmark_source_row <- rep(NA_integer_, nrow(work$worklist))
+    work$worklist$benchmark_source_context <- rep(NA_character_, nrow(work$worklist))
+    if (carry) {
+      i <- which(work$worklist$role %in% c("incumbent_repeat", "incumbent_benchmark_repeat"))
+      work$worklist$reference_context[i] <- incumbent_info$source_context
+      work$worklist$incumbent_source_rows[i] <- paste(incumbent_info$source_rows, collapse = ",")
+      work$worklist$incumbent_n_preparations[i] <- incumbent_info$n_preparations
+      work$worklist$incumbent_recipe_n_preparations[i] <- incumbent_info$recipe_n_preparations
+      work$worklist$incumbent_recipe_n_complete[i] <- incumbent_info$recipe_n_complete
+      work$worklist$incumbent_recipe_mean_score[i] <- incumbent_info$recipe_mean_score
+      work$worklist$incumbent_summary[i] <- incumbent_info$summary
+    }
+    if (!is.null(benchmark_info)) {
+      i <- which(work$worklist$recipe_id == benchmark_info$recipe_id)
+      work$worklist$benchmark_source_row[i] <- benchmark_row
+      work$worklist$benchmark_source_context[i] <- benchmark_info$source_context
+    }
+  }
+  c(out, work)
 }

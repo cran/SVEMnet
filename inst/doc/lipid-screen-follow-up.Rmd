@@ -1,0 +1,47 @@
+---
+title: "Choosing and confirming follow-up recipes in a 23-run lipid screen"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Choosing and confirming follow-up recipes in a 23-run lipid screen}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+The worked example fits elastic-net SVEM, forward-likelihood SVEM, GauPro and Extra Trees on the same experimental factors. The installed package
+includes the complete executable analysis, so the results can be regenerated
+with different measurements or a different preparation budget. To rerun it,
+copy the source to a writable project directory and render it there. Install
+the suggested packages `GauPro` and `ranger` to include both companions.
+The final sections use a two-factor teaching surface and an optional general
+spline on the full mixture/process experiment with its nominal ingredient
+factor. They show explicit model and exploration counts. The worklist reports how many distinct settings those models
+nominate. Install the suggested package `mgcv` for that section.
+
+The journal articles are the fixed versions of record. The authors occasionally
+update the arXiv manuscripts. These links open the latest posted revisions.
+
+* Karl et al., *A Workflow for Lipid Nanoparticle (LNP) Formulation Optimization*.
+  [Latest arXiv version](https://arxiv.org/abs/2212.11264) · [JoVE article](https://doi.org/10.3791/65200).
+* Karl, *SVEMnet: An R Package for Self-Validated Elastic-Net Ensembles and Multi-Response Optimization*.
+  [Latest arXiv version](https://arxiv.org/abs/2511.20968) · [Chemometrics article](https://doi.org/10.1016/j.chemolab.2026.105660).
+
+```r
+source_file <- system.file("examples", "lipid-screen-follow-up.Rmd", package = "SVEMnet")
+file.copy(source_file, "my-lipid-follow-up.Rmd")
+rmarkdown::render("my-lipid-follow-up.Rmd")
+```
+
+The GP fits in this example use one seeded optimizer start per endpoint.
+Rerunning with a different seed can lead to a different fitted surface and
+recipe nomination. Compare plausible nominees in the laboratory when that
+sensitivity affects the decision.
+
+For a large recipe table, the optional medoid step compares pairs of
+high-spread recipes. Its memory cost grows with the square of the shortlist
+size. A discrete table of settings the lab can prepare keeps this step small.
+
+```{r worked-results, echo=FALSE, results='asis'}
+snapshot <- system.file("examples", "lipid-screen-follow-up.md", package = "SVEMnet",
+                        mustWork = TRUE)
+cat(readLines(snapshot, encoding = "UTF-8"), sep = "\n")
+```

@@ -169,8 +169,10 @@ the ordinary (gamma = 1) curve before choosing gamma.
 }
 \details{
 This function is a convenience wrapper around \code{glmnet()} and
-\code{cv.glmnet()} that returns an object in the same structural format as
-\code{SVEMnet()} (class \code{"svem_model"}). It is intended for:
+\code{cv.glmnet()} that returns an object inheriting from
+\code{"svem_model"} for prediction and model-matrix schema tools.
+Candidate scoring and planning require the additional ensemble and sampling
+information stored by \code{SVEMnet()}. This wrapper is intended for:
 \itemize{
 \item direct comparison of standard cross-validated glmnet fits to SVEMnet
 models using the same prediction and schema tools, or

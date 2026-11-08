@@ -3,12 +3,9 @@
 #' Extracts averaged coefficients from an \code{svem_model} fitted by
 #' \code{\link{SVEMnet}}.
 #'
-#' For Gaussian fits, you can optionally request debiased coefficients (if they
-#' were computed and stored) via \code{debiased = TRUE}. In that case, the
-#' function returns \code{object$parms_debiased}. If debiased coefficients are
-#' not available, or if \code{debiased = FALSE}, the function returns
-#' \code{object$parms}, which are the ensemble-averaged coefficients across
-#' bootstrap members.
+#' The default returns \code{object$parms}, the ensemble-averaged coefficients.
+#' For a Gaussian fit, \code{debiased = TRUE} returns the coefficients after
+#' calibration when fitted. Otherwise the stored coefficients are unchanged.
 #'
 #' For Binomial models, \code{debiased} is ignored and the averaged
 #' coefficients in \code{object$parms} are returned.
@@ -28,11 +25,11 @@
 #' \itemize{
 #'   \item \code{parms}: ensemble-averaged coefficients over bootstrap members,
 #'         on the model's link scale;
-#'   \item \code{parms_debiased}: optional debiased coefficients (Gaussian only),
-#'         if requested at fit time.
+#'   \item \code{parms_debiased}: coefficients adjusted by the fitted Gaussian
+#'         calibration when available. Otherwise they equal \code{parms}.
 #' }
-#' Passing \code{debiased = TRUE} has no effect if \code{parms_debiased} is
-#' \code{NULL}.
+#' For older objects that lack \code{parms_debiased}, the accessor returns
+#' \code{parms}.
 #'
 #' @seealso \code{\link{svem_nonzero}} for bootstrap nonzero percentages and a
 #'   quick stability plot.

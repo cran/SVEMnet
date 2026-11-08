@@ -52,11 +52,8 @@
 #'   }
 #' @param objective Character. One of \code{"auto"}, \code{"wAIC"},
 #'   \code{"wBIC"}, or \code{"wSSE"}.
-#'   \itemize{
-#'   \item \code{"wAIC"}: Gaussian AIC-like criterion based on the weighted SSE.
-#'   \item \code{"wBIC"}: Gaussian BIC-like criterion based on the weighted SSE.
-#'   }
-#'   See Details for the exact criteria in the Gaussian and binomial cases.
+#'   See Details for the automatic choices, the information criteria and the
+#'   loss-only criterion for Gaussian and binomial responses.
 #' @param relaxed Logical or character. Default \code{"auto"}.
 #'   If \code{TRUE}, use glmnet's relaxed elastic-net path and select both
 #'   the penalty \code{lambda} and the relaxed refit parameter \code{gamma}
@@ -146,7 +143,64 @@
 #'   (\code{nlambda} is fixed at 500); user-supplied values are ignored with
 #'   a warning. Argument names that the installed \code{glmnet} does not
 #'   recognize are also ignored with a warning (misspelling protection).
+#'   Relaxed fits additionally accept `maxp` and `path`.
 #'
+#' @details The Gaussian SVEMnet elastic-net search requests 500 lambda values with
+#'   glmnet's deviance-based early path stopping disabled (`fdev = 0`,
+#'   `devmax = 1`). Other solver limits can still shorten the requested path.
+#'   Disabling these rules preserves solver convergence checks, coefficient limits and
+#'   SVEM's validation-size support guard. Explicit algorithm controls are
+#'   honored. These call-level defaults override session-level stopping settings.
+#'   Use `control = list(fdev = 1e-5, devmax = 0.999)` to recover the
+#'   former stopping policy. Modern glmnet uses per-call controls; older
+#'   supported versions use a scoped override restored even on error.
+#'   This default applies to Gaussian SVEMnet members, including fits inside
+#'   the whole-model test. Binomial members and the separate `glmnet_with_cv()`
+#'   comparison wrapper retain their former stopping defaults. To request the
+#'   extended binomial path, supply `control = list(fdev = 0, devmax = 1)`. Retained
+#'   solver warnings, their member count, the glmnet version and the effective
+#'   call-level controls are available in `diagnostics`. Changing the path can
+#'   change fits at any noise level and whole-model p-values or multipliers.
+#'   Results are not uniformly better on new data: a small stress check saw
+#'   some small-sample and wSSE fits worsen.
+#'
+#'   GauPro companions normalize the response internally and return means and
+#'   latent standard errors in the original response units. An unsupported
+#'   single-factor input or a constant response is reported before claiming a
+#'   usable GP fit. Engine messages are retained with companion warnings.
+#'
+#' @param companions Optional Gaussian-response companion fits. \code{FALSE}
+#'   fits SVEM alone. \code{TRUE} requests both \pkg{GauPro} and \pkg{ranger}
+#'   Extra Trees. A character vector can select \code{"gaupro"} or
+#'   \code{"extra_trees"} individually. Companions use the original factors
+#'   on the SVEM analysis rows. Requested fits and diagnostics are stored in
+#'   \code{$companions}; an unavailable engine leaves the primary fit usable.
+#'   The companion component retains the unique physical predictor rows used
+#'   for that endpoint to identify previously prepared recipes at nomination.
+#'   The Gaussian process uses GauPro's Matern 5/2 kernel on continuous
+#'   coordinates and latent-factor kernels on nominal inputs. It estimates
+#'   the nugget with one seeded optimization start. The fit records its seed,
+#'   package version, kernel settings and attained GauPro deviance on its
+#'   internally normalized response scale. That deviance is not comparable
+#'   with earlier unnormalized fits. Printing the companion component reports
+#'   how many fit notes were retained in its `warnings` field.
+#' @param companion_blocks With \code{"respect"} (default), a varying block
+#'   declared in a BigExp specification makes the companion fits unsupported.
+#'   \code{"interacting"} explicitly permits each companion to learn a
+#'   different recipe surface per block. Numeric day, plate or batch IDs
+#'   are nominal labels by default. Supply observed IDs when scoring them.
+#'   An unreplicated numeric block triggers a diagnostic at fitting time.
+#' @param companion_continuous_blocks Names of measured numeric blocking
+#'   covariates, such as ambient temperature, to treat as continuous inputs in
+#'   an interacting companion. Such a covariate can be scored between observed
+#'   values within its fitted range. Other blocks retain their nominal encoding.
+#'   The SVEM formula and its block penalties are unaffected.
+#' @param mixture_groups Optional list of fixed-sum mixture groups in
+#'   \code{\link{svem_random_table_multi}} format. A BigExp fit inherits its
+#'   groups from \code{\link{bigexp_terms}}. Companions use one fewer
+#'   varying coordinate per group. They drop the last varying component in
+#'   the declared order and check all components at prediction. The GP and forest
+#'   can give different fits in a different choice of free coordinates.
 #' @return An object of class \code{"svem_model"} (and \code{"svem_binomial"}
 #'   when \code{family = "binomial"}) with components:
 #' \itemize{
@@ -549,7 +603,21 @@ SVEMnet <- function(formula, data,
                     family = c("gaussian", "binomial"),
                     complexity = c("support", "edf"),
                     ...,
-                    store_member_weights = FALSE) {
+                    store_member_weights = FALSE,
+                    companions = FALSE,
+                    companion_blocks = c("respect", "interacting"),
+                    mixture_groups = NULL,
+                    companion_continuous_blocks = character()) {
+
+  engines <- .svem_companion_names(companions)
+  companion_blocks <- match.arg(companion_blocks)
+  if (is.null(companion_continuous_blocks)) companion_continuous_blocks <- character()
+  if (!is.character(companion_continuous_blocks) || anyNA(companion_continuous_blocks) ||
+      any(!nzchar(companion_continuous_blocks)) || anyDuplicated(companion_continuous_blocks)) {
+    stop("companion_continuous_blocks must be a character vector of unique block names.",
+         call. = FALSE)
+  }
+  mixture_groups <- .svem_mixture_groups(mixture_groups)
 
   ## ----------------- family handling -----------------
   if (inherits(family, "family")) {
@@ -634,6 +702,18 @@ SVEMnet <- function(formula, data,
     }
   }
 
+  if (!is.null(spec$settings$mixture_groups)) {
+    inherited <- spec$settings$mixture_groups
+    if (!is.null(mixture_groups) && !identical(mixture_groups, inherited))
+      stop("mixture_groups conflicts with the groups declared in bigexp_terms().", call. = FALSE)
+    mixture_groups <- inherited
+  }
+  if (using_spec && length(mixture_groups) &&
+      (length(spec$settings$mixture_vars) || isTRUE(spec$settings$center_polynomials)) &&
+      !setequal(spec$settings$mixture_vars, unlist(lapply(mixture_groups, `[[`, "vars"), use.names = FALSE))) {
+    stop("Declare consistent mixture_groups and mixture membership in bigexp_terms().",
+         call. = FALSE)
+  }
   contrasts_used_full <- NULL  # will capture pre-intercept-drop contrasts (fix #1)
   schema_data <- data
 
@@ -778,6 +858,15 @@ SVEMnet <- function(formula, data,
   }
 
   predictor_vars <- .svem_raw_predictor_vars(terms_full, names(schema_data))
+  if (length(mixture_groups)) {
+    mixture_vars <- unlist(lapply(mixture_groups, `[[`, "vars"), use.names = FALSE)
+    if (length(setdiff(mixture_vars, predictor_vars)) ||
+        length(intersect(mixture_vars, c(blocking, spec$settings$discrete_numeric))) ||
+        !all(vapply(schema_data_used[mixture_vars], is.numeric, logical(1)))) {
+      stop("Mixture components must be continuous, non-blocking model predictors.", call. = FALSE)
+    }
+    .svem_check_mixture_totals(schema_data_used, mixture_groups)
+  }
   if (!using_spec) {
     schema_data_used <- .svem_drop_unused_raw_levels(schema_data_used, predictor_vars)
   }
@@ -983,6 +1072,7 @@ SVEMnet <- function(formula, data,
   n_eff_keep        <- numeric(nBoot)
   objective_value   <- rep(NA_real_, nBoot)
   validation_sse    <- rep(NA_real_, nBoot)
+  solver_warnings   <- rep(NA_character_, nBoot)
   frw_uniforms      <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
   training_weights  <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
   validation_weights <- if (store_member_weights) matrix(NA_real_, nBoot, n) else NULL
@@ -1069,6 +1159,8 @@ SVEMnet <- function(formula, data,
                                   glmnet_base_args, relax_gamma_grid,
                                   glmnet_design$sentinel)
       attempt_reasons <- c(attempt_reasons, bundle$errors)
+      notes <- unique(c(if (!is.na(solver_warnings[i])) solver_warnings[i], bundle$warnings))
+      if (length(notes)) solver_warnings[i] <- paste(notes, collapse = " | ")
       fit <- bundle$fit
       for (path in bundle$paths) {
         relax_g <- path$gamma
@@ -1260,6 +1352,7 @@ SVEMnet <- function(formula, data,
   n_eff_keep        <- n_eff_keep[valid_rows]
   objective_value   <- objective_value[valid_rows]
   validation_sse    <- validation_sse[valid_rows]
+  solver_warnings   <- solver_warnings[valid_rows]
   if (store_member_weights) {
     frw_uniforms       <- frw_uniforms[valid_rows, , drop = FALSE]
     training_weights   <- training_weights[valid_rows, , drop = FALSE]
@@ -1332,6 +1425,12 @@ SVEMnet <- function(formula, data,
   diagnostics <- list(
     numerically_constant_columns = colnames(X)[numerically_constant],
     calibration_skip_reason = calibration$reason,
+    solver_warnings = solver_warnings,
+    solver_warning_count = sum(!is.na(solver_warnings)),
+    glmnet_version = as.character(utils::packageVersion("glmnet")),
+    glmnet_control = if (!is.null(glmnet_base_args$control)) glmnet_base_args$control else
+      c(glmnet_base_args[intersect(names(glmnet_base_args), .glmnet_direct_control_args())],
+        attr(glmnet_base_args, "svem_legacy_control", exact = TRUE)),
     k_summary = c(k_median = stats::median(k_sel_vec),
                   k_iqr    = stats::IQR(k_sel_vec)),
     fallback_rate = mean(fallbacks),
@@ -1430,6 +1529,7 @@ SVEMnet <- function(formula, data,
     discrete_numeric = discrete_numeric_vars,
     discrete_levels  = discrete_numeric_levels
   )
+  if (length(mixture_groups)) sampling_schema$mixture_groups <- mixture_groups
 
 
   result <- list(
@@ -1480,5 +1580,10 @@ SVEMnet <- function(formula, data,
     cls <- c("svem_binomial", cls)
   }
   class(result) <- cls
+  if (length(engines)) {
+    result$companions <- .svem_fit_companions(result, schema_data_used, engines,
+                                             companion_blocks, unseen, using_spec,
+                                             companion_continuous_blocks)
+  }
   result
 }

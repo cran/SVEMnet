@@ -4,9 +4,8 @@
 #   * forward_aicc(): deterministic greedy forward selection over whole model
 #     terms, minimizing a Gaussian least-squares AICc (or AIC / BIC).
 #   * svem_forward(): SVEM ensemble whose per-bootstrap base learner is
-#     training-weighted forward selection; the forward path plays the
-#     lambda-path role and is scored by the same validation-weighted
-#     wSSE/wAIC/wBIC criteria as SVEMnet().
+#     training-weighted forward selection. Gaussian validation likelihood
+#     selects a path point by default.
 #
 # Both functions build the design exactly like SVEMnet() (locked bigexp types,
 # levels, contrasts, blocking, sampling schema) and return objects of class
@@ -348,6 +347,10 @@
     discrete_numeric = discrete_numeric_vars,
     discrete_levels  = discrete_numeric_levels
   )
+  if (length(spec$settings$mixture_groups)) {
+    .svem_check_mixture_totals(schema_data_used, spec$settings$mixture_groups)
+    sampling_schema$mixture_groups <- spec$settings$mixture_groups
+  }
 
   list(
     X = X, y_vec = y_vec, n = n, p = p,
@@ -484,8 +487,15 @@
   n * log(rss_log / n) + K * log(n)  # BIC
 }
 
+## Twice the negative Gaussian validation log likelihood per unit weight,
+## omitting the common Gaussian constant. Both MSEs use conditioned responses.
+.svem_forward_gaussian_score <- function(training_mse, validation_mse) {
+  variance <- pmax(training_mse, .Machine$double.eps^2)
+  log(variance) + validation_mse / variance
+}
+
 ## Grow one greedy forward path to its end (all groups, rank exhaustion, or
-## the wAIC/wBIC admissibility ceiling). Steps minimize training RSS over
+## the validation Kish admissibility ceiling). Steps minimize training RSS over
 ## whole-effect groups; no improvement check, because the path plays the
 ## lambda-path role and selection happens in validation scoring.
 .svem_forward_grow <- function(Xmat, yvec, groups, k_slope_ceiling = NULL) {
@@ -505,7 +515,7 @@
   while (length(remaining)) {
     if (!is.null(k_slope_ceiling) &&
         (length(path_idx) - 1L) >= k_slope_ceiling) {
-      ## Every further path point is inadmissible for wAIC/wBIC because the
+      ## Every further path point is inadmissible under the Kish cap because the
       ## slope count only grows; wSSE paths never take this shortcut.
       truncated <- TRUE
       break
@@ -787,13 +797,10 @@ forward_aicc <- function(formula, data,
 #'
 #' Fit a Self-Validated Ensemble Model in which each bootstrap replicate's
 #' base learner is greedy forward selection on training-weighted least
-#' squares, instead of the glmnet elastic-net path used by
-#' \code{\link{SVEMnet}}. The forward path (intercept-only model up to the
-#' full greedy path) plays the lambda-path role: every path point is scored
-#' on the fractional-random-weight validation copy with the same
-#' validation-weighted criteria as \code{SVEMnet()} (\code{"wAIC"} by
-#' default, or \code{"wBIC"} / \code{"wSSE"}), and the minimizing path point
-#' wins that replicate. Winning coefficient vectors are averaged across
+#' squares. By default, each path point's training-fitted Gaussian mean and
+#' variance are evaluated on the validation-weighted copy. The first path
+#' point attaining the lowest admissible score wins that replicate.
+#' Winning coefficient vectors are averaged across
 #' bootstrap replicates exactly as in \code{SVEMnet()}.
 #'
 #' This is an experimental alternative to the elastic-net base learners in
@@ -807,10 +814,11 @@ forward_aicc <- function(formula, data,
 #' steps add the whole model term (multi-column factor blocks move as a
 #' unit) that most reduces training RSS, and each path point is refit and
 #' scored by validation-weighted residuals on the original (unweighted)
-#' rows. For \code{"wAIC"}/\code{"wBIC"}, path growth stops once the slope
-#' count reaches the Kish admissible effective sample size
-#' \eqn{n_{eff,adm}}, because all further path points would be inadmissible;
-#' \code{"wSSE"} paths are never truncated. Replicates with no admissible
+#' rows. Gaussian validation likelihood, wAIC and wBIC admit only models
+#' whose number of slope coefficients is strictly below the bounded
+#' validation Kish effective size. All columns of a term count toward the
+#' cap. Growth stops once the current support reaches the ceiling.
+#' The wSSE criterion uses the uncapped path. Replicates with no admissible
 #' finite path point fall back to a weighted intercept-only model, as in
 #' \code{SVEMnet()}.
 #'
@@ -818,19 +826,20 @@ forward_aicc <- function(formula, data,
 #'   \code{bigexp_terms()}, exactly as in \code{\link{SVEMnet}}.
 #' @param data A data frame containing the variables in the model.
 #' @param nBoot Integer. Number of bootstrap replicates (default \code{200}).
-#' @param objective Character. One of \code{"auto"} (resolves to
-#'   \code{"wAIC"}), \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}, with the
-#'   same definitions as in \code{\link{SVEMnet}} (Gaussian case): the model
-#'   size \eqn{k} counts the fitted coefficients of the path point including
-#'   the intercept.
+#' @param objective Character. The default and \code{"auto"} select
+#'   \code{"gaussian_likelihood"}. Use \code{objective = "wAIC"} to reproduce
+#'   the former forward default. Explicit \code{"wBIC"} and \code{"wSSE"}
+#'   are also available. The information criteria count fitted coefficients
+#'   including the intercept. This likelihood option is specific to
+#'   Gaussian forward selection.
 #' @param weight_scheme Character. \code{"SVEM"} (default),
 #'   \code{"FRW_plain"}, or \code{"Identity"}, as in \code{\link{SVEMnet}}.
 #'   \code{"Identity"} with \code{nBoot = 1} yields a single deterministic
-#'   forward-selection fit tuned by the chosen information criterion on the
+#'   forward-selection fit tuned by the chosen objective on the
 #'   training data.
 #'   The support guard does not guarantee positive residual degrees of
 #'   freedom. In particular, \code{"Identity"} gives \eqn{n_{eff,adm} = n},
-#'   so the wAIC/wBIC rule admits saturated path points with \eqn{k = n}.
+#'   so the Kish cap admits saturated path points with \eqn{k = n}.
 #'   A forward path can then interpolate the training data and be selected
 #'   by the log-scale criterion. Such members are flagged in
 #'   \code{member_diagnostics}. By comparison, \code{forward_aicc()} skips
@@ -867,13 +876,29 @@ forward_aicc <- function(formula, data,
 #'   \item \code{diagnostics$path_length_max}: longest grown path (points,
 #'     including the intercept-only point).
 #'   \item \code{diagnostics$admissibility_truncation_rate}: fraction of
-#'     replicates whose path growth was stopped by the wAIC/wBIC
+#'     replicates whose path growth was stopped by the Kish
 #'     admissibility ceiling.
 #'   \item \code{diagnostics$selection_frequencies}: fraction of replicates
 #'     in which each model term was part of the winning model.
 #' }
 #'
 #' @details
+#' For Gaussian validation likelihood let \eqn{t} and \eqn{v} be the
+#' training- and validation-weighted mean squared residuals of the same
+#' training fit. Each uses its own sum of weights. Minimize
+#' \eqn{\log(t) + v/t} over all admissible points, including the intercept.
+#' A fit that understates residual variation can receive a poor validation
+#' log score. The score omits the common Gaussian constant and factor of one half.
+#'
+#' For this objective the response is centered at its midrange and divided
+#' by the largest absolute centered value. The training variance is floored at
+#' \code{.Machine$double.eps^2} in these units in both parts of the score.
+#' A constant response has zero centered residuals and selects its exact
+#' intercept. In \code{member_diagnostics}, \code{objective_value} uses
+#' conditioned units. Away from the floor, adding twice the log of the
+#' response scale gives the score in original units. Coefficients, fitted
+#' means, predictions and validation SSE are returned on the original scale.
+#'
 #' Only Gaussian responses are supported. There is no debias argument at fit
 #' time: as in \code{SVEMnet()}, a linear calibration \code{lm(y ~ y_pred)}
 #' is stored when \code{nBoot >= 10} and the fitted values vary, and
@@ -894,8 +919,11 @@ forward_aicc <- function(formula, data,
 #' y  <- 1 + 2 * X1 - 1.5 * X2 + 0.8 * X1 * X2 + rnorm(n, 0, 0.5)
 #' dat <- data.frame(y, X1, X2, X3)
 #'
+#' ## Validate each training-fitted Gaussian mean and variance on the weighted copy.
 #' fit <- svem_forward(y ~ (X1 + X2 + X3)^2, dat, nBoot = 8)
+#' fit$member_diagnostics[1:3, c("objective", "objective_value")]
 #' preds <- predict(fit, dat)
+#' ## To reproduce the former forward default, supply objective = "wAIC".
 #'
 #' ## bigexp_spec front end, as in SVEMnet()
 #' spec <- bigexp_terms(y ~ X1 + X2 + X3, dat, factorial_order = 2)
@@ -905,7 +933,7 @@ forward_aicc <- function(formula, data,
 #' @export
 svem_forward <- function(formula, data,
                          nBoot = 200,
-                         objective = c("auto", "wAIC", "wBIC", "wSSE"),
+                         objective = c("auto", "gaussian_likelihood", "wAIC", "wBIC", "wSSE"),
                          weight_scheme = c("SVEM", "FRW_plain", "Identity"),
                          response = NULL,
                          unseen = c("warn_na", "error"),
@@ -928,11 +956,20 @@ svem_forward <- function(formula, data,
   groups <- lapply(design$groups, function(cols) cols + 1L)
 
   auto_used      <- identical(objective, "auto")
-  objective_used <- if (auto_used) "wAIC" else objective
+  objective_used <- if (auto_used) "gaussian_likelihood" else objective
   auto_decision  <- if (auto_used) objective_used else NA_character_
 
+  constant_response <- length(unique(y_vec)) < 2L
   structural_intercept_only <- length(design$numerically_constant_columns) == p ||
-    length(unique(y_vec)) < 2L
+    constant_response
+  likelihood <- objective_used == "gaussian_likelihood"
+  fit_y <- y_vec
+  if (likelihood) {
+    offset <- if (constant_response) y_vec[1L] else min(y_vec) / 2 + max(y_vec) / 2
+    fit_y <- y_vec - offset
+    response_scale <- if (constant_response) 1 else max(abs(fit_y))
+    fit_y <- fit_y / response_scale
+  }
 
   coef_matrix <- matrix(NA_real_, nrow = nBoot, ncol = p + 1L)
   colnames(coef_matrix) <- c("(Intercept)", colnames(X))
@@ -976,7 +1013,7 @@ svem_forward <- function(formula, data,
     n_eff_adm <- max(2, min(n, n_eff_raw))
     n_eff_keep[i] <- n_eff_raw
 
-    if (structural_intercept_only) {
+    if (structural_intercept_only && !likelihood) {
       mu_w <- sum(w_train * y_vec) / sum(w_train)
       coef_matrix[i, ] <- c(mu_w, rep(0, p))
       k_sel_vec[i]     <- 1L
@@ -994,10 +1031,11 @@ svem_forward <- function(formula, data,
 
     sqrt_w <- sqrt(w_train)
     Xw <- Xint * sqrt_w
-    yw <- y_vec * sqrt_w
+    yw <- fit_y * sqrt_w
 
-    ceiling_k <- if (objective_used %in% c("wAIC", "wBIC")) n_eff_adm else NULL
-    path <- .svem_forward_grow(Xw, yw, groups, k_slope_ceiling = ceiling_k)
+    ceiling_k <- if (objective_used != "wSSE") n_eff_adm else NULL
+    path <- .svem_forward_grow(Xw, yw, if (structural_intercept_only) list() else groups,
+                               k_slope_ceiling = ceiling_k)
     rank_deficient_terms <- union(rank_deficient_terms, path$rank_deficient_terms)
     path_len_vec[i] <- length(path$points)
     trunc_vec[i]    <- path$truncated
@@ -1006,6 +1044,7 @@ svem_forward <- function(formula, data,
     ## weights applied to residuals on the ORIGINAL unweighted rows.
     L <- length(path$points)
     sse_w     <- numeric(L)
+    if (likelihood) training_sse <- numeric(L)
     kvals     <- integer(L)
     coef_list <- vector("list", L)
     for (j in seq_len(L)) {
@@ -1016,34 +1055,52 @@ svem_forward <- function(formula, data,
         sse_w[j] <- Inf
         next
       }
-      r <- as.vector(Xint[, idx, drop = FALSE] %*% cf) - y_vec
-      s <- sum(w_valid * r * r)
+      r <- as.vector(Xint[, idx, drop = FALSE] %*% cf) - fit_y
+      if (likelihood) {
+        squared_residuals <- r^2
+        training_sse[j] <- sum(w_train * squared_residuals)
+        s <- sum(w_valid * squared_residuals)
+      } else {
+        s <- sum(w_valid * r * r)
+      }
       sse_w[j] <- if (is.finite(s)) s else Inf
       coef_list[[j]] <- cf
     }
 
-    sse_adj <- pmax(sse_w, .Machine$double.xmin)
     if (objective_used == "wSSE") {
       scores <- sse_w
     } else {
       k_slope <- pmax(kvals - 1L, 0L)
       adm     <- k_slope < n_eff_adm
-      n_like  <- sumw
-      pen     <- if (objective_used == "wAIC") 2 else log(n_eff_adm)
       scores  <- rep(Inf, L)
-      scores[adm] <- n_like * log(sse_adj[adm] / n_like) + pen * kvals[adm]
+      if (likelihood) {
+        scores[adm] <- .svem_forward_gaussian_score(
+          training_sse[adm] / sum(w_train), sse_w[adm] / sumw
+        )
+      } else {
+        sse_adj <- pmax(sse_w, .Machine$double.xmin)
+        pen <- if (objective_used == "wAIC") 2 else log(n_eff_adm)
+        scores[adm] <- sumw * log(sse_adj[adm] / sumw) + pen * kvals[adm]
+      }
     }
     scores[!is.finite(scores)] <- Inf
 
     ok <- any(is.finite(scores))
     if (ok) {
       winner <- which.min(scores)
-      ok     <- !is.null(coef_list[[winner]])
+      selected_coef <- coef_list[[winner]]
+      ok <- !is.null(selected_coef)
+      if (ok && likelihood) {
+        selected_coef <- selected_coef * response_scale
+        selected_coef[1L] <- selected_coef[1L] + offset
+        ok <- all(is.finite(selected_coef))
+      }
     }
     if (!ok) {
       fallbacks[i]       <- 1L
       fallback_reason[i] <- "no admissible finite forward path point"
-      mu_w <- sum(w_train * y_vec) / sum(w_train)
+      mu_w <- sum(w_train * fit_y) / sum(w_train)
+      if (likelihood) mu_w <- offset + response_scale * mu_w
       coef_matrix[i, ] <- c(mu_w, rep(0, p))
       k_sel_vec[i]     <- 1L
       validation_sse[i] <- sum(w_valid * (y_vec - mu_w)^2)
@@ -1051,10 +1108,11 @@ svem_forward <- function(formula, data,
     }
 
     beta <- numeric(p + 1L)
-    beta[path$points[[winner]]] <- coef_list[[winner]]
+    beta[path$points[[winner]]] <- selected_coef
     coef_matrix[i, ] <- beta
     k_sel_vec[i]     <- kvals[winner]
     validation_sse[i] <- sse_w[winner]
+    if (likelihood) validation_sse[i] <- (sqrt(sse_w[winner]) * response_scale)^2
     objective_value[i] <- scores[winner]
     sel_terms_i <- path$group_names[[winner]]
     if (length(sel_terms_i)) {
@@ -1169,7 +1227,7 @@ svem_forward <- function(formula, data,
     if (residual_df_support[ii] <= 0) {
       wi <- c(wi, "nonpositive n - support residual denominator")
     }
-    if (objective_used %in% c("wAIC", "wBIC") &&
+    if (objective_used != "wSSE" &&
         (n_eff_adm_keep[ii] - (k_sel_vec[ii] - 1L)) <= 1) {
       wi <- c(wi, "selected support is within one coefficient of the Kish guardrail")
     }

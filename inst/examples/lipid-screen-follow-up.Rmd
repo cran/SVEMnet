@@ -1,0 +1,862 @@
+---
+title: "Choosing and confirming follow-up recipes in a 23-run lipid screen"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Choosing and confirming follow-up recipes in a 23-run lipid screen}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", cache = FALSE, error = FALSE)
+# Keep the precomputed snapshot's plots portable when included in the vignette.
+knitr::knit_hooks$set(plot = function(x, options) {
+  paste0('<img src="', knitr::image_uri(x),
+         '" alt="Follow-up recipe predictions" style="max-width:100%;" />')
+})
+```
+
+Start with the 23 measured preparations in `lipid_screen`. The first example
+uses only the core package to export **five distinct new preparations**. It
+keeps the three response goals, mixture bounds, planned operator and run
+budget visible. The advanced example then adds other models, reserves an
+incumbent repeat within an eight-preparation budget, simulates measurements
+and refits. A separate two-factor process example at the end shows how to
+request a spline nominee and reserve distinct exploration preparations.
+
+For another experiment, change the data, factor specification, goals and
+feasible candidate settings below. Keep one row per independent preparation;
+aggregate technical assay replicates before fitting. A repeated recipe in a
+new preparation is a new row with its own preparation ID.
+
+For planning the initial mixture or process experiment, see Karl's
+[A Sphericity Filter for Space-Filling Designs in Nondeterministic Experiments](https://arxiv.org/abs/2610.36012).
+Its low-order working model protects selected estimation precision while
+retaining space-filling coverage. That design choice is separate from the
+richer cubic candidate model fitted below; it does not require the final
+response surface to be low-order.
+
+## Specify the experiment once
+
+```{r specification}
+library(SVEMnet)
+data(lipid_screen, package = "SVEMnet")
+dat <- lipid_screen
+components <- c("PEG", "Helper", "Ionizable", "Cholesterol")
+recipe_cols <- c(components, "Ionizable_Lipid_Type", "N_P_ratio", "flow_rate")
+predictors <- c(recipe_cols, "Operator")
+mix <- list(list(vars = components, lower = c(.01, .10, .10, .10),
+                 upper = c(.05, .60, .60, .60), total = 1))
+spec <- bigexp_terms(
+  Potency ~ PEG + Helper + Ionizable + Cholesterol +
+    Ionizable_Lipid_Type + N_P_ratio + flow_rate, data = dat,
+  blocking = "Operator", mixture_groups = mix,
+  discrete_numeric = c("N_P_ratio", "flow_rate"), report = FALSE
+)
+goals <- list(
+  Potency = list(goal = "max", weight = .6, lower_acceptable = 65, upper_acceptable = 95),
+  Size    = list(goal = "min", weight = .3, lower_acceptable = 40, upper_acceptable = 210),
+  PDI     = list(goal = "min", weight = .1, lower_acceptable = .04, upper_acceptable = .39)
+)
+endpoints <- names(goals)
+
+```
+
+The default `bigexp_terms()` expansion is a full cubic candidate model: pure
+squares and cubes, two- and three-factor interactions, and partial-cubic
+terms such as `x^2:z`. Blocking variables stay additive. The fitting method
+reduces this common candidate model; no preliminary choice of a smaller
+model is required.
+
+## Five new preparations with the core package
+
+`svem_fit_responses()` returns an ordinary named list, so `core_fits$Potency`
+remains a regular fitted model. It makes the same sequential calls and random
+draws as fitting the three endpoints individually. With only the response
+already named in `spec`, use `SVEMnet(spec, dat)` directly.
+
+```{r five-new-preparations, message=FALSE}
+set.seed(2301)
+core_fits <- svem_fit_responses(spec, dat, responses = names(goals))
+
+# Change this to the operator who will prepare the next batch.
+planned_operator <- "A"
+set.seed(2302)
+core_pool <- svem_random_table_multi(core_fits, n = 600, mixture_groups = mix)$data
+# Include old recipes so exclusion is also exercised in this example.
+core_pool <- rbind(dat[predictors], core_pool[predictors])
+core_pool$Operator <- factor(planned_operator, levels = levels(factor(dat$Operator)))
+core_pool <- unique(core_pool)
+core_pool$recipe_id <- sprintf("C%04d", seq_len(nrow(core_pool)))
+
+scored_core <- svem_score_random(
+  core_fits, goals = goals, data = dat, candidates = core_pool,
+  mixture_groups = mix, budget = 5L, verbose = FALSE
+)
+
+# Set this to an explicit file in your project for an actual experiment.
+csv_file <- file.path(tempdir(), "lipid-screen-five-new.csv")
+svem_export_candidates_csv(scored_core, file = csv_file, overwrite = TRUE,
+  planned_date = as.Date("2026-11-02"),
+  preparation_prefix = "lipid-screen-20261102-core-example")
+new_runs <- read.csv(csv_file, stringsAsFactors = FALSE)
+```
+
+The candidate pool respects the declared mixture bounds and total. The
+sampler draws proportions continuously; replace this pool with the lab's
+allowable settings when preparation increments matter. The advanced example
+uses an explicit preparation grid. The operator is set before scoring so all
+models predict the context in which the new preparations will be made.
+
+Here `budget = 5L` counts distinct **new** preparations. Historical physical
+recipes are excluded even if their recorded operator differs. Inspect
+`shortfall` before booking laboratory runs. The core path can leave slots empty
+because of its nomination or top-10% shortlist limits, or unavailable
+informative spread, even when the pool contains five or more feasible recipes.
+For a small pool, use `svem_plan_runs(incumbent = FALSE)` to apply the portfolio
+allocator, which widens its shortlist when needed to meet the budget. The exporter writes only the selected
+worklist in slot order and retains its role and every endorsing engine. The
+explicit optional date and prefix above add scheduling labels. `recipe_id`
+identifies physical settings within this pool; `preparation_id` identifies one
+new execution, including a repeated recipe. Retain supplied stable recipe IDs
+and historical settings in later pools; automatically generated IDs may change
+when the pool changes, so otherwise match physical settings. Choose a distinct batch prefix even for two batches
+on the same date. Omitting both options leaves the export unchanged.
+
+`planned_date` is not the actual execution date and does not add a model block.
+Record the actual date when preparing the runs. The historical data use
+date-like `RunID` labels such as `02SEP22-1`; retain those original identifiers.
+The exporter does not maintain a global laboratory ID registry.
+
+```{r verify-five-new}
+stopifnot(scored_core$shortfall == 0L, nrow(new_runs) == 5L,
+          identical(new_runs$slot, 1:5), !anyDuplicated(new_runs$recipe_id),
+          !anyDuplicated(new_runs$preparation_id),
+          all(new_runs$planned_date == "2026-11-02"),
+          !anyDuplicated(new_runs[recipe_cols]),
+          identical(new_runs$recipe_id, scored_core$worklist$recipe_id),
+          identical(new_runs$role, scored_core$worklist$role),
+          identical(new_runs$nominated_by, scored_core$worklist$nominated_by),
+          all(new_runs$Operator == planned_operator),
+          all(abs(rowSums(new_runs[components]) - 1) < 1e-10),
+          nrow(merge(new_runs[recipe_cols], dat[recipe_cols], by = recipe_cols)) == 0L)
+for (i in seq_along(components)) {
+  stopifnot(all(new_runs[[components[i]]] >= mix[[1]]$lower[i]),
+            all(new_runs[[components[i]]] <= mix[[1]]$upper[i]))
+}
+knitr::kable(new_runs[c("slot", "recipe_id", "preparation_id", "planned_date")],
+             row.names = FALSE)
+knitr::kable(new_runs[c("slot", "role", "nominated_by", "recipe_id", predictors)],
+             digits = 4, row.names = FALSE)
+```
+
+For an existing workflow, keep using `svem_select_from_score_table()`. Its
+`k` is the requested number of medoids **in addition to** its best row;
+`k = 4` can therefore produce five rows. The budgeted worklist has a different
+meaning: its budget is a total number of distinct new preparations.
+
+## Advanced: several models and a carried-forward reference
+
+The SVEMnet paper starts with the same data, candidate terms and scientific
+weights. Its workflow fits each endpoint, scores feasible settings, chooses
+diverse high-score and high-uncertainty recipes, and refits after measurement.
+Here we also ask forward-selection SVEM, GauPro and Extra Trees to nominate
+recipes. The fixed publication did not benchmark these additions. The journal
+articles remain the versions of record; the author occasionally updates the
+[SVEMnet arXiv manuscript](https://arxiv.org/abs/2511.20968) and the earlier
+[workflow arXiv manuscript](https://arxiv.org/abs/2212.11264).
+
+## What the Gaussian process contributes
+
+This package implements a custom confirmation workflow. GauPro proposes a
+recipe using its fitted mean (or the desirability of several fitted means).
+A separate exploration slot can use the largest latent standard deviation
+for a chosen response. The scientist allocates preparations, measures them
+and decides when to refit. A full Bayesian optimizer specifies an acquisition
+policy for those sequential decisions. For example, expected improvement
+uses both the predicted improvement and uncertainty to choose a point.
+[Jones, Schonlau and Welch (1998)](https://doi.org/10.1023/A:1008306431147)
+and [Frazier (2018)](https://arxiv.org/abs/1807.02811).
+
+SVEMnet offers the full candidate expansion and shrinks the additive operator
+effect. The two optional companions use the original factors and free mixture
+coordinates. Here we deliberately let those models learn operator-by-recipe
+patterns. Both operators handled every lipid type, but some combinations
+have little support. We specify operator A for every new preparation.
+
+```{r fit}
+limits <- list(Potency = list(lower = 78), Size = list(upper = 100),
+               PDI = list(upper = .25))
+with(dat, table(Operator, Ionizable_Lipid_Type))
+# Installing GauPro and ranger enables both companions. Either works alone.
+packages <- c(gaupro = "GauPro", extra_trees = "ranger")
+enabled <- names(packages)[vapply(packages, requireNamespace,
+                                  quietly = TRUE, FUN.VALUE = logical(1))]
+used <- c("SVEMnet", unname(packages[enabled]))
+knitr::kable(data.frame(package = used, version = vapply(used, function(p)
+  as.character(packageVersion(p)), character(1))), row.names = FALSE)
+
+```
+
+With both packages installed, `companions = TRUE` is the shortcut for this
+request. `predict(fits$Potency, newdata)` returns the ordinary SVEM response.
+Use `engine = "all"` to inspect the models side by side. We use the fitting
+defaults throughout and ordinary SVEM predictions with `debias = FALSE`.
+
+## Prepare the candidate table before optimizing
+
+The proportions below are built in integer basis points. The fourth component
+is determined by the total. The seed recipes are included in the candidate
+table so that an endorsement of a previous preparation can be recognized.
+The paper draws 25,000 feasible settings and derives default desirability
+anchors from predicted response quantiles. Here a smaller discrete pool
+and fixed anchors make the models and both rounds comparable.
+The resulting recipe IDs and scores are specific to this example. In practice, supply
+the full set of recipes the lab would prepare or draw a larger feasible pool.
+
+```{r feasible-grid}
+composition <- expand.grid(PEG = seq(100, 500, 100),
+                           Helper = seq(1000, 6000, 500),
+                           Ionizable = seq(1000, 6000, 500))
+composition$Cholesterol <- 10000 - rowSums(composition)
+composition <- subset(composition, Cholesterol >= 1000 & Cholesterol <= 6000)
+settings <- expand.grid(Ionizable_Lipid_Type = levels(factor(dat$Ionizable_Lipid_Type)),
+                        N_P_ratio = sort(unique(dat$N_P_ratio)),
+                        flow_rate = sort(unique(dat$flow_rate)), stringsAsFactors = FALSE)
+grid <- merge(composition / 10000, settings, by = NULL)
+set.seed(2302)
+pool <- unique(rbind(dat[recipe_cols], grid[sample.int(nrow(grid), 600), recipe_cols]))
+pool$Operator <- factor("A", levels = levels(factor(dat$Operator)))
+pool$recipe_id <- sprintf("R%04d", seq_len(nrow(pool)))
+increments <- setNames(rep(.0001, length(components)), components)
+stopifnot(all(abs(rowSums(pool[components]) - 1) < 1e-10))
+
+# Map each preparation to a physical recipe ID, regardless of operator.
+# Quantize only the mixture columns and reject off-grid inputs.
+physical_settings <- function(rows) {
+  key <- rows[recipe_cols]
+  for (nm in names(increments)) {
+    units <- key[[nm]] / increments[[nm]]
+    stopifnot(all(abs(units - round(units)) <= 1e-7))
+    key[[nm]] <- round(units)
+  }
+  key
+}
+lookup <- cbind(recipe_id = pool$recipe_id, physical_settings(pool))
+stopifnot(!anyDuplicated(lookup[recipe_cols]))
+screen_rows <- cbind(screen_row = seq_len(nrow(dat)), physical_settings(dat))
+matched <- merge(screen_rows, lookup, by = recipe_cols, all.x = TRUE)
+dat$recipe_id <- matched$recipe_id[match(screen_rows$screen_row, matched$screen_row)]
+stopifnot(nrow(matched) == nrow(dat), !anyNA(dat$recipe_id))
+```
+
+## Allocate eight preparations, including an incumbent repeat
+
+The convenience function earns its place when several models and a reference
+are needed: it fits the endpoints, collects model nominees and delegates the
+allocation to the scorer. All intermediates remain inspectable. `plan$fits`
+and `plan$forward` are ordinary model lists; `plan$scores` contains the full
+candidate table, and `plan$worklist` and `plan$shortfall` describe the actual
+preparation plan. It does not write a file.
+
+Unlike the earlier new-recipe-only scorer call, `svem_plan_runs()` counts the
+incumbent repeat **within** its total budget. Its default five slots can hold
+one reference repeat plus up to four distinct model optima. This example
+uses eight total preparations, leaving room for exploration. Optionally retain
+a fixed original-design benchmark as well: set `fixed_benchmark` to its unique
+preparation ID below. That benchmark is mandatory and counts within the total,
+reducing the slots available for model optima or exploration. It shares one
+repeat if its physical recipe is also the incumbent; otherwise both repeats
+must fit in the budget. Keep the same ID selector on subsequent refits so
+adding or reordering rows does not change which benchmark is carried forward.
+
+```{r nomination}
+fit_controls <- list(companions = if (length(enabled)) enabled else FALSE,
+                     companion_blocks = "interacting")
+score_controls <- list(increments = increments, specs = limits,
+                       gp_endpoint = "Potency", verbose = FALSE)
+# Choose the intended incumbent by stable preparation ID, not row position.
+incumbent_row <- match("02SEP22-20", dat$RunID)
+stopifnot(!is.na(incumbent_row))
+fixed_benchmark <- NULL
+# Optional fixed control from the original design, retained in every round:
+# fixed_benchmark <- list(RunID = "02SEP22-2")
+set.seed(2301)
+plan <- svem_plan_runs(
+  spec, data = dat, goals = goals, candidates = pool, budget = 8L,
+  fit_control = fit_controls, score_control = score_controls,
+  incumbent = incumbent_row, benchmark = fixed_benchmark
+)
+fits <- plan$fits
+forward <- plan$forward
+scored <- plan$scores
+batch <- plan$worklist
+stopifnot(plan$shortfall == 0L, nrow(batch) == 8L,
+          !anyDuplicated(batch$recipe_id), sum(!batch$new_recipe) %in% 1:2)
+knitr::kable(batch[c("slot", "role", "nominated_by", "recipe_id", "new_recipe", recipe_cols)],
+             digits = 4, row.names = FALSE)
+```
+
+The default order is the incumbent, elastic-net SVEM, GauPro, Extra Trees,
+then forward likelihood. A smaller budget truncates that order; with one
+slot and an enabled incumbent, the plan is confirmation only. Set
+`incumbent = FALSE` when every slot must be a new recipe. The priority is a
+practical allocation rule, not a claim that its ordering is best for every
+experiment. For this multi-response decision each model maximizes the same
+weighted desirability of its fitted endpoint means. Desirability stops improving
+at its declared limits. When several multi-response recipes reach the same
+combined desirability, they remain exact utility ties and the stable recipe
+key breaks the tie. Extra predicted improvement beyond a saturated goal is
+not assigned additional utility. Change the scientific goals explicitly if
+those differences should matter.
+
+Models endorsing the same new recipe spend one slot and retain all their
+attributions. Inspect `best_ties` and `new_ties` in the nominations. When exact
+ties are resolved by the same recipe key, a shared nomination is not evidence
+of independent agreement among the fitted models. Remaining slots are
+distinct high-spread medoids. An
+unavailable engine is visible in the diagnostics; it is not silently replaced
+by another fitted model. The code above uses whichever suggested companion
+packages are installed.
+
+For this first batch we explicitly carry forward preparation `02SEP22-20`.
+Its original operator was B; the planned repeat uses A. This is a declared
+incumbent choice across contexts, not an automatic comparison of raw A and B
+outcomes. Matching `RunID` keeps the choice stable if the table is reordered.
+Original measurements and source context remain visible for review. Selecting
+a noisy winner does not establish that it is the best true recipe; the repeat
+supplies confirmation evidence. Without an explicit row, the planner chooses
+the best observed preparation within the requested reference context. A separate fixed benchmark keeps its
+original selector in `plan$policy$benchmark` and its source row and context in
+`plan$benchmark`, regardless of which preparation becomes the incumbent.
+
+```{r reference-recipe}
+reference_row <- plan$incumbent$source_data
+reference_row$observed_score <- plan$incumbent$observed_score
+knitr::kable(reference_row[c("recipe_id", recipe_cols, "Operator", endpoints,
+                             "observed_score")], digits = 4, row.names = FALSE)
+```
+
+```{r endorsements}
+knitr::kable(plan$nominations, digits = 3, row.names = FALSE)
+```
+
+**Exploration choices.** The portfolio uses diverse medoids from the top
+tenth of the eligible SVEM spread scores for its remaining slots. SVEM
+summarizes widths of member-percentile intervals across the three responses.
+Widths are scaled between their 2nd and 98th percentiles and clipped, which
+can produce exact ties. Ensemble spread is useful for exploration; it is not
+automatically calibrated predictive uncertainty.
+
+The diagnostics below also show alternatives: choose the largest combined
+spread and break ties by fitted desirability, or choose the widest underlying
+spread. They do not allocate extra preparations in this portfolio. The
+separate scorer can also nominate the largest latent GP standard deviation
+for a chosen response; no such slot is reserved by the default portfolio.
+Extra Trees supplies a mean nominee, with trees varying through randomized
+splits of the full training rows.
+
+```{r ties}
+knitr::kable(scored$exploration, digits = 4, row.names = FALSE)
+knitr::kable(scored$tie_endpoint_ranges, digits = 4, row.names = FALSE)
+tab <- scored$score_table
+unprepared <- tab[!tab$recipe_id %in% dat$recipe_id, , drop = FALSE]
+summary(data.frame(PDI_member_width = tab$PDI_upr - tab$PDI_lwr,
+                   PDI_weighted_spread = tab$PDI_ciw_w))
+```
+
+An exact tie is possible even when fitted responses and underlying widths
+differ substantially. For example, consider a single response with widths
+1 through 98, then 105 and 120. The 98th percentile falls below 105, so both
+of the last two recipes receive a scaled width of 1. If their desirabilities
+are 0.85 and 0.20, respectively, the practical tie-break chooses the former.
+The raw-width rule chooses the latter. The tie counts printed above refer to
+the actual multi-response pool.
+
+For diverse representatives of the high-spread region, the established
+selector can return feasible medoids. A scientist following the paper's
+SVEM-only allocation can also select distinct representatives of the
+high-score region. Both selections use physical recipe coordinates.
+
+```{r other-choices, eval=FALSE}
+diverse <- svem_select_from_score_table(unprepared, target = "uncertainty_measure",
+                                        top = .10, k = 3, predictor_cols = recipe_cols)
+high_score <- svem_select_from_score_table(unprepared, target = "score",
+                                           top = .05, k = 3, predictor_cols = recipe_cols)
+```
+
+The paper also nominates a recipe for which the modeled means appear likely
+to meet specifications. The product of the three marginal probabilities is a
+ranking proxy. It addresses uncertainty about the means; the measurements
+from an individual future preparation also include assay and preparation
+variation. Rank only unprepared recipes. Choosing this alternative would
+use one of the available slots.
+
+```{r mean-spec}
+finite <- which(is.finite(unprepared$p_joint_mean))
+stopifnot(length(finite) > 0L)
+by_spec <- finite[which.max(unprepared$p_joint_mean[finite])]
+knitr::kable(unprepared[by_spec, c("recipe_id", "score", "p_joint_mean")],
+             digits = 4, row.names = FALSE)
+```
+
+Whole-model permutation tests provide another optional diagnostic. With WMT
+enabled, compare `score` and `wmt_score` on the same recipes. A weak global
+signal alone is insufficient to discard an endpoint. Here the scientist's
+nominal weights govern every model and both rounds.
+
+```{r optional-paper-analysis, eval=FALSE}
+forms <- setNames(lapply(endpoints, function(y) bigexp_formula(spec, y)), endpoints)
+wmt <- svem_wmt_multi(forms, data = dat, mixture_groups = mix,
+                      wmt_control = list(seed = 123, nCore = 1L), plot = FALSE)
+svem_specification_scores <- svem_score_random(
+  fits, goals = goals, data = dat, candidates = pool,
+  wmt = wmt, specs = limits)
+head(svem_specification_scores$score_table[c("recipe_id", "score", "wmt_score",
+                                             "p_joint_mean")])
+```
+
+## Change the budget without refitting
+
+To request specific kinds of runs, set `n_optima = 3L, n_explore = 2L` in the planner call below and omit `budget`. This requests three new model candidates, two exploration recipes and the best-observed repeat, for six planned preparations. In this worked run, these fitted models nominate only two distinct new recipes, so the call returns five preparations and reports one unmet model request. Setting `incumbent = FALSE` removes the repeat from the planned total. Inspect selected counts and unused places before preparing the runs.
+
+Forward likelihood and the relaxed elastic net can emphasize different terms
+in the same candidate model. Forward's validation score evaluates each
+training-fitted Gaussian mean and variance on the validation-weighted copy.
+The wrapper fits this method for each endpoint as well as the primary SVEM
+models. The same physical pool, scientific weights and planned operator
+apply to every nominee.
+
+For a smaller batch, reuse the fitted models and rescore. These five total
+preparations include a reference repeat; they are separate from the first
+example's five **new** preparations. We still simulate and refit only the
+eight-preparation batch stored in `batch`.
+
+```{r five-total-preparations}
+five_total <- svem_plan_runs(
+  spec, data = dat, goals = goals, candidates = pool, budget = 5L,
+  fits = fits, forward = forward, score_control = score_controls,
+  incumbent = incumbent_row, benchmark = fixed_benchmark
+)
+five_total
+```
+
+If scientific priorities change, pass a revised `goals` list and the same
+fits and forward fits to inspect their consequences. Keeping the weights
+visible matters: agreement among fitted models does not settle the tradeoff
+between potency, size and PDI. `exploration_fraction = .25` is an optional
+wider shortlist for medoids, not a demonstrated improvement over .10.
+
+```{r planned-predictions, fig.width=7, fig.height=4}
+plot(plan)
+plot(plan, type = "responses")
+```
+
+The plots show fitted values available before measurement. Exporting the
+plan preserves every role and nomination, including the incumbent repeat.
+The physical recipe ID can recur in a later round. The optional prefix gives
+each planned preparation its own label; replace it with the lab's actual batch
+identifier and reconcile labels when executing the rows. Use a different prefix
+for the next batch even if its planned date is unchanged. These labels and the
+planned date are export metadata; neither changes the fitted model or adds a
+day effect.
+
+```{r export-eight, message=FALSE}
+eight_csv <- file.path(tempdir(), "lipid-screen-eight-total.csv")
+svem_export_candidates_csv(plan, file = eight_csv, overwrite = TRUE,
+  planned_date = "2026-11-02",
+  preparation_prefix = "lipid-screen-20261102-round1")
+eight_readback <- read.csv(eight_csv, stringsAsFactors = FALSE)
+stopifnot(nrow(eight_readback) == 8L,
+          identical(eight_readback$recipe_id, batch$recipe_id),
+          identical(eight_readback$role, batch$role),
+          !anyDuplicated(eight_readback$preparation_id),
+          all(eight_readback$planned_date == "2026-11-02"))
+```
+
+## Freeze predictions, then reveal simulated outcomes
+
+```{r frozen}
+engines <- c("svemnet", enabled, "forward")
+predictions <- function(models, rows, forward_models) {
+  setNames(lapply(engines, function(e) {
+    if (e == "forward") return(as.data.frame(lapply(forward_models, predict, newdata = rows)))
+    as.data.frame(lapply(models, function(f) {
+      if (e != "svemnet" && !identical(f$companions[[e]]$status, "ok"))
+        return(rep(NA_real_, nrow(rows)))
+      as.numeric(predict(f, rows, engine = e))
+    }))
+  }), engines)
+}
+before <- predictions(fits, batch, forward)
+```
+
+Until this point, only the 23 observed outcomes entered the analysis. We now
+use the example simulator. Potency and Size use the original generating
+surfaces and independent Normal errors with SDs 2 and 3, recorded to whole
+units. This teaching simulation has no additional calendar-day shift.
+Its response means are also the same for both operators and contain no
+operator-by-recipe interaction.
+The fitted companions were allowed to learn such interactions from sparse
+operator-by-lipid cells. This difference matters when interpreting the
+comparison. One batch cannot establish what caused a particular prediction
+error or which model will give better nominees in another study.
+PDI is a negative control. Its example distribution is Beta(4,16) for
+every recipe and operator, with mean 0.20 and SD 0.0873. Those moments match
+the initial PDI measurements reasonably well. The historical PDI noise law is
+unknown. The simulator records PDI to hundredths. Each newly prepared run
+receives one set of measurements, however many models nominated it. The
+explicit preparation IDs key the teaching simulator's reproducible random
+measurements; changing those IDs changes this illustrative realization even
+with the same seed. They do not change the generating mean surfaces.
+
+```{r simulate}
+preparation_id <- eight_readback$preparation_id
+observed <- lipid_screen_simulate(batch, run_id = preparation_id, seed = 731)
+latent <- setNames(observed[paste0(endpoints, "_true")], endpoints)
+comparison <- do.call(rbind, lapply(endpoints, function(y) {
+  out <- data.frame(recipe_id = batch$recipe_id, endpoint = y)
+  for (e in engines) out[[e]] <- before[[e]][[y]]
+  out$latent_mean <- latent[[y]]
+  out$recorded <- observed[[y]]
+  out
+}))
+knitr::kable(comparison, digits = 3, row.names = FALSE)
+```
+
+To compare models with the generating surface we evaluate the original
+desirability at the three **latent means**. The **realized desirability** uses
+the three recorded outcomes from one preparation. A noisy winner is a
+candidate for independent confirmation. It supplies little evidence for
+ranking the engines.
+
+```{r joint-outcomes}
+utility <- function(y) {
+  parts <- lapply(endpoints, function(nm) {
+    g <- goals[[nm]]
+    z <- (y[[nm]] - g$lower_acceptable) / (g$upper_acceptable - g$lower_acceptable)
+    if (g$goal == "min") z <- 1 - z
+    g$weight * log(1e-6 + (1 - 1e-6) * pmin(1, pmax(0, z)))
+  })
+  exp(Reduce(`+`, parts) / sum(vapply(goals, function(g) g$weight, numeric(1))))
+}
+stopifnot(isTRUE(all.equal(utility(before$svemnet), batch$score, tolerance = 1e-7,
+                           check.attributes = FALSE)))
+pool_truth <- lipid_screen_simulate(pool)
+best_feasible <- max(utility(setNames(pool_truth[paste0(endpoints, "_true")], endpoints)))
+result <- data.frame(recipe_id = batch$recipe_id, latent = utility(latent),
+                     recorded = utility(observed))
+result$gap_to_best_in_pool <- best_feasible - result$latent
+for (e in engines) {
+  result[[paste0(e, "_pred")]] <- utility(before[[e]])
+  fixed_pdi <- before[[e]]
+  fixed_pdi$PDI <- rep(.20, nrow(fixed_pdi))
+  result[[paste0(e, "_PDI_fixed")]] <- utility(fixed_pdi)
+}
+knitr::kable(result, digits = 3, row.names = FALSE)
+```
+
+The paired prediction columns show how much each model's score changes when
+only its fitted PDI is replaced with 0.20. This is an after-selection check.
+The known PDI mean contributed no information to the original nominations.
+For context, simulate the range of outcomes one preparation might produce.
+These extra draws are kept out of the follow-up data.
+
+```{r outcome-reference}
+ref_interval <- t(vapply(seq_len(nrow(batch)), function(i) {
+  repeats <- batch[rep(i, 500L), , drop = FALSE]
+  ids <- paste0("interval-", batch$recipe_id[i], "-", seq_len(nrow(repeats)))
+  sim <- lipid_screen_simulate(repeats, run_id = ids, seed = 903)
+  unname(quantile(utility(sim), c(.05, .95)))
+}, numeric(2)))
+knitr::kable(data.frame(recipe_id = batch$recipe_id, lower_90 = ref_interval[, 1],
+                       recorded = result$recorded, upper_90 = ref_interval[, 2]),
+             digits = 3, row.names = FALSE)
+```
+
+## Refit using the eight new measurements
+
+```{r refit}
+analysis_cols <- c("RunID", "recipe_id", predictors, endpoints)
+followup <- cbind(RunID = preparation_id, batch[c("recipe_id", predictors)],
+                  observed[endpoints])
+augmented <- rbind(dat[analysis_cols], followup[analysis_cols])
+stopifnot(!anyDuplicated(augmented$RunID))
+set.seed(2301)
+next_plan <- svem_plan_runs(
+  spec, data = augmented, goals = goals, candidates = pool, budget = 8L,
+  fit_control = fit_controls, score_control = score_controls,
+  reference = list(Operator = "A"), benchmark = fixed_benchmark
+)
+updated <- next_plan$fits
+updated_forward <- next_plan$forward
+after <- predictions(updated, batch, updated_forward)
+refit_scores <- data.frame(recipe_id = batch$recipe_id)
+for (e in engines) {
+  refit_scores[[paste0(e, "_before")]] <- utility(before[[e]])
+  refit_scores[[paste0(e, "_after")]] <- utility(after[[e]])
+}
+knitr::kable(refit_scores, digits = 3, row.names = FALSE)
+next_batch <- next_plan$worklist
+stopifnot(next_plan$shortfall == 0L,
+          !any(next_batch$recipe_id[next_batch$new_recipe] %in% augmented$recipe_id))
+knitr::kable(next_batch[c("slot", "role", "recipe_id", "new_recipe", recipe_cols)],
+             digits = 4, row.names = FALSE)
+```
+
+The next round returns to automatic selection within operator A. Inspect
+`next_plan$incumbent$by_context` to see the best raw observed scores in each
+context; a larger score elsewhere does not make raw block outcomes directly
+comparable. An explicit incumbent override remains available when the
+scientist wants a deliberate bridge across contexts.
+
+Within the reference context, the default `incumbent_summary = "best"` retains
+the best observed **individual preparation**. An older high observation can
+therefore remain the incumbent after a poorer repeat; the rule does not erase
+that older measurement or average confirmation results automatically. Inspect
+`incumbent$recipe_n_preparations` for all attempts at that physical recipe in
+its source context, `recipe_n_complete` for complete preparations, and
+`recipe_mean_score` for desirability evaluated at their mean responses. These
+diagnostics do not change the selected statistic: `n_preparations` is still
+one for the default best individual preparation. To compare recipe means over
+repeated independent preparations in the same context instead, rescore the
+updated fits explicitly:
+
+```{r mean-reference-option, eval=FALSE}
+mean_reference <- svem_plan_runs(
+  spec, augmented, goals, pool, budget = 8L,
+  fits = updated, forward = updated_forward, score_control = score_controls,
+  reference = list(Operator = "A"), incumbent_summary = "mean",
+  benchmark = fixed_benchmark
+)
+```
+
+This optional rule averages measured response values for each recipe before
+applying the goal maps. Keep technical readings summarized within preparation
+and keep distinct preparation IDs. Reusing fitted lists is appropriate for
+this choice or changed scientific weights on unchanged data. Adding or
+correcting measurements requires refitting; the planner checks the stored
+training rows before accepting supplied models.
+
+Review optional-engine diagnostics as well as the nominations. A diagnostic
+such as a fitted nugget reaching its optimization bound warrants inspecting
+the affected fit; it is not evidence that any nominated recipe has been
+confirmed. The prospective comparisons still
+use the predictions frozen before these new measurements were revealed.
+
+The after columns are fitted on data that include the follow-up preparations.
+Only the before columns are prospective predictions for this batch. With
+real measurements, replace `observed[endpoints]` with the laboratory results,
+record the calendar date and operator with each unique preparation ID, and
+refit with the same declared goals and candidate domain. Operator is a model
+factor here; the teaching simulation has no additional calendar-day shift. The
+planner does not add a round or batch factor automatically. Declare intended
+blocks from physical conditions, such as a changed lot, operator or instrument,
+before seeing the results. Do not add or remove a block because a round
+looked good or bad. Once a new level has measurements,
+rebuild the specification from the augmented data and refit. Primary SVEM then
+uses additive penalized block effects without recipe-by-block interactions.
+
+The portfolio already reserves the selected incumbent repeat; the optional fixed
+benchmark can connect successive contexts even when the incumbent changes.
+Exploration also broadens recipe coverage. Neither guarantees separation of
+block effects from recipe effects, so plan bridging preparations deliberately.
+Compare new recipes with the repeats prepared in the same batch, rather than
+only with their earlier measurements. Under an additive batch shift, that
+within-batch contrast removes the shift without relying on a fitted block
+term. A fixed benchmark chosen in advance avoids choosing the reference for
+an unusually high observed response; it still has preparation and measurement
+noise. A deliberate challenge run to revisit a poor response remains a manual
+choice.
+
+For the **first follow-up round**, suppose the operator had been unknown and
+A and B equally likely. Using the original 23 preparations, score each
+physical recipe twice and average its two scores before ranking. This answers
+a different operational question from preparing every recipe with A. The
+same recipe IDs align the two tables.
+
+```{r marginal-operator}
+pool_b <- pool
+pool_b$Operator <- factor("B", levels = levels(pool$Operator))
+by_b <- svem_score_random(fits, goals = goals, data = dat, candidates = pool_b,
+                          increments = increments, budget = 3L, verbose = FALSE)
+idx <- match(tab$recipe_id, by_b$score_table$recipe_id)
+stopifnot(!anyNA(idx))
+cols <- intersect(c("score", "gaupro_score", "extra_trees_score"), names(tab))
+eligible <- !tab$recipe_id %in% dat$recipe_id
+avg <- (tab[cols] + by_b$score_table[idx, cols, drop = FALSE]) / 2
+vapply(avg, function(s) {
+  use <- which(eligible & is.finite(s))
+  if (length(use)) as.character(tab$recipe_id[use[which.max(s[use])]]) else NA_character_
+}, character(1))
+```
+
+## A spline nominee on a two-factor process
+
+The full lipid experiment above has four mixture components, two numeric
+process settings and a nominal ingredient type. The optional general spline
+can now represent that factor specification, including its five independent
+numeric coordinates and additive operator shifts. A final optional comparison
+below adds its nomination to the same initial data. This separate teaching
+experiment keeps two continuous coordinates so its fitted ridge is easy to
+display and compare with the known simulated response.
+
+Both coded process settings run from zero to one. A response ridge follows a
+line through the interior of the feasible grid. We know its noiseless response
+for teaching and can check the nominations against it after fitting. In the
+laboratory the measured follow-up supplies that check.
+
+```{r spline-process-design}
+process_grid <- expand.grid(rate = seq(0, 1, length.out = 9),
+                            time = seq(0, 1, length.out = 9))
+process_grid$recipe_id <- sprintf("P%03d", seq_len(nrow(process_grid)))
+process_mean <- function(rate, time) {
+  along <- exp(-0.5 * ((rate - 0.65) / 0.35)^2)
+  across <- exp(-0.5 * ((time - 0.2 - 0.6 * rate) / 0.13)^2)
+  0.15 * rate + along * across
+}
+set.seed(7312)
+process_data <- process_grid[sample.int(nrow(process_grid), 24L), ]
+process_data$yield <- with(process_data, process_mean(rate, time)) +
+  rnorm(nrow(process_data), sd = 0.08)
+process_spec <- bigexp_terms(yield ~ rate + time, data = process_data,
+                             report = FALSE)
+process_goals <- list(yield = list(goal = "max", weight = 1))
+```
+
+Specify both counts when you know how many new candidates to test and how
+many runs to spend on exploration. The planner adds the best-observed repeat
+and any distinct fixed benchmark. With both optional companions available,
+five requested model candidates and two exploration runs plus the incumbent
+give eight planned preparations. Set `incumbent = FALSE` to request the same
+numbers of new recipes without that repeat. To impose a lab limit, supply `budget`.
+The worklist can be shorter if model nominees coincide.
+The standard order tries elastic-net SVEM, GauPro, Extra Trees, forward SVEM
+and then the optional spline. When two models nominate the same recipe, their
+endorsements share one physical place. The planner considers later model
+nominees before declaring a model shortfall. An explicit exploration request
+reserves those places for exploration.
+
+```{r spline-process-plan, message=FALSE}
+if (requireNamespace("mgcv", quietly = TRUE)) {
+  n_models <- 3L + length(enabled)  # Elastic net, forward, spline, and enabled companions
+  set.seed(7313)
+  process_plan <- svem_plan_runs(
+    process_spec, process_data, process_goals, candidates = process_grid,
+    incumbent = TRUE, n_optima = n_models, n_explore = 2L,
+    spline = TRUE,
+    fit_control = list(companions = if (length(enabled)) enabled else FALSE),
+    score_control = list(verbose = FALSE)
+  )
+  counts <- process_plan$allocation_counts
+  print(data.frame(type = c("Reference repeats", "New model candidates", "Exploration"),
+    requested = c(1L, n_models, 2L),
+    selected = c(counts$distinct_repeats, counts$selected_optima, counts$selected_explore)))
+  print(process_plan$nominations[, c("engine", "status", "new_recipe_id", "slot")])
+  if (nrow(process_plan$merged_nominations)) print(process_plan$merged_nominations)
+  process_runs <- process_plan$worklist[, c("slot", "role", "nominated_by",
+    "recipe_id", "rate", "time", "yield_spline_pred")]
+  process_runs$example_mean <- with(process_runs, process_mean(rate, time))
+  print(process_runs)
+} else {
+  message("Install the suggested mgcv package to run the spline example.")
+}
+```
+
+```{r spline-allocated-places, echo=FALSE, results='asis'}
+if (exists("process_plan", inherits = FALSE)) {
+  cat(sprintf(paste0("This run requested %d distinct model candidates and obtained %d. ",
+      "Overlapping nominations share a preparation. Counting reference repeats (%d) and ",
+      "exploration settings (%d), the worklist contains %d distinct preparations. ",
+      "The number of unused places is %d.\n\n"),
+    n_models, counts$selected_optima, counts$distinct_repeats, counts$selected_explore,
+    nrow(process_plan$worklist), counts$unused_capacity))
+}
+```
+
+The `yield_spline_pred` column is the fitted ensemble mean for the recipe in
+that row. `example_mean` is the noiseless response used to generate this
+teaching experiment. Neither column is a new assay. Check the actual number of
+distinct preparations and obtain independent measurements before adopting a
+model nominee. With `n_explore = NULL`, the existing high-spread medoid policy
+fills spare places. With an explicit count, inspect the returned allocation for
+any unused capacity or unavailable nominations.
+
+To fit the same spline independently, the shared response-fitting helper
+accepts the original factor specification and the response-free feasible grid.
+Set this reference grid before looking at outcomes and keep it fixed across
+refits. Its physical coordinates determine the basis. The declared factor
+bounds separately determine which recipes are legal. If the planner fits the
+spline itself, its `candidates` table supplies the reference grid. To score a
+different pool on the existing basis, supply the saved spline fits. Prediction
+at recipes off the saved grid requires `mgcv`, including after reload.
+
+```{r standalone-spline-process, eval=FALSE}
+spline_fits <- svem_fit_responses(process_spec, process_data, "yield",
+                                  method = "spline", domain_grid = process_grid)
+predict(spline_fits[["yield"]], newdata = process_grid[1:3, ])
+```
+
+The spline regularizes curvature and chooses a smoothing strength for each
+paired training and validation weighting. A member scores its training-fitted
+Gaussian mean and residual variance on the validation-weighted copy. The
+capacity limit uses the smoother's effective degrees of freedom. The basis follows the
+thin-plate regression spline construction of [Wood (2003)](https://doi.org/10.1111/1467-9868.00374).
+
+
+## An optional general spline on the full lipid experiment
+
+Return to the original 23 preparations for this comparison. The specification,
+goals, mixture bounds, ingredient types, process settings and operator remain
+visible in the earlier code. Reuse the four fitted learners and add the spline.
+Five requested model optima, two exploration medoids and one incumbent repeat
+give a nominal budget of eight preparations. Distinct model nominees can be
+fewer than five when learners agree; the returned shortfall and endorsements
+show what can actually be prepared.
+
+```{r full-lipid-general-spline, message=FALSE, results="asis"}
+if (requireNamespace("mgcv", quietly = TRUE)) {
+  set.seed(2401)
+  spline_plan <- svem_plan_runs(
+    spec, data = dat, goals = goals, candidates = pool,
+    fits = plan$fits, forward = plan$forward, spline = TRUE,
+    incumbent = incumbent_row, benchmark = fixed_benchmark,
+    n_optima = 5L, n_explore = 2L,
+    spline_control = list(nBoot = 200L), score_control = score_controls
+  )
+  capacity <- do.call(rbind, lapply(names(spline_plan$spline), function(r) {
+    f <- spline_plan$spline[[r]]
+    data.frame(response = r, numeric_coordinates = f$spec$dimension,
+               model_columns = length(f$penalty),
+               median_effective_df = median(f$member_diagnostics$effective_df),
+               intercept_member_fraction = mean(f$member_diagnostics$intercept_only))
+  }))
+  print(knitr::kable(capacity, digits = 3, row.names = FALSE))
+  print(knitr::kable(spline_plan$worklist[c("slot", "role", "nominated_by", "recipe_id")],
+               row.names = FALSE))
+  notes <- spline_plan$scores$engine_status
+  notes <- notes[notes$engine == "spline" & nzchar(notes$message), , drop = FALSE]
+  if (nrow(notes)) print(knitr::kable(notes, row.names = FALSE))
+  cc <- spline_plan$allocation_counts
+  print(knitr::kable(data.frame(reference_repeats = cc$distinct_repeats,
+    model_candidates = cc$selected_optima, exploration = cc$selected_explore,
+    unused_capacity = cc$unused_capacity, shortfall = spline_plan$shortfall),
+    row.names = FALSE))
+}
+```
+
+The stored general surface uses a shared Duchon basis and modest one-factor
+curvature here. Ingredient levels
+add penalized shifts and deviations; the operator remains an additive block.
+The smoothing strength is selected separately for each self-validated member
+using its training-fitted Gaussian mean and variance on the validation copy.
+The self-validation score and effective-df cap can favor a simple fit in a small experiment. A flat
+general surface supplies predictions but no directional optimum. This extends
+factor coverage; it does not transfer the earlier two-coordinate simulation
+results to every formulation problem. Confirm the proposed recipes experimentally.
+
+For a new experiment, the same call uses its own shared `bigexp_terms()`
+specification and response-free candidate grid. Multiple disjoint mixture
+groups and fixed components are supported. With no varying numeric coordinate,
+the general smoother reduces to penalized categorical effects or an intercept.
+The default four-learner workflow remains available without a spline request.

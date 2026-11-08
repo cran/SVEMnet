@@ -44,7 +44,9 @@ groups. Each element should be a list with components:
 \item \code{upper}: numeric vector of upper bounds (same length as \code{vars});
 \item \code{total}: scalar specifying the sum of the mixture variables.
 }
-All mixture variables must appear in exactly one group. Defaults to \code{NULL}.}
+All mixture variables must appear in exactly one group. When a
+\code{bigexp_terms()} specification declares groups, the evaluation grid
+inherits them and an explicitly supplied group list must agree.}
 
 \item{nPoint}{Number of random evaluation points in the factor space
 (default \code{2000}); must be a positive integer.}
@@ -134,7 +136,8 @@ The \code{relaxed} setting is controlled by the \code{relaxed} argument of
 this function. User \code{weights} and \code{offset} are not supported
 (SVEM controls its own weighting). Argument names that neither
 \code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
-with a warning (misspelling protection).}
+with a warning (misspelling protection). The documented \code{maxp} and \code{path}
+controls are accepted only when \code{relaxed = TRUE}.}
 }
 \value{
 An object of class \code{"svem_significance_test"}, a list with
@@ -192,6 +195,9 @@ calls \code{set.seed()} with its assigned seed before performing random draws
 This makes results reproducible regardless of worker scheduling and
 independent of the number of cores. The caller's RNG kind and
 \code{.Random.seed} are restored on exit, including error exits.
+With \code{seed = NULL}, the private stream derives from the caller's
+current state. Two calls starting from the same saved state can therefore
+repeat the same draws. Supply distinct seeds for independent repetitions.
 A failed fit slot is retried twice with deterministic sub-seeds while its
 response permutation remains fixed. If all three attempts fail, the test
 aborts with a failure summary rather than silently reducing \code{nSVEM} or
@@ -217,10 +223,8 @@ with \code{bigexp_terms()}. Supply \code{spec} (and optionally
 polynomial/interaction structure are identical across repeated calls and
 across multiple responses sharing the same factor space.
 
-Although the implementation calls \code{SVEMnet()} internally and will
-technically run for any supported \code{family}, the significance test is
-\emph{designed} for continuous (Gaussian) responses and should be interpreted
-in that setting.
+The significance test accepts continuous numeric responses and uses
+Gaussian SVEM refits. A binomial response family is unsupported.
 }
 \section{Acknowledgments}{
 

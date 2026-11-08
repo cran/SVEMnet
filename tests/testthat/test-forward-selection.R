@@ -181,7 +181,7 @@ test_that("svem_forward fits, predicts, and interoperates with svem_model method
   expect_s3_class(fit, "svem_forward")
   expect_s3_class(fit, "svem_model")
   expect_identical(fit$family, "gaussian")
-  expect_identical(fit$objective_used, "wAIC")
+  expect_identical(fit$objective_used, "gaussian_likelihood")
   expect_equal(nrow(fit$coef_matrix), 15L)
   expect_identical(colnames(fit$coef_matrix)[1], "(Intercept)")
 
@@ -328,7 +328,7 @@ test_that("svem_forward matches an independent single-bootstrap oracle", {
   dat <- gen_forward_df()
   n <- nrow(dat)
   set.seed(123)
-  fit <- svem_forward(y ~ (X1 + X2 + X3)^2, dat, nBoot = 1)
+  fit <- svem_forward(y ~ (X1 + X2 + X3)^2, dat, nBoot = 1, objective = "wAIC")
 
   # Reproduce the replicate independently: same RNG stream, lm.wfit-based
   # greedy path on training weights, wAIC scoring with validation weights

@@ -38,8 +38,7 @@
 .svem_active <- function(beta, tol = 0) {
   tol <- .svem_numeric_scalar(tol, "tol", lower = 0)
   if (tol == 0) return(.svem_solver_active(beta))
-  # Explicit positive tolerances retain the private research harness's
-  # historical raw-coefficient convention; production uses exact support.
+  # A positive tolerance thresholds raw slopes relative to their largest magnitude.
   slope <- beta[-1L]
   finite <- is.finite(slope)
   m <- if (any(finite)) max(abs(slope[finite])) else 0

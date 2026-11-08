@@ -2,30 +2,34 @@ Package: SVEMnet
 Type: Package
 Title: Self-Validated Ensemble Models with Lasso and Relaxed Elastic
         Net Regression
-Version: 3.6.3
-Date: 2026-10-29
+Version: 4.0.0
+Date: 2026-11-07
 Authors@R: 
     person(given = "Andrew T.",
            family = "Karl",
            email = "akarl@asu.edu",
            role = c("cre", "aut"),
            comment = c(ORCID = "0000-0002-5933-8706"))
-Description: Implements the self-validated elastic-net and relaxed elastic-net ensemble modeling and multi-response optimization workflow described in Karl (2026) <doi:10.1016/j.chemolab.2026.105660>. Self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) are fitted for small-sample design-of-experiments and related workflows using 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Package code was drafted with assistance from generative AI tools.
+Description: Implements the self-validated elastic-net and relaxed elastic-net ensemble modeling and multi-response optimization workflow described in Karl (2026) <doi:10.1016/j.chemolab.2026.105660>. Self-validated ensemble models (SVEM; Lemkus et al. (2021) <doi:10.1016/j.chemolab.2021.104439>) are fitted for small-sample design-of-experiments and related workflows using 'glmnet' (Friedman et al. (2010) <doi:10.18637/jss.v033.i01>). Fractional random-weight bootstraps with anti-correlated validation copies are used to tune penalty paths by validation-weighted AIC/BIC. Supports Gaussian and binomial responses, deterministic expansion helpers for shared factor spaces, prediction with bootstrap uncertainty, and a random-search optimizer that respects mixture constraints and combines multiple responses via desirability functions. Gaussian process models from 'GauPro' and extremely randomized forests from 'ranger' can each nominate candidate recipes for follow-up experiments using the same factors and constraints. The default formulation workflow carries forward the best observed preparation, nominates new candidates from elastic-net SVEM, Gaussian process, extremely randomized forest and forward SVEM models, and fills the remaining preparation budget with uncertainty medoids. Users can set a total preparation budget or request separate counts of new model candidates and exploration runs alongside optional reference repeats. A living executable vignette shows the shared factor specification, explicit scientific goals, worklist export, confirmation and refitting. An optional Gaussian self-validated smooth surface can nominate an additional recipe using a saved response-free domain, thin-plate or higher-dimensional Duchon spline bases, categorical study effects, multiple mixture groups and validation-tuned curvature shrinkage. Declared blocks remain additive. Gaussian forward selection uses validation likelihood to select among training-weighted least-squares fits. Also includes a permutation-based whole-model test for Gaussian SVEM fits (Karl (2024) <doi:10.1016/j.chemolab.2024.105122>). Package code was drafted with assistance from generative AI tools.
 URL: https://doi.org/10.1016/j.chemolab.2026.105660,
-        https://arxiv.org/abs/2511.20968
+        https://arxiv.org/abs/2511.20968,
+        https://arxiv.org/abs/2212.11264,
+        https://arxiv.org/abs/2610.36012
 Depends: R (>= 4.0.0)
 Imports: glmnet (>= 4.1-6), stats, cluster, ggplot2, lhs, parallel,
         utils
-Suggests: foreach, testthat (>= 3.0.0), withr, RhpcBLASctl
+Suggests: foreach, testthat (>= 3.2.0), withr, RhpcBLASctl, GauPro (>=
+        0.2.17), ranger (>= 0.18.0), digest, mgcv, knitr, rmarkdown
+VignetteBuilder: knitr
 License: GPL-2 | GPL-3
 Encoding: UTF-8
 Config/testthat/edition: 3
 LazyData: true
-Config/roxygen2/version: 8.1.1
+Config/roxygen2/version: 8.1.0
 NeedsCompilation: no
-Packaged: 2026-10-30 15:55:23 UTC; andre
+Packaged: 2026-11-07 23:08:09 UTC; andre
 Author: Andrew T. Karl [cre, aut] (ORCID:
     <https://orcid.org/0000-0002-5933-8706>)
 Maintainer: Andrew T. Karl <akarl@asu.edu>
 Repository: CRAN
-Date/Publication: 2026-10-30 17:50:02 UTC
+Date/Publication: 2026-11-08 16:20:50 UTC

@@ -290,6 +290,9 @@
 #' This makes results reproducible regardless of worker scheduling and
 #' independent of the number of cores. The caller's RNG kind and
 #' \code{.Random.seed} are restored on exit, including error exits.
+#' With \code{seed = NULL}, the private stream derives from the caller's
+#' current state. Two calls starting from the same saved state can therefore
+#' repeat the same draws. Supply distinct seeds for independent repetitions.
 #' A failed fit slot is retried twice with deterministic sub-seeds while its
 #' response permutation remains fixed. If all three attempts fail, the test
 #' aborts with a failure summary rather than silently reducing \code{nSVEM} or
@@ -315,10 +318,8 @@
 #' polynomial/interaction structure are identical across repeated calls and
 #' across multiple responses sharing the same factor space.
 #'
-#' Although the implementation calls \code{SVEMnet()} internally and will
-#' technically run for any supported \code{family}, the significance test is
-#' \emph{designed} for continuous (Gaussian) responses and should be interpreted
-#' in that setting.
+#' The significance test accepts continuous numeric responses and uses
+#' Gaussian SVEM refits. A binomial response family is unsupported.
 #'
 #' @param formula A model formula. If \code{spec} is provided, the right-hand
 #'   side is ignored and replaced by the locked expansion in \code{spec}.
@@ -334,7 +335,9 @@
 #'     \item \code{upper}: numeric vector of upper bounds (same length as \code{vars});
 #'     \item \code{total}: scalar specifying the sum of the mixture variables.
 #'   }
-#'   All mixture variables must appear in exactly one group. Defaults to \code{NULL}.
+#'   All mixture variables must appear in exactly one group. When a
+#'   \code{bigexp_terms()} specification declares groups, the evaluation grid
+#'   inherits them and an explicitly supplied group list must agree.
 #' @param nPoint Number of random evaluation points in the factor space
 #'   (default \code{2000}); must be a positive integer.
 #' @param nSVEM Number of SVEM fits on the original (unpermuted) data used to
@@ -407,7 +410,8 @@
 #'   this function. User \code{weights} and \code{offset} are not supported
 #'   (SVEM controls its own weighting). Argument names that neither
 #'   \code{SVEMnet()} nor the installed \code{glmnet} recognizes are ignored
-#'   with a warning (misspelling protection).
+#'   with a warning (misspelling protection). The documented `maxp` and `path`
+#'   controls are accepted only when `relaxed = TRUE`.
 #'
 #' @return An object of class \code{"svem_significance_test"}, a list with
 #'   components:
@@ -634,6 +638,14 @@ svem_significance_test_parallel <- function(
     resp_name <- .resp_var_from_formula(formula)
   }
 
+  inherited <- spec$settings$mixture_groups
+  if (length(inherited)) {
+    if (!is.null(mixture_groups) &&
+        !identical(.svem_mixture_groups(mixture_groups), inherited)) {
+      stop("mixture_groups conflicts with the groups declared in bigexp_terms().", call. = FALSE)
+    }
+    mixture_groups <- inherited
+  }
   wmt_terms <- stats::terms(f_use, data = data)
   .svem_reject_formula_offset(wmt_terms, "svem_significance_test_parallel")
   if (!identical(attr(wmt_terms, "intercept"), 1L) ||
@@ -697,6 +709,15 @@ svem_significance_test_parallel <- function(
 
   # Sanitize ... so explicit 'relaxed' here cannot be overridden
   dots <- list(...)
+  companion_args <- c("companions", "companion_blocks", "companion_continuous_blocks")
+  if (any(companion_args %in% names(dots))) {
+    if (!identical(dots$companions, FALSE) ||
+        any(c("companion_blocks", "companion_continuous_blocks") %in% names(dots))) {
+      warning("Ignoring companion options in the whole-model test; it tests only the SVEM surface.",
+              call. = FALSE)
+    }
+    dots[companion_args] <- NULL
+  }
 
   ## --- guard against binomial family: only Gaussian is supported here ----
   if ("family" %in% names(dots)) {
@@ -740,6 +761,7 @@ svem_significance_test_parallel <- function(
   unknown <- .svem_unknown_glmnet_args(
     dots,
     funs = list(SVEMnet, glmnet::glmnet),
+    extra_allowed = if (isTRUE(relaxed)) c("maxp", "path") else character(),
     context = "SVEMnet/glmnet via svem_significance_test_parallel"
   )
   if (length(unknown)) dots <- dots[setdiff(names(dots), unknown)]

@@ -289,7 +289,16 @@
 #' @param mixture_vars Optional character vector naming numeric, non-blocking
 #'   predictors whose polynomial powers must remain uncentered. This only
 #'   excludes them from polynomial centering; it does not impose mixture sum
-#'   constraints or replace \code{mixture_groups} in downstream sampling.
+#'   constraints. When \code{mixture_groups} is supplied, its component names
+#'   also define \code{mixture_vars}.
+#' @param mixture_groups Optional fixed-sum mixture groups, each with
+#'   \code{vars}, \code{lower}, \code{upper}, and \code{total} as in
+#'   the candidate sampler. Store components at sufficient precision to sum
+#'   to their total (within \code{1e-8 * max(1, abs(total))}). For a rounded
+#'   recipe, reconstruct a balancing component at preparation precision and
+#'   verify all individual bounds. See
+#'   \code{\link{svem_random_table_multi}}. The fit and sampler inherit
+#'   these groups. Components must be continuous, non-blocking predictors.
 #'
 #' @return An object of class \code{"bigexp_spec"} with components:
 #' \itemize{
@@ -434,7 +443,8 @@ bigexp_terms <- function(formula, data,
                          audit_min_n        = 12L,
                          report             = TRUE,
                          center_polynomials = FALSE,
-                         mixture_vars       = NULL) {
+                         mixture_vars       = NULL,
+                         mixture_groups     = NULL) {
   stopifnot(is.data.frame(data))
 
   factorial_order  <- .svem_integer_scalar(factorial_order, "factorial_order", min = 1L)
@@ -456,6 +466,13 @@ bigexp_terms <- function(formula, data,
   include_pc_2way <- .svem_logical_scalar(include_pc_2way, "include_pc_2way")
   include_pc_3way <- .svem_logical_scalar(include_pc_3way, "include_pc_3way")
   center_polynomials <- .svem_logical_scalar(center_polynomials, "center_polynomials")
+  mixture_groups <- .svem_mixture_groups(mixture_groups)
+  if (length(mixture_groups)) {
+    group_vars <- unlist(lapply(mixture_groups, `[[`, "vars"), use.names = FALSE)
+    if (!is.null(mixture_vars) && !setequal(mixture_vars, group_vars))
+      stop("mixture_vars and mixture_groups must name the same components.", call. = FALSE)
+    mixture_vars <- group_vars
+  }
   if (is.null(mixture_vars)) {
     mixture_vars <- character(0L)
   } else if (!is.character(mixture_vars) || anyNA(mixture_vars) ||
@@ -795,6 +812,8 @@ bigexp_terms <- function(formula, data,
   main_vars <- setdiff(vars_all, blocking_vars)
   cont_vars <- main_vars[!is_cat[main_vars]]
 
+  if (length(mixture_groups) && length(intersect(mixture_vars, discrete_numeric_vars)))
+    stop("Mixture components cannot be discrete numeric predictors.", call. = FALSE)
   invalid_mixture <- setdiff(mixture_vars, cont_vars)
   if (length(invalid_mixture)) {
     stop("mixture_vars must name numeric, non-blocking predictors in the expansion: ",
@@ -886,6 +905,7 @@ bigexp_terms <- function(formula, data,
     spec$settings$polynomial_centers <- polynomial_centers
     spec$settings$mixture_vars <- mixture_vars
   }
+  if (length(mixture_groups)) spec$settings$mixture_groups <- mixture_groups
 
   # Attach the spec to its own stored formula so that the documented workflow
   # SVEMnet(spec$formula, data, ...) carries the full spec (blocking,

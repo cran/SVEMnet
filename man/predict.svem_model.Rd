@@ -12,7 +12,8 @@
   se.fit = FALSE,
   interval = FALSE,
   level = 0.95,
-  ...
+  ...,
+  engine = c("svemnet", "gaupro", "extra_trees", "all")
 )
 }
 \arguments{
@@ -51,6 +52,14 @@ of bootstrap member predictions instead of aggregate coefficients.}
 \code{0.95}.}
 
 \item{...}{Currently unused.}
+
+\item{engine}{Default \code{"svemnet"} uses the original SVEM prediction.
+\code{"gaupro"} or \code{"extra_trees"} returns one companion mean.
+For GauPro, \code{se.fit = TRUE} returns the conditional latent-mean
+standard deviation in \code{$se.fit}. \code{"all"} returns a data frame
+of means with one column per requested engine plus SVEMnet. A failed
+companion has missing means and its diagnostic in the \code{engine_status}
+attribute. Calibration, intervals, and binomial companions are unsupported.}
 }
 \value{
 If \code{se.fit = FALSE} and \code{interval = FALSE}:

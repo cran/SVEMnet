@@ -100,8 +100,10 @@
 #' @param n Number of random candidates to draw when \code{candidates} is
 #'   \code{NULL}. Default \code{5000}.
 #' @param mixture_groups Optional mixture and simplex constraints passed to
-#'   \code{\link{svem_random_table_multi}} (ignored when \code{candidates}
-#'   is supplied).
+#'   \code{\link{svem_random_table_multi}} when generating candidates. For
+#'   supplied candidates, groups declared in the fitted factor specification
+#'   are enforced and an explicit declaration must agree. For older fits
+#'   without declared groups, the caller supplies an already feasible table.
 #' @param numeric_sampler Character; how numeric predictors are sampled when
 #'   \code{candidates = NULL}: \code{"random"} (Latin hypercube when
 #'   \pkg{lhs} is available) or \code{"uniform"}. As in
@@ -367,6 +369,11 @@ svem_thompson_batch <- function(objects,
     if (!nrow(candidates))
       stop("'candidates' has zero rows.")
     cand_df <- as.data.frame(candidates)
+    if (any(vapply(objects, function(x) length(x$sampling_schema$mixture_groups) > 0L,
+                   logical(1)))) {
+      groups <- .svem_pool_groups(objects, mixture_groups)
+      .svem_check_candidate_mixtures(cand_df, groups, tol = 1e-8)
+    }
   }
   n_cand <- nrow(cand_df)
   if (batch_size > n_cand)

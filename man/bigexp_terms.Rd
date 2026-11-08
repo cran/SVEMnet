@@ -20,7 +20,8 @@ bigexp_terms(
   audit_min_n = 12L,
   report = TRUE,
   center_polynomials = FALSE,
-  mixture_vars = NULL
+  mixture_vars = NULL,
+  mixture_groups = NULL
 )
 }
 \arguments{
@@ -121,7 +122,17 @@ those in \code{mixture_vars}. See \emph{Centered polynomial powers}.}
 \item{mixture_vars}{Optional character vector naming numeric, non-blocking
 predictors whose polynomial powers must remain uncentered. This only
 excludes them from polynomial centering; it does not impose mixture sum
-constraints or replace \code{mixture_groups} in downstream sampling.}
+constraints. When \code{mixture_groups} is supplied, its component names
+also define \code{mixture_vars}.}
+
+\item{mixture_groups}{Optional fixed-sum mixture groups, each with
+\code{vars}, \code{lower}, \code{upper}, and \code{total} as in
+the candidate sampler. Store components at sufficient precision to sum
+to their total (within \code{1e-8 * max(1, abs(total))}). For a rounded
+recipe, reconstruct a balancing component at preparation precision and
+verify all individual bounds. See
+\code{\link{svem_random_table_multi}}. The fit and sampler inherit
+these groups. Components must be continuous, non-blocking predictors.}
 }
 \value{
 An object of class \code{"bigexp_spec"} with components:

@@ -9,8 +9,13 @@
   n <- length(y)
   args <- list(x=X,y=y,weights=wt,alpha=1,nlambda=500,
                standardize=TRUE,intercept=TRUE,family=family,relax=relaxed)
-  if ("control" %in% names(formals(glmnet::glmnet))) args$control <- list(maxit=1e6)
-  else args$maxit <- 1e6
+  if ("control" %in% names(formals(glmnet::glmnet))) args$control <- c(list(maxit=1e6),if(family=="gaussian")list(fdev=0,devmax=1))
+  else {
+    args$maxit <- 1e6
+    old <- glmnet::glmnet.control()
+    on.exit(do.call(glmnet::glmnet.control,old))
+    if(family=="gaussian")glmnet::glmnet.control(fdev=0,devmax=1)
+  }
   g <- do.call(glmnet::glmnet,args)
   neff <- sum(wv)^2 / sum(wv^2)
   nadm <- max(2, min(n, neff))

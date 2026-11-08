@@ -23,7 +23,8 @@ apply it. Has an effect only for Gaussian models where
 between the aligned design for \code{newdata} and the training design
 (including the intercept position). Default \code{FALSE}.}
 
-\item{...}{Additional arguments (currently unused).}
+\item{...}{Additional arguments. An engine selector applies only to models
+fitted with \code{SVEMnet()}; a CV fit has one prediction surface.}
 }
 \value{
 A numeric vector of predictions on the response scale:

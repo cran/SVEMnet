@@ -10,7 +10,8 @@ svem_random_table_multi(
   mixture_groups = NULL,
   debias = FALSE,
   range_tol = 1e-08,
-  numeric_sampler = c("random", "uniform")
+  numeric_sampler = c("random", "uniform"),
+  candidates = NULL
 )
 }
 \arguments{
@@ -46,6 +47,11 @@ is available; otherwise independent uniforms via \code{runif()}.
 \item \code{"uniform"}: independent uniform draws within numeric ranges
 (fastest; no \pkg{lhs} dependency).
 }}
+
+\item{candidates}{Optional data frame of physical recipes to score, in the
+supplied order, instead of drawing new settings. Include all model
+predictors. Extra columns are ignored. Numeric limits, factor labels,
+discrete supports and declared mixture constraints are checked.}
 }
 \value{
 A list with three data frames:

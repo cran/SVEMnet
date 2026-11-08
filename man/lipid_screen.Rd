@@ -33,8 +33,8 @@ An example dataset for modeling Potency, Size, and PDI as functions of
 formulation and process settings. Percent composition columns are stored as
 proportions in \code{[0, 1]} (for example, 4.19 percent is 0.0419). This
 table is intended for demonstration of SVEMnet multi-response modeling,
-desirability-based random-search optimization, and probabilistic
-design-space construction.
+desirability-based random-search optimization, and estimated probabilities
+that mean responses meet specification limits.
 }
 \details{
 The four composition columns \code{PEG}, \code{Helper}, \code{Ionizable},
@@ -42,6 +42,10 @@ and \code{Cholesterol} are stored as proportions in \code{[0,1]} and sum to
 exactly 1 in every row (so the mixture columns are exactly collinear),
 making them natural candidates for mixture constraints in optimization and
 design-space examples.
+
+The vignette \code{vignette("lipid-screen-follow-up", package = "SVEMnet")}
+uses this dataset to nominate and confirm new recipes. See
+\code{\link{lipid_screen_simulate}} for the teaching simulator.
 
 This dataset accompanies examples showing:
 \itemize{
@@ -60,8 +64,8 @@ by changing the target column (for example \code{score} vs
 \item optional whole-model reweighting (WMT) of response weights via
 \code{\link{svem_wmt_multi}} (for p-values and multipliers) together
 with \code{\link{svem_score_random}} (via its \code{wmt} argument),
-\item constructing a probabilistic design space in one step by passing
-process-mean specifications via the \code{specs} argument of
+\item estimating mean-level specification probabilities by passing
+process-mean limits via the \code{specs} argument of
 \code{\link{svem_score_random}} (internally using
 \code{svem_append_design_space_cols} when needed).
 }

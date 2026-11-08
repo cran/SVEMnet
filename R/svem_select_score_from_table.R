@@ -59,6 +59,9 @@
 #'   separator.
 #'
 #' @details
+#' This row-based helper does not deduplicate physical recipes: the best row
+#' may repeat a medoid, and discrete candidate rows may repeat one another.
+#' Use [svem_plan_runs()] for a distinct, budgeted preparation worklist.
 #' \code{svem_score_random()} returns both response prediction columns
 #' (for example, \code{Y_pred}) and robust bounded summaries such as
 #' \code{score}, per-response desirabilities, per-response weighted CI-width

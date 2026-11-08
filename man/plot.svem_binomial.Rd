@@ -19,7 +19,9 @@
 
 \item{bins}{Integer number of equal-frequency bins for calibration (default \code{10}).}
 
-\item{jitter_width}{Vertical jitter amplitude for raw points in calibration (default \code{0.05}).}
+\item{jitter_width}{Vertical jitter amplitude for raw points in calibration
+(default \code{0.05}). A positive width draws random offsets and advances
+the caller's random-number stream. Set it to zero to omit jitter.}
 
 \item{...}{Additional aesthetics passed to \code{ggplot2::geom_line()} or \code{ggplot2::geom_point()}.}
 }

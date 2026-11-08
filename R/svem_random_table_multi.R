@@ -1,3 +1,39 @@
+# Normalize current and legacy sampling-schema discrete supports for both
+# supplied candidate validation and incumbent/benchmark selection.
+.svem_discrete_map <- function(ss) {
+  normalize <- function(x) {
+    if (is.null(x) || !is.list(x) || !length(x)) return(list())
+    nm <- names(x)
+    if (is.null(nm) || any(!nzchar(nm))) return(list())
+    out <- vector("list", length(x))
+    names(out) <- nm
+    for (v in nm) {
+      vals <- sort(unique(as.numeric(x[[v]])))
+      out[[v]] <- vals[is.finite(vals)]
+    }
+    out[vapply(out, length, integer(1)) > 0]
+  }
+  if (is.null(ss) || !is.list(ss)) return(list())
+  dn <- ss$discrete_numeric
+  dl <- if (is.null(ss$discrete_levels)) ss$discrete_values else ss$discrete_levels
+  if (is.list(dn) && !is.null(names(dn)) && all(nzchar(names(dn)))) {
+    return(normalize(dn))
+  }
+  if (is.list(dl) && length(dl) && !is.null(names(dl)) && all(nzchar(names(dl)))) {
+    if (is.character(dn) && length(dn)) {
+      keep <- intersect(unique(as.character(dn)), names(dl))
+      return(normalize(dl[keep]))
+    }
+    return(normalize(dl))
+  }
+  if (is.character(dn) && length(dn)) {
+    stop("sampling_schema$discrete_numeric is present (character vector) but ",
+         "sampling_schema$discrete_levels (or legacy $discrete_values) is missing; ",
+         "cannot resolve discrete supports.")
+  }
+  list()
+}
+
 #' Generate a Random Prediction Table from Multiple SVEMnet Models (no refit)
 #'
 #' Samples the original predictor factor space cached in fitted \code{svem_model}
@@ -136,9 +172,14 @@
 #' @importFrom lhs randomLHS
 #' @importFrom stats rgamma
 #' @export
+#' @param candidates Optional data frame of physical recipes to score, in the
+#'   supplied order, instead of drawing new settings. Include all model
+#'   predictors. Extra columns are ignored. Numeric limits, factor labels,
+#'   discrete supports and declared mixture constraints are checked.
 svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
                                     debias = FALSE, range_tol = 1e-8,
-                                    numeric_sampler = c("random", "uniform")) {
+                                    numeric_sampler = c("random", "uniform"),
+                                    candidates = NULL) {
   numeric_sampler <- match.arg(numeric_sampler)
 
   # ---- validate inputs ----
@@ -149,6 +190,8 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     stop("All elements of 'objects' must be 'svem_model' objects.")
   if (!all(vapply(objects, function(o) is.list(o$sampling_schema), logical(1))))
     stop("Each 'svem_model' must contain a valid $sampling_schema. Refit with updated SVEMnet().")
+
+  mixture_groups <- .svem_pool_groups(objects, mixture_groups)
 
   n <- .svem_integer_scalar(n, "n", min = 1L)
   range_tol <- .svem_numeric_scalar(range_tol, "range_tol", lower = 0)
@@ -180,59 +223,22 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
     all(abs(diff) <= tol)
   }
 
-  # ---- helper: extract + normalize discrete numeric map from a sampling_schema ----
-  .norm_discrete_map <- function(x) {
-    if (is.null(x) || !is.list(x) || !length(x)) return(list())
-    nm <- names(x)
-    if (is.null(nm) || any(!nzchar(nm))) return(list())
-    out <- vector("list", length(x))
-    names(out) <- nm
-    for (v in nm) {
-      vals <- sort(unique(as.numeric(x[[v]])))
-      vals <- vals[is.finite(vals)]
-      out[[v]] <- vals
-    }
-    out <- out[vapply(out, length, integer(1)) > 0]
-    out
-  }
-
-  .extract_discrete_map <- function(ss) {
-    if (is.null(ss) || !is.list(ss)) return(list())
-
-    dn <- ss$discrete_numeric
-    # New name (SVEMnet stores this)
-    dl <- ss$discrete_levels
-    # Backward-compatible alias (older objects)
-    dv <- ss$discrete_values
-
-    # If both exist, prefer discrete_levels
-    if (is.null(dl) && !is.null(dv)) dl <- dv
-
-    # Case 1: discrete_numeric is a named list of supports (accept)
-    if (is.list(dn) && !is.null(names(dn)) && all(nzchar(names(dn)))) {
-      return(.norm_discrete_map(dn))
-    }
-
-    # Case 2: discrete_levels/discrete_values is a named list -> treat as discrete
-    if (is.list(dl) && length(dl) && !is.null(names(dl)) && all(nzchar(names(dl)))) {
-      # If dn is a character vector, subset to those names (if provided)
-      if (is.character(dn) && length(dn)) {
-        keep <- intersect(unique(as.character(dn)), names(dl))
-        return(.norm_discrete_map(dl[keep]))
+  # A supplied pool only needs to be feasible for *each* endpoint. Missing
+  # outcomes can give two fits different observed ranges or factor supports
+  # while the exact same supplied recipes are admissible in both.
+  if (!is.null(candidates)) {
+    for (k in seq_along(objects)) {
+      ss <- objects[[k]]$sampling_schema
+      if (!setequal(ss$predictor_vars, ref_vars) ||
+          !identical(ss$var_classes[ref_vars], ref_classes[ref_vars]) ||
+          !setequal(ss$blocking, ref_blocking)) {
+        stop("The supplied candidate pool requires common predictors, classes and blocking.")
       }
-      return(.norm_discrete_map(dl))
+      candidate_frame <- .svem_candidate_frame(candidates, ss, .svem_discrete_map(ss),
+                                               mixture_groups, range_tol)
+      if (k == 1L) shared_frame <- candidate_frame
     }
-
-    # Case 3: discrete_numeric is a character vector but no levels list -> error
-    if (is.character(dn) && length(dn)) {
-      stop(
-        "sampling_schema$discrete_numeric is present (character vector) but ",
-        "sampling_schema$discrete_levels (or legacy $discrete_values) is missing; ",
-        "cannot resolve discrete supports."
-      )
-    }
-
-    list()
+    return(.svem_pool_predictions(objects, shared_frame, debias))
   }
 
   # Check all schemas match reference (predictors, classes, levels, ranges, blocking)
@@ -334,7 +340,7 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   }
 
   # ---- AUTO discrete numeric map (from ANY supplied object) ----
-  disc_maps <- lapply(objects, function(o) .extract_discrete_map(o$sampling_schema))
+  disc_maps <- lapply(objects, function(o) .svem_discrete_map(o$sampling_schema))
   has_disc  <- vapply(disc_maps, function(m) is.list(m) && length(m) > 0, logical(1))
 
   discrete_map <- list()
@@ -700,8 +706,10 @@ svem_random_table_multi <- function(objects, n = 1000, mixture_groups = NULL,
   # Order like predictor_vars and ensure blocking columns exist (constant)
   T_data <- T_data[, predictor_vars, drop = FALSE]
 
-  # ---- predict for each model on the shared T_data ----
-  data_df <- T_data
+  .svem_pool_predictions(objects, T_data, debias)
+}
+
+.svem_pool_predictions <- function(objects, data_df, debias) {
   pred_df <- as.data.frame(matrix(NA_real_, nrow = nrow(data_df), ncol = 0))
   rownames(pred_df) <- NULL
 

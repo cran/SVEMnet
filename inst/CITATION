@@ -3,7 +3,8 @@
 citHeader(paste(
   "Please cite Karl (2026) as the primary reference for SVEMnet's core workflow",
   "and the package manual to identify the software version used.",
-  "Additional method references are provided below as appropriate."
+  "The journal articles are the fixed versions of record.",
+  "The authors occasionally update the corresponding arXiv manuscripts."
 ))
 
 # Package Paper Citation
@@ -15,7 +16,21 @@ citation_paper <- bibentry(
   year = "2026",
   volume = "271",
   pages = "105660",
-  doi = "10.1016/j.chemolab.2026.105660"
+  doi = "10.1016/j.chemolab.2026.105660",
+  url = "https://arxiv.org/abs/2511.20968"
+)
+
+citation_workflow <- bibentry(
+  bibtype = "Article",
+  title = "A workflow for lipid nanoparticle (LNP) formulation optimization using designed mixture-process experiments and self-validated ensemble models (SVEM)",
+  author = c(person("Andrew T.", "Karl"), person("Sean", "Essex"),
+             person("James", "Wisnowski"), person("Heath", "Rushing")),
+  journal = "Journal of Visualized Experiments",
+  year = "2023",
+  number = "198",
+  pages = "e65200",
+  doi = "10.3791/65200",
+  url = "https://arxiv.org/abs/2212.11264"
 )
 
 # Package Manual Citation
@@ -76,4 +91,4 @@ citation3 <- bibentry(
 )
 
 # Combine all citations into a list
-citation <- list(citation_paper, citation_package, citation1, citation2, citation3)
+citation <- list(citation_paper, citation_package, citation_workflow, citation1, citation2, citation3)

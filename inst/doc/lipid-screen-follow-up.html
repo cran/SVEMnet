@@ -1,0 +1,2728 @@
+<!DOCTYPE html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8" />
+<meta name="generator" content="pandoc" />
+<meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
+
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+
+
+<title>Choosing and confirming follow-up recipes in a 23-run lipid screen</title>
+
+<script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
+// be compatible with the behavior of Pandoc < 2.8).
+document.addEventListener('DOMContentLoaded', function(e) {
+  var hs = document.querySelectorAll("div.section[class*='level'] > :first-child");
+  var i, h, a;
+  for (i = 0; i < hs.length; i++) {
+    h = hs[i];
+    if (!/^h[1-6]$/i.test(h.tagName)) continue;  // it should be a header h1-h6
+    a = h.attributes;
+    while (a.length > 0) h.removeAttribute(a[0].name);
+  }
+});
+</script>
+
+<style type="text/css">
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+span.underline{text-decoration: underline;}
+div.column{display: inline-block; vertical-align: top; width: 50%;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+ul.task-list{list-style: none;}
+</style>
+
+
+
+<style type="text/css">
+code {
+white-space: pre;
+}
+.sourceCode {
+overflow: visible;
+}
+</style>
+<style type="text/css" data-origin="pandoc">
+html { -webkit-text-size-adjust: 100%; }
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+<script>
+// apply pandoc div.sourceCode style to pre.sourceCode instead
+(function() {
+  var sheets = document.styleSheets;
+  for (var i = 0; i < sheets.length; i++) {
+    if (sheets[i].ownerNode.dataset["origin"] !== "pandoc") continue;
+    try { var rules = sheets[i].cssRules; } catch (e) { continue; }
+    var j = 0;
+    while (j < rules.length) {
+      var rule = rules[j];
+      // check if there is a div.sourceCode rule
+      if (rule.type !== rule.STYLE_RULE || rule.selectorText !== "div.sourceCode") {
+        j++;
+        continue;
+      }
+      var style = rule.style.cssText;
+      // check if color or background-color is set
+      if (rule.style.color === '' && rule.style.backgroundColor === '') {
+        j++;
+        continue;
+      }
+      // replace div.sourceCode by a pre.sourceCode rule
+      sheets[i].deleteRule(j);
+      sheets[i].insertRule('pre.sourceCode{' + style + '}', j);
+    }
+  }
+})();
+</script>
+
+
+
+
+<style type="text/css">body {
+background-color: #fff;
+margin: 1em auto;
+max-width: 700px;
+overflow: visible;
+padding-left: 2em;
+padding-right: 2em;
+font-family: "Open Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+font-size: 14px;
+line-height: 1.35;
+}
+#TOC {
+clear: both;
+margin: 0 0 10px 10px;
+padding: 4px;
+width: 400px;
+border: 1px solid #CCCCCC;
+border-radius: 5px;
+background-color: #f6f6f6;
+font-size: 13px;
+line-height: 1.3;
+}
+#TOC .toctitle {
+font-weight: bold;
+font-size: 15px;
+margin-left: 5px;
+}
+#TOC ul {
+padding-left: 40px;
+margin-left: -1.5em;
+margin-top: 5px;
+margin-bottom: 5px;
+}
+#TOC ul ul {
+margin-left: -2em;
+}
+#TOC li {
+line-height: 16px;
+}
+table {
+margin: 1em auto;
+border-width: 1px;
+border-color: #DDDDDD;
+border-style: outset;
+border-collapse: collapse;
+}
+table th {
+border-width: 2px;
+padding: 5px;
+border-style: inset;
+}
+table td {
+border-width: 1px;
+border-style: inset;
+line-height: 18px;
+padding: 5px 5px;
+}
+table, table th, table td {
+border-left-style: none;
+border-right-style: none;
+}
+table thead, table tr.even {
+background-color: #f7f7f7;
+}
+p {
+margin: 0.5em 0;
+}
+blockquote {
+background-color: #f6f6f6;
+padding: 0.25em 0.75em;
+}
+hr {
+border-style: solid;
+border: none;
+border-top: 1px solid #777;
+margin: 28px 0;
+}
+dl {
+margin-left: 0;
+}
+dl dd {
+margin-bottom: 13px;
+margin-left: 13px;
+}
+dl dt {
+font-weight: bold;
+}
+ul {
+margin-top: 0;
+}
+ul li {
+list-style: circle outside;
+}
+ul ul {
+margin-bottom: 0;
+}
+pre, code {
+background-color: #f7f7f7;
+border-radius: 3px;
+color: #333;
+white-space: pre-wrap; 
+}
+pre {
+border-radius: 3px;
+margin: 5px 0px 10px 0px;
+padding: 10px;
+}
+pre:not([class]) {
+background-color: #f7f7f7;
+}
+code {
+font-family: Consolas, Monaco, 'Courier New', monospace;
+font-size: 85%;
+}
+p > code, li > code {
+padding: 2px 0px;
+}
+div.figure {
+text-align: center;
+}
+img {
+background-color: #FFFFFF;
+padding: 2px;
+border: 1px solid #DDDDDD;
+border-radius: 3px;
+border: 1px solid #CCCCCC;
+margin: 0 5px;
+}
+h1 {
+margin-top: 0;
+font-size: 35px;
+line-height: 40px;
+}
+h2 {
+border-bottom: 4px solid #f7f7f7;
+padding-top: 10px;
+padding-bottom: 2px;
+font-size: 145%;
+}
+h3 {
+border-bottom: 2px solid #f7f7f7;
+padding-top: 10px;
+font-size: 120%;
+}
+h4 {
+border-bottom: 1px solid #f7f7f7;
+margin-left: 8px;
+font-size: 105%;
+}
+h5, h6 {
+border-bottom: 1px solid #ccc;
+font-size: 105%;
+}
+a {
+color: #0033dd;
+text-decoration: none;
+}
+a:hover {
+color: #6666ff; }
+a:visited {
+color: #800080; }
+a:visited:hover {
+color: #BB00BB; }
+a[href^="http:"] {
+text-decoration: underline; }
+a[href^="https:"] {
+text-decoration: underline; }
+
+code > span.kw { color: #555; font-weight: bold; } 
+code > span.dt { color: #902000; } 
+code > span.dv { color: #40a070; } 
+code > span.bn { color: #d14; } 
+code > span.fl { color: #d14; } 
+code > span.ch { color: #d14; } 
+code > span.st { color: #d14; } 
+code > span.co { color: #888888; font-style: italic; } 
+code > span.ot { color: #007020; } 
+code > span.al { color: #ff0000; font-weight: bold; } 
+code > span.fu { color: #900; font-weight: bold; } 
+code > span.er { color: #a61717; background-color: #e3d2d2; } 
+</style>
+
+
+
+
+</head>
+
+<body>
+
+
+
+
+<h1 class="title toc-ignore">Choosing and confirming follow-up recipes
+in a 23-run lipid screen</h1>
+
+
+
+<p>The worked example fits elastic-net SVEM, forward-likelihood SVEM,
+GauPro and Extra Trees on the same experimental factors. The installed
+package includes the complete executable analysis, so the results can be
+regenerated with different measurements or a different preparation
+budget. To rerun it, copy the source to a writable project directory and
+render it there. Install the suggested packages <code>GauPro</code> and
+<code>ranger</code> to include both companions. The final sections use a
+two-factor teaching surface and an optional general spline on the full
+mixture/process experiment with its nominal ingredient factor. They show
+explicit model and exploration counts. The worklist reports how many
+distinct settings those models nominate. Install the suggested package
+<code>mgcv</code> for that section.</p>
+<p>The journal articles are the fixed versions of record. The authors
+occasionally update the arXiv manuscripts. These links open the latest
+posted revisions.</p>
+<ul>
+<li>Karl et al., <em>A Workflow for Lipid Nanoparticle (LNP) Formulation
+Optimization</em>. <a href="https://arxiv.org/abs/2212.11264">Latest
+arXiv version</a> · <a href="https://doi.org/10.3791/65200">JoVE
+article</a>.</li>
+<li>Karl, <em>SVEMnet: An R Package for Self-Validated Elastic-Net
+Ensembles and Multi-Response Optimization</em>. <a href="https://arxiv.org/abs/2511.20968">Latest arXiv version</a> · <a href="https://doi.org/10.1016/j.chemolab.2026.105660">Chemometrics
+article</a>.</li>
+</ul>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" tabindex="-1"></a>source_file <span class="ot">&lt;-</span> <span class="fu">system.file</span>(<span class="st">&quot;examples&quot;</span>, <span class="st">&quot;lipid-screen-follow-up.Rmd&quot;</span>, <span class="at">package =</span> <span class="st">&quot;SVEMnet&quot;</span>)</span>
+<span id="cb1-2"><a href="#cb1-2" tabindex="-1"></a><span class="fu">file.copy</span>(source_file, <span class="st">&quot;my-lipid-follow-up.Rmd&quot;</span>)</span>
+<span id="cb1-3"><a href="#cb1-3" tabindex="-1"></a>rmarkdown<span class="sc">::</span><span class="fu">render</span>(<span class="st">&quot;my-lipid-follow-up.Rmd&quot;</span>)</span></code></pre></div>
+<p>The GP fits in this example use one seeded optimizer start per
+endpoint. Rerunning with a different seed can lead to a different fitted
+surface and recipe nomination. Compare plausible nominees in the
+laboratory when that sensitivity affects the decision.</p>
+<p>For a large recipe table, the optional medoid step compares pairs of
+high-spread recipes. Its memory cost grows with the square of the
+shortlist size. A discrete table of settings the lab can prepare keeps
+this step small.</p>
+<p>Start with the 23 measured preparations in <code>lipid_screen</code>.
+The first example uses only the core package to export <strong>five
+distinct new preparations</strong>. It keeps the three response goals,
+mixture bounds, planned operator and run budget visible. The advanced
+example then adds other models, reserves an incumbent repeat within an
+eight-preparation budget, simulates measurements and refits. A separate
+two-factor process example at the end shows how to request a spline
+nominee and reserve distinct exploration preparations.</p>
+<p>For another experiment, change the data, factor specification, goals
+and feasible candidate settings below. Keep one row per independent
+preparation; aggregate technical assay replicates before fitting. A
+repeated recipe in a new preparation is a new row with its own
+preparation ID.</p>
+<p>For planning the initial mixture or process experiment, see Karl’s <a href="https://arxiv.org/abs/2610.36012">A Sphericity Filter for
+Space-Filling Designs in Nondeterministic Experiments</a>. Its low-order
+working model protects selected estimation precision while retaining
+space-filling coverage. That design choice is separate from the richer
+cubic candidate model fitted below; it does not require the final
+response surface to be low-order.</p>
+<div id="specify-the-experiment-once" class="section level2">
+<h2>Specify the experiment once</h2>
+<div class="sourceCode" id="cb2"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" tabindex="-1"></a><span class="fu">library</span>(SVEMnet)</span>
+<span id="cb2-2"><a href="#cb2-2" tabindex="-1"></a><span class="fu">data</span>(lipid_screen, <span class="at">package =</span> <span class="st">&quot;SVEMnet&quot;</span>)</span>
+<span id="cb2-3"><a href="#cb2-3" tabindex="-1"></a>dat <span class="ot">&lt;-</span> lipid_screen</span>
+<span id="cb2-4"><a href="#cb2-4" tabindex="-1"></a>components <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;PEG&quot;</span>, <span class="st">&quot;Helper&quot;</span>, <span class="st">&quot;Ionizable&quot;</span>, <span class="st">&quot;Cholesterol&quot;</span>)</span>
+<span id="cb2-5"><a href="#cb2-5" tabindex="-1"></a>recipe_cols <span class="ot">&lt;-</span> <span class="fu">c</span>(components, <span class="st">&quot;Ionizable_Lipid_Type&quot;</span>, <span class="st">&quot;N_P_ratio&quot;</span>, <span class="st">&quot;flow_rate&quot;</span>)</span>
+<span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>predictors <span class="ot">&lt;-</span> <span class="fu">c</span>(recipe_cols, <span class="st">&quot;Operator&quot;</span>)</span>
+<span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>mix <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="fu">list</span>(<span class="at">vars =</span> components, <span class="at">lower =</span> <span class="fu">c</span>(.<span class="dv">01</span>, .<span class="dv">10</span>, .<span class="dv">10</span>, .<span class="dv">10</span>),</span>
+<span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>                 <span class="at">upper =</span> <span class="fu">c</span>(.<span class="dv">05</span>, .<span class="dv">60</span>, .<span class="dv">60</span>, .<span class="dv">60</span>), <span class="at">total =</span> <span class="dv">1</span>))</span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>spec <span class="ot">&lt;-</span> <span class="fu">bigexp_terms</span>(</span>
+<span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>  Potency <span class="sc">~</span> PEG <span class="sc">+</span> Helper <span class="sc">+</span> Ionizable <span class="sc">+</span> Cholesterol <span class="sc">+</span></span>
+<span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>    Ionizable_Lipid_Type <span class="sc">+</span> N_P_ratio <span class="sc">+</span> flow_rate, <span class="at">data =</span> dat,</span>
+<span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>  <span class="at">blocking =</span> <span class="st">&quot;Operator&quot;</span>, <span class="at">mixture_groups =</span> mix,</span>
+<span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>  <span class="at">discrete_numeric =</span> <span class="fu">c</span>(<span class="st">&quot;N_P_ratio&quot;</span>, <span class="st">&quot;flow_rate&quot;</span>), <span class="at">report =</span> <span class="cn">FALSE</span></span>
+<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>)</span>
+<span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>goals <span class="ot">&lt;-</span> <span class="fu">list</span>(</span>
+<span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>  <span class="at">Potency =</span> <span class="fu">list</span>(<span class="at">goal =</span> <span class="st">&quot;max&quot;</span>, <span class="at">weight =</span> .<span class="dv">6</span>, <span class="at">lower_acceptable =</span> <span class="dv">65</span>, <span class="at">upper_acceptable =</span> <span class="dv">95</span>),</span>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>  <span class="at">Size    =</span> <span class="fu">list</span>(<span class="at">goal =</span> <span class="st">&quot;min&quot;</span>, <span class="at">weight =</span> .<span class="dv">3</span>, <span class="at">lower_acceptable =</span> <span class="dv">40</span>, <span class="at">upper_acceptable =</span> <span class="dv">210</span>),</span>
+<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a>  <span class="at">PDI     =</span> <span class="fu">list</span>(<span class="at">goal =</span> <span class="st">&quot;min&quot;</span>, <span class="at">weight =</span> .<span class="dv">1</span>, <span class="at">lower_acceptable =</span> .<span class="dv">04</span>, <span class="at">upper_acceptable =</span> .<span class="dv">39</span>)</span>
+<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a>)</span>
+<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a>endpoints <span class="ot">&lt;-</span> <span class="fu">names</span>(goals)</span></code></pre></div>
+<p>The default <code>bigexp_terms()</code> expansion is a full cubic
+candidate model: pure squares and cubes, two- and three-factor
+interactions, and partial-cubic terms such as <code>x^2:z</code>.
+Blocking variables stay additive. The fitting method reduces this common
+candidate model; no preliminary choice of a smaller model is
+required.</p>
+</div>
+<div id="five-new-preparations-with-the-core-package" class="section level2">
+<h2>Five new preparations with the core package</h2>
+<p><code>svem_fit_responses()</code> returns an ordinary named list, so
+<code>core_fits$Potency</code> remains a regular fitted model. It makes
+the same sequential calls and random draws as fitting the three
+endpoints individually. With only the response already named in
+<code>spec</code>, use <code>SVEMnet(spec, dat)</code> directly.</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2301</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>core_fits <span class="ot">&lt;-</span> <span class="fu">svem_fit_responses</span>(spec, dat, <span class="at">responses =</span> <span class="fu">names</span>(goals))</span>
+<span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" tabindex="-1"></a><span class="co"># Change this to the operator who will prepare the next batch.</span></span>
+<span id="cb3-5"><a href="#cb3-5" tabindex="-1"></a>planned_operator <span class="ot">&lt;-</span> <span class="st">&quot;A&quot;</span></span>
+<span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2302</span>)</span>
+<span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>core_pool <span class="ot">&lt;-</span> <span class="fu">svem_random_table_multi</span>(core_fits, <span class="at">n =</span> <span class="dv">600</span>, <span class="at">mixture_groups =</span> mix)<span class="sc">$</span>data</span>
+<span id="cb3-8"><a href="#cb3-8" tabindex="-1"></a><span class="co"># Include old recipes so exclusion is also exercised in this example.</span></span>
+<span id="cb3-9"><a href="#cb3-9" tabindex="-1"></a>core_pool <span class="ot">&lt;-</span> <span class="fu">rbind</span>(dat[predictors], core_pool[predictors])</span>
+<span id="cb3-10"><a href="#cb3-10" tabindex="-1"></a>core_pool<span class="sc">$</span>Operator <span class="ot">&lt;-</span> <span class="fu">factor</span>(planned_operator, <span class="at">levels =</span> <span class="fu">levels</span>(<span class="fu">factor</span>(dat<span class="sc">$</span>Operator)))</span>
+<span id="cb3-11"><a href="#cb3-11" tabindex="-1"></a>core_pool <span class="ot">&lt;-</span> <span class="fu">unique</span>(core_pool)</span>
+<span id="cb3-12"><a href="#cb3-12" tabindex="-1"></a>core_pool<span class="sc">$</span>recipe_id <span class="ot">&lt;-</span> <span class="fu">sprintf</span>(<span class="st">&quot;C%04d&quot;</span>, <span class="fu">seq_len</span>(<span class="fu">nrow</span>(core_pool)))</span>
+<span id="cb3-13"><a href="#cb3-13" tabindex="-1"></a></span>
+<span id="cb3-14"><a href="#cb3-14" tabindex="-1"></a>scored_core <span class="ot">&lt;-</span> <span class="fu">svem_score_random</span>(</span>
+<span id="cb3-15"><a href="#cb3-15" tabindex="-1"></a>  core_fits, <span class="at">goals =</span> goals, <span class="at">data =</span> dat, <span class="at">candidates =</span> core_pool,</span>
+<span id="cb3-16"><a href="#cb3-16" tabindex="-1"></a>  <span class="at">mixture_groups =</span> mix, <span class="at">budget =</span> <span class="dv">5</span><span class="dt">L</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb3-17"><a href="#cb3-17" tabindex="-1"></a>)</span>
+<span id="cb3-18"><a href="#cb3-18" tabindex="-1"></a></span>
+<span id="cb3-19"><a href="#cb3-19" tabindex="-1"></a><span class="co"># Set this to an explicit file in your project for an actual experiment.</span></span>
+<span id="cb3-20"><a href="#cb3-20" tabindex="-1"></a>csv_file <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;lipid-screen-five-new.csv&quot;</span>)</span>
+<span id="cb3-21"><a href="#cb3-21" tabindex="-1"></a><span class="fu">svem_export_candidates_csv</span>(scored_core, <span class="at">file =</span> csv_file, <span class="at">overwrite =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb3-22"><a href="#cb3-22" tabindex="-1"></a>  <span class="at">planned_date =</span> <span class="fu">as.Date</span>(<span class="st">&quot;2026-11-02&quot;</span>),</span>
+<span id="cb3-23"><a href="#cb3-23" tabindex="-1"></a>  <span class="at">preparation_prefix =</span> <span class="st">&quot;lipid-screen-20261102-core-example&quot;</span>)</span>
+<span id="cb3-24"><a href="#cb3-24" tabindex="-1"></a>new_runs <span class="ot">&lt;-</span> <span class="fu">read.csv</span>(csv_file, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<p>The candidate pool respects the declared mixture bounds and total.
+The sampler draws proportions continuously; replace this pool with the
+lab’s allowable settings when preparation increments matter. The
+advanced example uses an explicit preparation grid. The operator is set
+before scoring so all models predict the context in which the new
+preparations will be made.</p>
+<p>Here <code>budget = 5L</code> counts distinct <strong>new</strong>
+preparations. Historical physical recipes are excluded even if their
+recorded operator differs. Inspect <code>shortfall</code> before booking
+laboratory runs. The core path can leave slots empty because of its
+nomination or top-10% shortlist limits, or unavailable informative
+spread, even when the pool contains five or more feasible recipes. For a
+small pool, use <code>svem_plan_runs(incumbent = FALSE)</code> to apply
+the portfolio allocator, which widens its shortlist when needed to meet
+the budget. The exporter writes only the selected worklist in slot order
+and retains its role and every endorsing engine. The explicit optional
+date and prefix above add scheduling labels. <code>recipe_id</code>
+identifies physical settings within this pool;
+<code>preparation_id</code> identifies one new execution, including a
+repeated recipe. Retain supplied stable recipe IDs and historical
+settings in later pools; automatically generated IDs may change when the
+pool changes, so otherwise match physical settings. Choose a distinct
+batch prefix even for two batches on the same date. Omitting both
+options leaves the export unchanged.</p>
+<p><code>planned_date</code> is not the actual execution date and does
+not add a model block. Record the actual date when preparing the runs.
+The historical data use date-like <code>RunID</code> labels such as
+<code>02SEP22-1</code>; retain those original identifiers. The exporter
+does not maintain a global laboratory ID registry.</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a><span class="fu">stopifnot</span>(scored_core<span class="sc">$</span>shortfall <span class="sc">==</span> <span class="dv">0</span><span class="dt">L</span>, <span class="fu">nrow</span>(new_runs) <span class="sc">==</span> <span class="dv">5</span><span class="dt">L</span>,</span>
+<span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>          <span class="fu">identical</span>(new_runs<span class="sc">$</span>slot, <span class="dv">1</span><span class="sc">:</span><span class="dv">5</span>), <span class="sc">!</span><span class="fu">anyDuplicated</span>(new_runs<span class="sc">$</span>recipe_id),</span>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">anyDuplicated</span>(new_runs<span class="sc">$</span>preparation_id),</span>
+<span id="cb4-4"><a href="#cb4-4" tabindex="-1"></a>          <span class="fu">all</span>(new_runs<span class="sc">$</span>planned_date <span class="sc">==</span> <span class="st">&quot;2026-11-02&quot;</span>),</span>
+<span id="cb4-5"><a href="#cb4-5" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">anyDuplicated</span>(new_runs[recipe_cols]),</span>
+<span id="cb4-6"><a href="#cb4-6" tabindex="-1"></a>          <span class="fu">identical</span>(new_runs<span class="sc">$</span>recipe_id, scored_core<span class="sc">$</span>worklist<span class="sc">$</span>recipe_id),</span>
+<span id="cb4-7"><a href="#cb4-7" tabindex="-1"></a>          <span class="fu">identical</span>(new_runs<span class="sc">$</span>role, scored_core<span class="sc">$</span>worklist<span class="sc">$</span>role),</span>
+<span id="cb4-8"><a href="#cb4-8" tabindex="-1"></a>          <span class="fu">identical</span>(new_runs<span class="sc">$</span>nominated_by, scored_core<span class="sc">$</span>worklist<span class="sc">$</span>nominated_by),</span>
+<span id="cb4-9"><a href="#cb4-9" tabindex="-1"></a>          <span class="fu">all</span>(new_runs<span class="sc">$</span>Operator <span class="sc">==</span> planned_operator),</span>
+<span id="cb4-10"><a href="#cb4-10" tabindex="-1"></a>          <span class="fu">all</span>(<span class="fu">abs</span>(<span class="fu">rowSums</span>(new_runs[components]) <span class="sc">-</span> <span class="dv">1</span>) <span class="sc">&lt;</span> <span class="fl">1e-10</span>),</span>
+<span id="cb4-11"><a href="#cb4-11" tabindex="-1"></a>          <span class="fu">nrow</span>(<span class="fu">merge</span>(new_runs[recipe_cols], dat[recipe_cols], <span class="at">by =</span> recipe_cols)) <span class="sc">==</span> <span class="dv">0</span><span class="dt">L</span>)</span>
+<span id="cb4-12"><a href="#cb4-12" tabindex="-1"></a><span class="cf">for</span> (i <span class="cf">in</span> <span class="fu">seq_along</span>(components)) {</span>
+<span id="cb4-13"><a href="#cb4-13" tabindex="-1"></a>  <span class="fu">stopifnot</span>(<span class="fu">all</span>(new_runs[[components[i]]] <span class="sc">&gt;=</span> mix[[<span class="dv">1</span>]]<span class="sc">$</span>lower[i]),</span>
+<span id="cb4-14"><a href="#cb4-14" tabindex="-1"></a>            <span class="fu">all</span>(new_runs[[components[i]]] <span class="sc">&lt;=</span> mix[[<span class="dv">1</span>]]<span class="sc">$</span>upper[i]))</span>
+<span id="cb4-15"><a href="#cb4-15" tabindex="-1"></a>}</span>
+<span id="cb4-16"><a href="#cb4-16" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(new_runs[<span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;preparation_id&quot;</span>, <span class="st">&quot;planned_date&quot;</span>)],</span>
+<span id="cb4-17"><a href="#cb4-17" tabindex="-1"></a>             <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<thead>
+<tr class="header">
+<th align="right">slot</th>
+<th align="left">recipe_id</th>
+<th align="left">preparation_id</th>
+<th align="left">planned_date</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="left">C0294</td>
+<td align="left">lipid-screen-20261102-core-example-001</td>
+<td align="left">2026-11-02</td>
+</tr>
+<tr class="even">
+<td align="right">2</td>
+<td align="left">C0523</td>
+<td align="left">lipid-screen-20261102-core-example-002</td>
+<td align="left">2026-11-02</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="left">C0575</td>
+<td align="left">lipid-screen-20261102-core-example-003</td>
+<td align="left">2026-11-02</td>
+</tr>
+<tr class="even">
+<td align="right">4</td>
+<td align="left">C0553</td>
+<td align="left">lipid-screen-20261102-core-example-004</td>
+<td align="left">2026-11-02</td>
+</tr>
+<tr class="odd">
+<td align="right">5</td>
+<td align="left">C0272</td>
+<td align="left">lipid-screen-20261102-core-example-005</td>
+<td align="left">2026-11-02</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(new_runs[<span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;role&quot;</span>, <span class="st">&quot;nominated_by&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>, predictors)],</span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>             <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="3%" />
+<col width="14%" />
+<col width="9%" />
+<col width="7%" />
+<col width="5%" />
+<col width="5%" />
+<col width="7%" />
+<col width="9%" />
+<col width="15%" />
+<col width="7%" />
+<col width="7%" />
+<col width="6%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="right">slot</th>
+<th align="left">role</th>
+<th align="left">nominated_by</th>
+<th align="left">recipe_id</th>
+<th align="right">PEG</th>
+<th align="right">Helper</th>
+<th align="right">Ionizable</th>
+<th align="right">Cholesterol</th>
+<th align="left">Ionizable_Lipid_Type</th>
+<th align="right">N_P_ratio</th>
+<th align="right">flow_rate</th>
+<th align="left">Operator</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="left">optimum</td>
+<td align="left">svemnet</td>
+<td align="left">C0294</td>
+<td align="right">0.0469</td>
+<td align="right">0.5603</td>
+<td align="right">0.1026</td>
+<td align="right">0.2902</td>
+<td align="left">H103</td>
+<td align="right">14</td>
+<td align="right">1.5</td>
+<td align="left">A</td>
+</tr>
+<tr class="even">
+<td align="right">2</td>
+<td align="left">maximum_spread</td>
+<td align="left">svemnet</td>
+<td align="left">C0523</td>
+<td align="right">0.0105</td>
+<td align="right">0.5670</td>
+<td align="right">0.1840</td>
+<td align="right">0.2386</td>
+<td align="left">H103</td>
+<td align="right">6</td>
+<td align="right">3.0</td>
+<td align="left">A</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">C0575</td>
+<td align="right">0.0305</td>
+<td align="right">0.5636</td>
+<td align="right">0.1211</td>
+<td align="right">0.2848</td>
+<td align="left">H103</td>
+<td align="right">12</td>
+<td align="right">2.0</td>
+<td align="left">A</td>
+</tr>
+<tr class="even">
+<td align="right">4</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">C0553</td>
+<td align="right">0.0345</td>
+<td align="right">0.1546</td>
+<td align="right">0.5209</td>
+<td align="right">0.2900</td>
+<td align="left">H102</td>
+<td align="right">12</td>
+<td align="right">2.0</td>
+<td align="left">A</td>
+</tr>
+<tr class="odd">
+<td align="right">5</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">C0272</td>
+<td align="right">0.0495</td>
+<td align="right">0.2326</td>
+<td align="right">0.5369</td>
+<td align="right">0.1810</td>
+<td align="left">H102</td>
+<td align="right">10</td>
+<td align="right">2.5</td>
+<td align="left">A</td>
+</tr>
+</tbody>
+</table>
+<p>For an existing workflow, keep using
+<code>svem_select_from_score_table()</code>. Its <code>k</code> is the
+requested number of medoids <strong>in addition to</strong> its best
+row; <code>k = 4</code> can therefore produce five rows. The budgeted
+worklist has a different meaning: its budget is a total number of
+distinct new preparations.</p>
+</div>
+<div id="advanced-several-models-and-a-carried-forward-reference" class="section level2">
+<h2>Advanced: several models and a carried-forward reference</h2>
+<p>The SVEMnet paper starts with the same data, candidate terms and
+scientific weights. Its workflow fits each endpoint, scores feasible
+settings, chooses diverse high-score and high-uncertainty recipes, and
+refits after measurement. Here we also ask forward-selection SVEM,
+GauPro and Extra Trees to nominate recipes. The fixed publication did
+not benchmark these additions. The journal articles remain the versions
+of record; the author occasionally updates the <a href="https://arxiv.org/abs/2511.20968">SVEMnet arXiv manuscript</a> and
+the earlier <a href="https://arxiv.org/abs/2212.11264">workflow arXiv
+manuscript</a>.</p>
+</div>
+<div id="what-the-gaussian-process-contributes" class="section level2">
+<h2>What the Gaussian process contributes</h2>
+<p>This package implements a custom confirmation workflow. GauPro
+proposes a recipe using its fitted mean (or the desirability of several
+fitted means). A separate exploration slot can use the largest latent
+standard deviation for a chosen response. The scientist allocates
+preparations, measures them and decides when to refit. A full Bayesian
+optimizer specifies an acquisition policy for those sequential
+decisions. For example, expected improvement uses both the predicted
+improvement and uncertainty to choose a point. <a href="https://doi.org/10.1023/A:1008306431147">Jones, Schonlau and Welch
+(1998)</a> and <a href="https://arxiv.org/abs/1807.02811">Frazier
+(2018)</a>.</p>
+<p>SVEMnet offers the full candidate expansion and shrinks the additive
+operator effect. The two optional companions use the original factors
+and free mixture coordinates. Here we deliberately let those models
+learn operator-by-recipe patterns. Both operators handled every lipid
+type, but some combinations have little support. We specify operator A
+for every new preparation.</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>limits <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="at">Potency =</span> <span class="fu">list</span>(<span class="at">lower =</span> <span class="dv">78</span>), <span class="at">Size =</span> <span class="fu">list</span>(<span class="at">upper =</span> <span class="dv">100</span>),</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>               <span class="at">PDI =</span> <span class="fu">list</span>(<span class="at">upper =</span> .<span class="dv">25</span>))</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a><span class="fu">with</span>(dat, <span class="fu">table</span>(Operator, Ionizable_Lipid_Type))</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a><span class="co">#&gt;         Ionizable_Lipid_Type</span></span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a><span class="co">#&gt; Operator H101 H102 H103</span></span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a><span class="co">#&gt;        A    2    5    5</span></span>
+<span id="cb6-7"><a href="#cb6-7" tabindex="-1"></a><span class="co">#&gt;        B    7    2    2</span></span>
+<span id="cb6-8"><a href="#cb6-8" tabindex="-1"></a><span class="co"># Installing GauPro and ranger enables both companions. Either works alone.</span></span>
+<span id="cb6-9"><a href="#cb6-9" tabindex="-1"></a>packages <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">gaupro =</span> <span class="st">&quot;GauPro&quot;</span>, <span class="at">extra_trees =</span> <span class="st">&quot;ranger&quot;</span>)</span>
+<span id="cb6-10"><a href="#cb6-10" tabindex="-1"></a>enabled <span class="ot">&lt;-</span> <span class="fu">names</span>(packages)[<span class="fu">vapply</span>(packages, requireNamespace,</span>
+<span id="cb6-11"><a href="#cb6-11" tabindex="-1"></a>                                  <span class="at">quietly =</span> <span class="cn">TRUE</span>, <span class="at">FUN.VALUE =</span> <span class="fu">logical</span>(<span class="dv">1</span>))]</span>
+<span id="cb6-12"><a href="#cb6-12" tabindex="-1"></a>used <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;SVEMnet&quot;</span>, <span class="fu">unname</span>(packages[enabled]))</span>
+<span id="cb6-13"><a href="#cb6-13" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="fu">data.frame</span>(<span class="at">package =</span> used, <span class="at">version =</span> <span class="fu">vapply</span>(used, <span class="cf">function</span>(p)</span>
+<span id="cb6-14"><a href="#cb6-14" tabindex="-1"></a>  <span class="fu">as.character</span>(<span class="fu">packageVersion</span>(p)), <span class="fu">character</span>(<span class="dv">1</span>))), <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<thead>
+<tr class="header">
+<th align="left">package</th>
+<th align="left">version</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">SVEMnet</td>
+<td align="left">4.0.0</td>
+</tr>
+<tr class="even">
+<td align="left">GauPro</td>
+<td align="left">0.2.17</td>
+</tr>
+<tr class="odd">
+<td align="left">ranger</td>
+<td align="left">0.18.0</td>
+</tr>
+</tbody>
+</table>
+<p>With both packages installed, <code>companions = TRUE</code> is the
+shortcut for this request. <code>predict(fits$Potency, newdata)</code>
+returns the ordinary SVEM response. Use <code>engine = &quot;all&quot;</code> to
+inspect the models side by side. We use the fitting defaults throughout
+and ordinary SVEM predictions with <code>debias = FALSE</code>.</p>
+</div>
+<div id="prepare-the-candidate-table-before-optimizing" class="section level2">
+<h2>Prepare the candidate table before optimizing</h2>
+<p>The proportions below are built in integer basis points. The fourth
+component is determined by the total. The seed recipes are included in
+the candidate table so that an endorsement of a previous preparation can
+be recognized. The paper draws 25,000 feasible settings and derives
+default desirability anchors from predicted response quantiles. Here a
+smaller discrete pool and fixed anchors make the models and both rounds
+comparable. The resulting recipe IDs and scores are specific to this
+example. In practice, supply the full set of recipes the lab would
+prepare or draw a larger feasible pool.</p>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>composition <span class="ot">&lt;-</span> <span class="fu">expand.grid</span>(<span class="at">PEG =</span> <span class="fu">seq</span>(<span class="dv">100</span>, <span class="dv">500</span>, <span class="dv">100</span>),</span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>                           <span class="at">Helper =</span> <span class="fu">seq</span>(<span class="dv">1000</span>, <span class="dv">6000</span>, <span class="dv">500</span>),</span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>                           <span class="at">Ionizable =</span> <span class="fu">seq</span>(<span class="dv">1000</span>, <span class="dv">6000</span>, <span class="dv">500</span>))</span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>composition<span class="sc">$</span>Cholesterol <span class="ot">&lt;-</span> <span class="dv">10000</span> <span class="sc">-</span> <span class="fu">rowSums</span>(composition)</span>
+<span id="cb7-5"><a href="#cb7-5" tabindex="-1"></a>composition <span class="ot">&lt;-</span> <span class="fu">subset</span>(composition, Cholesterol <span class="sc">&gt;=</span> <span class="dv">1000</span> <span class="sc">&amp;</span> Cholesterol <span class="sc">&lt;=</span> <span class="dv">6000</span>)</span>
+<span id="cb7-6"><a href="#cb7-6" tabindex="-1"></a>settings <span class="ot">&lt;-</span> <span class="fu">expand.grid</span>(<span class="at">Ionizable_Lipid_Type =</span> <span class="fu">levels</span>(<span class="fu">factor</span>(dat<span class="sc">$</span>Ionizable_Lipid_Type)),</span>
+<span id="cb7-7"><a href="#cb7-7" tabindex="-1"></a>                        <span class="at">N_P_ratio =</span> <span class="fu">sort</span>(<span class="fu">unique</span>(dat<span class="sc">$</span>N_P_ratio)),</span>
+<span id="cb7-8"><a href="#cb7-8" tabindex="-1"></a>                        <span class="at">flow_rate =</span> <span class="fu">sort</span>(<span class="fu">unique</span>(dat<span class="sc">$</span>flow_rate)), <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb7-9"><a href="#cb7-9" tabindex="-1"></a>grid <span class="ot">&lt;-</span> <span class="fu">merge</span>(composition <span class="sc">/</span> <span class="dv">10000</span>, settings, <span class="at">by =</span> <span class="cn">NULL</span>)</span>
+<span id="cb7-10"><a href="#cb7-10" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2302</span>)</span>
+<span id="cb7-11"><a href="#cb7-11" tabindex="-1"></a>pool <span class="ot">&lt;-</span> <span class="fu">unique</span>(<span class="fu">rbind</span>(dat[recipe_cols], grid[<span class="fu">sample.int</span>(<span class="fu">nrow</span>(grid), <span class="dv">600</span>), recipe_cols]))</span>
+<span id="cb7-12"><a href="#cb7-12" tabindex="-1"></a>pool<span class="sc">$</span>Operator <span class="ot">&lt;-</span> <span class="fu">factor</span>(<span class="st">&quot;A&quot;</span>, <span class="at">levels =</span> <span class="fu">levels</span>(<span class="fu">factor</span>(dat<span class="sc">$</span>Operator)))</span>
+<span id="cb7-13"><a href="#cb7-13" tabindex="-1"></a>pool<span class="sc">$</span>recipe_id <span class="ot">&lt;-</span> <span class="fu">sprintf</span>(<span class="st">&quot;R%04d&quot;</span>, <span class="fu">seq_len</span>(<span class="fu">nrow</span>(pool)))</span>
+<span id="cb7-14"><a href="#cb7-14" tabindex="-1"></a>increments <span class="ot">&lt;-</span> <span class="fu">setNames</span>(<span class="fu">rep</span>(.<span class="dv">0001</span>, <span class="fu">length</span>(components)), components)</span>
+<span id="cb7-15"><a href="#cb7-15" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="fu">all</span>(<span class="fu">abs</span>(<span class="fu">rowSums</span>(pool[components]) <span class="sc">-</span> <span class="dv">1</span>) <span class="sc">&lt;</span> <span class="fl">1e-10</span>))</span>
+<span id="cb7-16"><a href="#cb7-16" tabindex="-1"></a></span>
+<span id="cb7-17"><a href="#cb7-17" tabindex="-1"></a><span class="co"># Map each preparation to a physical recipe ID, regardless of operator.</span></span>
+<span id="cb7-18"><a href="#cb7-18" tabindex="-1"></a><span class="co"># Quantize only the mixture columns and reject off-grid inputs.</span></span>
+<span id="cb7-19"><a href="#cb7-19" tabindex="-1"></a>physical_settings <span class="ot">&lt;-</span> <span class="cf">function</span>(rows) {</span>
+<span id="cb7-20"><a href="#cb7-20" tabindex="-1"></a>  key <span class="ot">&lt;-</span> rows[recipe_cols]</span>
+<span id="cb7-21"><a href="#cb7-21" tabindex="-1"></a>  <span class="cf">for</span> (nm <span class="cf">in</span> <span class="fu">names</span>(increments)) {</span>
+<span id="cb7-22"><a href="#cb7-22" tabindex="-1"></a>    units <span class="ot">&lt;-</span> key[[nm]] <span class="sc">/</span> increments[[nm]]</span>
+<span id="cb7-23"><a href="#cb7-23" tabindex="-1"></a>    <span class="fu">stopifnot</span>(<span class="fu">all</span>(<span class="fu">abs</span>(units <span class="sc">-</span> <span class="fu">round</span>(units)) <span class="sc">&lt;=</span> <span class="fl">1e-7</span>))</span>
+<span id="cb7-24"><a href="#cb7-24" tabindex="-1"></a>    key[[nm]] <span class="ot">&lt;-</span> <span class="fu">round</span>(units)</span>
+<span id="cb7-25"><a href="#cb7-25" tabindex="-1"></a>  }</span>
+<span id="cb7-26"><a href="#cb7-26" tabindex="-1"></a>  key</span>
+<span id="cb7-27"><a href="#cb7-27" tabindex="-1"></a>}</span>
+<span id="cb7-28"><a href="#cb7-28" tabindex="-1"></a>lookup <span class="ot">&lt;-</span> <span class="fu">cbind</span>(<span class="at">recipe_id =</span> pool<span class="sc">$</span>recipe_id, <span class="fu">physical_settings</span>(pool))</span>
+<span id="cb7-29"><a href="#cb7-29" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="sc">!</span><span class="fu">anyDuplicated</span>(lookup[recipe_cols]))</span>
+<span id="cb7-30"><a href="#cb7-30" tabindex="-1"></a>screen_rows <span class="ot">&lt;-</span> <span class="fu">cbind</span>(<span class="at">screen_row =</span> <span class="fu">seq_len</span>(<span class="fu">nrow</span>(dat)), <span class="fu">physical_settings</span>(dat))</span>
+<span id="cb7-31"><a href="#cb7-31" tabindex="-1"></a>matched <span class="ot">&lt;-</span> <span class="fu">merge</span>(screen_rows, lookup, <span class="at">by =</span> recipe_cols, <span class="at">all.x =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb7-32"><a href="#cb7-32" tabindex="-1"></a>dat<span class="sc">$</span>recipe_id <span class="ot">&lt;-</span> matched<span class="sc">$</span>recipe_id[<span class="fu">match</span>(screen_rows<span class="sc">$</span>screen_row, matched<span class="sc">$</span>screen_row)]</span>
+<span id="cb7-33"><a href="#cb7-33" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="fu">nrow</span>(matched) <span class="sc">==</span> <span class="fu">nrow</span>(dat), <span class="sc">!</span><span class="fu">anyNA</span>(dat<span class="sc">$</span>recipe_id))</span></code></pre></div>
+</div>
+<div id="allocate-eight-preparations-including-an-incumbent-repeat" class="section level2">
+<h2>Allocate eight preparations, including an incumbent repeat</h2>
+<p>The convenience function earns its place when several models and a
+reference are needed: it fits the endpoints, collects model nominees and
+delegates the allocation to the scorer. All intermediates remain
+inspectable. <code>plan$fits</code> and <code>plan$forward</code> are
+ordinary model lists; <code>plan$scores</code> contains the full
+candidate table, and <code>plan$worklist</code> and
+<code>plan$shortfall</code> describe the actual preparation plan. It
+does not write a file.</p>
+<p>Unlike the earlier new-recipe-only scorer call,
+<code>svem_plan_runs()</code> counts the incumbent repeat
+<strong>within</strong> its total budget. Its default five slots can
+hold one reference repeat plus up to four distinct model optima. This
+example uses eight total preparations, leaving room for exploration.
+Optionally retain a fixed original-design benchmark as well: set
+<code>fixed_benchmark</code> to its unique preparation ID below. That
+benchmark is mandatory and counts within the total, reducing the slots
+available for model optima or exploration. It shares one repeat if its
+physical recipe is also the incumbent; otherwise both repeats must fit
+in the budget. Keep the same ID selector on subsequent refits so adding
+or reordering rows does not change which benchmark is carried
+forward.</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>fit_controls <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="at">companions =</span> <span class="cf">if</span> (<span class="fu">length</span>(enabled)) enabled <span class="cf">else</span> <span class="cn">FALSE</span>,</span>
+<span id="cb8-2"><a href="#cb8-2" tabindex="-1"></a>                     <span class="at">companion_blocks =</span> <span class="st">&quot;interacting&quot;</span>)</span>
+<span id="cb8-3"><a href="#cb8-3" tabindex="-1"></a>score_controls <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="at">increments =</span> increments, <span class="at">specs =</span> limits,</span>
+<span id="cb8-4"><a href="#cb8-4" tabindex="-1"></a>                       <span class="at">gp_endpoint =</span> <span class="st">&quot;Potency&quot;</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb8-5"><a href="#cb8-5" tabindex="-1"></a><span class="co"># Choose the intended incumbent by stable preparation ID, not row position.</span></span>
+<span id="cb8-6"><a href="#cb8-6" tabindex="-1"></a>incumbent_row <span class="ot">&lt;-</span> <span class="fu">match</span>(<span class="st">&quot;02SEP22-20&quot;</span>, dat<span class="sc">$</span>RunID)</span>
+<span id="cb8-7"><a href="#cb8-7" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="sc">!</span><span class="fu">is.na</span>(incumbent_row))</span>
+<span id="cb8-8"><a href="#cb8-8" tabindex="-1"></a>fixed_benchmark <span class="ot">&lt;-</span> <span class="cn">NULL</span></span>
+<span id="cb8-9"><a href="#cb8-9" tabindex="-1"></a><span class="co"># Optional fixed control from the original design, retained in every round:</span></span>
+<span id="cb8-10"><a href="#cb8-10" tabindex="-1"></a><span class="co"># fixed_benchmark &lt;- list(RunID = &quot;02SEP22-2&quot;)</span></span>
+<span id="cb8-11"><a href="#cb8-11" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2301</span>)</span>
+<span id="cb8-12"><a href="#cb8-12" tabindex="-1"></a>plan <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb8-13"><a href="#cb8-13" tabindex="-1"></a>  spec, <span class="at">data =</span> dat, <span class="at">goals =</span> goals, <span class="at">candidates =</span> pool, <span class="at">budget =</span> <span class="dv">8</span><span class="dt">L</span>,</span>
+<span id="cb8-14"><a href="#cb8-14" tabindex="-1"></a>  <span class="at">fit_control =</span> fit_controls, <span class="at">score_control =</span> score_controls,</span>
+<span id="cb8-15"><a href="#cb8-15" tabindex="-1"></a>  <span class="at">incumbent =</span> incumbent_row, <span class="at">benchmark =</span> fixed_benchmark</span>
+<span id="cb8-16"><a href="#cb8-16" tabindex="-1"></a>)</span>
+<span id="cb8-17"><a href="#cb8-17" tabindex="-1"></a>fits <span class="ot">&lt;-</span> plan<span class="sc">$</span>fits</span>
+<span id="cb8-18"><a href="#cb8-18" tabindex="-1"></a>forward <span class="ot">&lt;-</span> plan<span class="sc">$</span>forward</span>
+<span id="cb8-19"><a href="#cb8-19" tabindex="-1"></a>scored <span class="ot">&lt;-</span> plan<span class="sc">$</span>scores</span>
+<span id="cb8-20"><a href="#cb8-20" tabindex="-1"></a>batch <span class="ot">&lt;-</span> plan<span class="sc">$</span>worklist</span>
+<span id="cb8-21"><a href="#cb8-21" tabindex="-1"></a><span class="fu">stopifnot</span>(plan<span class="sc">$</span>shortfall <span class="sc">==</span> <span class="dv">0</span><span class="dt">L</span>, <span class="fu">nrow</span>(batch) <span class="sc">==</span> <span class="dv">8</span><span class="dt">L</span>,</span>
+<span id="cb8-22"><a href="#cb8-22" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">anyDuplicated</span>(batch<span class="sc">$</span>recipe_id), <span class="fu">sum</span>(<span class="sc">!</span>batch<span class="sc">$</span>new_recipe) <span class="sc">%in%</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">2</span>)</span>
+<span id="cb8-23"><a href="#cb8-23" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(batch[<span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;role&quot;</span>, <span class="st">&quot;nominated_by&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;new_recipe&quot;</span>, recipe_cols)],</span>
+<span id="cb8-24"><a href="#cb8-24" tabindex="-1"></a>             <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="3%" />
+<col width="12%" />
+<col width="20%" />
+<col width="6%" />
+<col width="7%" />
+<col width="4%" />
+<col width="4%" />
+<col width="6%" />
+<col width="7%" />
+<col width="13%" />
+<col width="6%" />
+<col width="6%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="right">slot</th>
+<th align="left">role</th>
+<th align="left">nominated_by</th>
+<th align="left">recipe_id</th>
+<th align="left">new_recipe</th>
+<th align="right">PEG</th>
+<th align="right">Helper</th>
+<th align="right">Ionizable</th>
+<th align="right">Cholesterol</th>
+<th align="left">Ionizable_Lipid_Type</th>
+<th align="right">N_P_ratio</th>
+<th align="right">flow_rate</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="left">incumbent_repeat</td>
+<td align="left">observed</td>
+<td align="left">R0019</td>
+<td align="left">FALSE</td>
+<td align="right">0.0474</td>
+<td align="right">0.4297</td>
+<td align="right">0.1396</td>
+<td align="right">0.3833</td>
+<td align="left">H101</td>
+<td align="right">6</td>
+<td align="right">2.5</td>
+</tr>
+<tr class="even">
+<td align="right">2</td>
+<td align="left">optimum</td>
+<td align="left">svemnet + extra_trees + forward</td>
+<td align="left">R0432</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.5000</td>
+<td align="right">0.1000</td>
+<td align="right">0.3500</td>
+<td align="left">H102</td>
+<td align="right">14</td>
+<td align="right">2.0</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="left">optimum</td>
+<td align="left">gaupro</td>
+<td align="left">R0259</td>
+<td align="left">TRUE</td>
+<td align="right">0.0400</td>
+<td align="right">0.4500</td>
+<td align="right">0.1000</td>
+<td align="right">0.4100</td>
+<td align="left">H102</td>
+<td align="right">14</td>
+<td align="right">3.0</td>
+</tr>
+<tr class="even">
+<td align="right">4</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0171</td>
+<td align="left">TRUE</td>
+<td align="right">0.0300</td>
+<td align="right">0.1500</td>
+<td align="right">0.5500</td>
+<td align="right">0.2700</td>
+<td align="left">H102</td>
+<td align="right">12</td>
+<td align="right">2.0</td>
+</tr>
+<tr class="odd">
+<td align="right">5</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0600</td>
+<td align="left">TRUE</td>
+<td align="right">0.0100</td>
+<td align="right">0.5000</td>
+<td align="right">0.1000</td>
+<td align="right">0.3900</td>
+<td align="left">H103</td>
+<td align="right">8</td>
+<td align="right">2.0</td>
+</tr>
+<tr class="even">
+<td align="right">6</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0444</td>
+<td align="left">TRUE</td>
+<td align="right">0.0400</td>
+<td align="right">0.6000</td>
+<td align="right">0.1500</td>
+<td align="right">0.2100</td>
+<td align="left">H103</td>
+<td align="right">12</td>
+<td align="right">1.0</td>
+</tr>
+<tr class="odd">
+<td align="right">7</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0384</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.4000</td>
+<td align="right">0.1000</td>
+<td align="right">0.4500</td>
+<td align="left">H103</td>
+<td align="right">12</td>
+<td align="right">1.5</td>
+</tr>
+<tr class="even">
+<td align="right">8</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0466</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.2500</td>
+<td align="right">0.5500</td>
+<td align="right">0.1500</td>
+<td align="left">H102</td>
+<td align="right">6</td>
+<td align="right">2.0</td>
+</tr>
+</tbody>
+</table>
+<p>The default order is the incumbent, elastic-net SVEM, GauPro, Extra
+Trees, then forward likelihood. A smaller budget truncates that order;
+with one slot and an enabled incumbent, the plan is confirmation only.
+Set <code>incumbent = FALSE</code> when every slot must be a new recipe.
+The priority is a practical allocation rule, not a claim that its
+ordering is best for every experiment. For this multi-response decision
+each model maximizes the same weighted desirability of its fitted
+endpoint means. Desirability stops improving at its declared limits.
+When several multi-response recipes reach the same combined
+desirability, they remain exact utility ties and the stable recipe key
+breaks the tie. Extra predicted improvement beyond a saturated goal is
+not assigned additional utility. Change the scientific goals explicitly
+if those differences should matter.</p>
+<p>Models endorsing the same new recipe spend one slot and retain all
+their attributions. Inspect <code>best_ties</code> and
+<code>new_ties</code> in the nominations. When exact ties are resolved
+by the same recipe key, a shared nomination is not evidence of
+independent agreement among the fitted models. Remaining slots are
+distinct high-spread medoids. An unavailable engine is visible in the
+diagnostics; it is not silently replaced by another fitted model. The
+code above uses whichever suggested companion packages are
+installed.</p>
+<p>For this first batch we explicitly carry forward preparation
+<code>02SEP22-20</code>. Its original operator was B; the planned repeat
+uses A. This is a declared incumbent choice across contexts, not an
+automatic comparison of raw A and B outcomes. Matching
+<code>RunID</code> keeps the choice stable if the table is reordered.
+Original measurements and source context remain visible for review.
+Selecting a noisy winner does not establish that it is the best true
+recipe; the repeat supplies confirmation evidence. Without an explicit
+row, the planner chooses the best observed preparation within the
+requested reference context. A separate fixed benchmark keeps its
+original selector in <code>plan$policy$benchmark</code> and its source
+row and context in <code>plan$benchmark</code>, regardless of which
+preparation becomes the incumbent.</p>
+<div class="sourceCode" id="cb9"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" tabindex="-1"></a>reference_row <span class="ot">&lt;-</span> plan<span class="sc">$</span>incumbent<span class="sc">$</span>source_data</span>
+<span id="cb9-2"><a href="#cb9-2" tabindex="-1"></a>reference_row<span class="sc">$</span>observed_score <span class="ot">&lt;-</span> plan<span class="sc">$</span>incumbent<span class="sc">$</span>observed_score</span>
+<span id="cb9-3"><a href="#cb9-3" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(reference_row[<span class="fu">c</span>(<span class="st">&quot;recipe_id&quot;</span>, recipe_cols, <span class="st">&quot;Operator&quot;</span>, endpoints,</span>
+<span id="cb9-4"><a href="#cb9-4" tabindex="-1"></a>                             <span class="st">&quot;observed_score&quot;</span>)], <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="7%" />
+<col width="5%" />
+<col width="5%" />
+<col width="7%" />
+<col width="9%" />
+<col width="16%" />
+<col width="7%" />
+<col width="7%" />
+<col width="7%" />
+<col width="6%" />
+<col width="3%" />
+<col width="3%" />
+<col width="11%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="right">PEG</th>
+<th align="right">Helper</th>
+<th align="right">Ionizable</th>
+<th align="right">Cholesterol</th>
+<th align="left">Ionizable_Lipid_Type</th>
+<th align="right">N_P_ratio</th>
+<th align="right">flow_rate</th>
+<th align="left">Operator</th>
+<th align="right">Potency</th>
+<th align="right">Size</th>
+<th align="right">PDI</th>
+<th align="right">observed_score</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="right">0.0474</td>
+<td align="right">0.4297</td>
+<td align="right">0.1396</td>
+<td align="right">0.3833</td>
+<td align="left">H101</td>
+<td align="right">6</td>
+<td align="right">2.5</td>
+<td align="left">B</td>
+<td align="right">95</td>
+<td align="right">85</td>
+<td align="right">0.3</td>
+<td align="right">0.7961</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb10"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(plan<span class="sc">$</span>nominations, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="10%" />
+<col width="7%" />
+<col width="12%" />
+<col width="11%" />
+<col width="8%" />
+<col width="11%" />
+<col width="7%" />
+<col width="16%" />
+<col width="4%" />
+<col width="9%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">engine</th>
+<th align="left">status</th>
+<th align="left">best_recipe_id</th>
+<th align="left">best_prepared</th>
+<th align="right">best_ties</th>
+<th align="left">new_recipe_id</th>
+<th align="right">new_ties</th>
+<th align="left">endorses_incumbent</th>
+<th align="right">slot</th>
+<th align="left">fit_status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">incumbent</td>
+<td align="left">selected</td>
+<td align="left">R0019</td>
+<td align="left">TRUE</td>
+<td align="right">1</td>
+<td align="left">NA</td>
+<td align="right">0</td>
+<td align="left">FALSE</td>
+<td align="right">1</td>
+<td align="left">observed</td>
+</tr>
+<tr class="even">
+<td align="left">svemnet</td>
+<td align="left">selected</td>
+<td align="left">R0432</td>
+<td align="left">FALSE</td>
+<td align="right">1</td>
+<td align="left">R0432</td>
+<td align="right">1</td>
+<td align="left">FALSE</td>
+<td align="right">2</td>
+<td align="left">ok</td>
+</tr>
+<tr class="odd">
+<td align="left">gaupro</td>
+<td align="left">selected</td>
+<td align="left">R0259</td>
+<td align="left">FALSE</td>
+<td align="right">1</td>
+<td align="left">R0259</td>
+<td align="right">1</td>
+<td align="left">FALSE</td>
+<td align="right">3</td>
+<td align="left">ok</td>
+</tr>
+<tr class="even">
+<td align="left">extra_trees</td>
+<td align="left">selected</td>
+<td align="left">R0432</td>
+<td align="left">FALSE</td>
+<td align="right">1</td>
+<td align="left">R0432</td>
+<td align="right">1</td>
+<td align="left">FALSE</td>
+<td align="right">2</td>
+<td align="left">ok</td>
+</tr>
+<tr class="odd">
+<td align="left">forward</td>
+<td align="left">selected</td>
+<td align="left">R0432</td>
+<td align="left">FALSE</td>
+<td align="right">1</td>
+<td align="left">R0432</td>
+<td align="right">1</td>
+<td align="left">FALSE</td>
+<td align="right">2</td>
+<td align="left">ok</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Exploration choices.</strong> The portfolio uses diverse
+medoids from the top tenth of the eligible SVEM spread scores for its
+remaining slots. SVEM summarizes widths of member-percentile intervals
+across the three responses. Widths are scaled between their 2nd and 98th
+percentiles and clipped, which can produce exact ties. Ensemble spread
+is useful for exploration; it is not automatically calibrated predictive
+uncertainty.</p>
+<p>The diagnostics below also show alternatives: choose the largest
+combined spread and break ties by fitted desirability, or choose the
+widest underlying spread. They do not allocate extra preparations in
+this portfolio. The separate scorer can also nominate the largest latent
+GP standard deviation for a chosen response; no such slot is reserved by
+the default portfolio. Extra Trees supplies a mean nominee, with trees
+varying through randomized splits of the full training rows.</p>
+<div class="sourceCode" id="cb11"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(scored<span class="sc">$</span>exploration, <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="13%" />
+<col width="7%" />
+<col width="7%" />
+<col width="7%" />
+<col width="12%" />
+<col width="11%" />
+<col width="11%" />
+<col width="14%" />
+<col width="9%" />
+<col width="4%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">rule</th>
+<th align="left">recipe_id</th>
+<th align="right">tie_count</th>
+<th align="right">exact_ties</th>
+<th align="right">display_only_ties</th>
+<th align="right">min_desirability</th>
+<th align="right">max_desirability</th>
+<th align="right">uncertainty_measure</th>
+<th align="right">strict_width</th>
+<th align="right">score</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">best_predicted_tie</td>
+<td align="left">R0250</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">0</td>
+<td align="right">0.0092</td>
+<td align="right">0.0092</td>
+<td align="right">0.8381</td>
+<td align="right">1.1334</td>
+<td align="right">0.0092</td>
+</tr>
+<tr class="even">
+<td align="left">widest_spread</td>
+<td align="left">R0250</td>
+<td align="right">1</td>
+<td align="right">1</td>
+<td align="right">0</td>
+<td align="right">0.0092</td>
+<td align="right">0.0092</td>
+<td align="right">0.8381</td>
+<td align="right">1.1334</td>
+<td align="right">0.0092</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb12"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(scored<span class="sc">$</span>tie_endpoint_ranges, <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table style="width:100%;">
+<colgroup>
+<col width="9%" />
+<col width="15%" />
+<col width="15%" />
+<col width="10%" />
+<col width="10%" />
+<col width="20%" />
+<col width="20%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">response</th>
+<th align="right">min_prediction</th>
+<th align="right">max_prediction</th>
+<th align="right">min_width</th>
+<th align="right">max_width</th>
+<th align="right">min_weighted_spread</th>
+<th align="right">max_weighted_spread</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Potency</td>
+<td align="right">78.8114</td>
+<td align="right">78.8114</td>
+<td align="right">13.0967</td>
+<td align="right">13.0967</td>
+<td align="right">0.5135</td>
+<td align="right">0.5135</td>
+</tr>
+<tr class="even">
+<td align="left">Size</td>
+<td align="right">213.2066</td>
+<td align="right">213.2066</td>
+<td align="right">21.6754</td>
+<td align="right">21.6754</td>
+<td align="right">0.2245</td>
+<td align="right">0.2245</td>
+</tr>
+<tr class="odd">
+<td align="left">PDI</td>
+<td align="right">0.2388</td>
+<td align="right">0.2388</td>
+<td align="right">0.3717</td>
+<td align="right">0.3717</td>
+<td align="right">0.1000</td>
+<td align="right">0.1000</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb13"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" tabindex="-1"></a>tab <span class="ot">&lt;-</span> scored<span class="sc">$</span>score_table</span>
+<span id="cb13-2"><a href="#cb13-2" tabindex="-1"></a>unprepared <span class="ot">&lt;-</span> tab[<span class="sc">!</span>tab<span class="sc">$</span>recipe_id <span class="sc">%in%</span> dat<span class="sc">$</span>recipe_id, , drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb13-3"><a href="#cb13-3" tabindex="-1"></a><span class="fu">summary</span>(<span class="fu">data.frame</span>(<span class="at">PDI_member_width =</span> tab<span class="sc">$</span>PDI_upr <span class="sc">-</span> tab<span class="sc">$</span>PDI_lwr,</span>
+<span id="cb13-4"><a href="#cb13-4" tabindex="-1"></a>                   <span class="at">PDI_weighted_spread =</span> tab<span class="sc">$</span>PDI_ciw_w))</span>
+<span id="cb13-5"><a href="#cb13-5" tabindex="-1"></a><span class="co">#&gt;  PDI_member_width  PDI_weighted_spread</span></span>
+<span id="cb13-6"><a href="#cb13-6" tabindex="-1"></a><span class="co">#&gt;  Min.   :0.06012   Min.   :0.00000    </span></span>
+<span id="cb13-7"><a href="#cb13-7" tabindex="-1"></a><span class="co">#&gt;  1st Qu.:0.09726   1st Qu.:0.01331    </span></span>
+<span id="cb13-8"><a href="#cb13-8" tabindex="-1"></a><span class="co">#&gt;  Median :0.12562   Median :0.02648    </span></span>
+<span id="cb13-9"><a href="#cb13-9" tabindex="-1"></a><span class="co">#&gt;  Mean   :0.13728   Mean   :0.03143    </span></span>
+<span id="cb13-10"><a href="#cb13-10" tabindex="-1"></a><span class="co">#&gt;  3rd Qu.:0.16015   3rd Qu.:0.04252    </span></span>
+<span id="cb13-11"><a href="#cb13-11" tabindex="-1"></a><span class="co">#&gt;  Max.   :0.40903   Max.   :0.10000</span></span></code></pre></div>
+<p>An exact tie is possible even when fitted responses and underlying
+widths differ substantially. For example, consider a single response
+with widths 1 through 98, then 105 and 120. The 98th percentile falls
+below 105, so both of the last two recipes receive a scaled width of 1.
+If their desirabilities are 0.85 and 0.20, respectively, the practical
+tie-break chooses the former. The raw-width rule chooses the latter. The
+tie counts printed above refer to the actual multi-response pool.</p>
+<p>For diverse representatives of the high-spread region, the
+established selector can return feasible medoids. A scientist following
+the paper’s SVEM-only allocation can also select distinct
+representatives of the high-score region. Both selections use physical
+recipe coordinates.</p>
+<div class="sourceCode" id="cb14"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" tabindex="-1"></a>diverse <span class="ot">&lt;-</span> <span class="fu">svem_select_from_score_table</span>(unprepared, <span class="at">target =</span> <span class="st">&quot;uncertainty_measure&quot;</span>,</span>
+<span id="cb14-2"><a href="#cb14-2" tabindex="-1"></a>                                        <span class="at">top =</span> .<span class="dv">10</span>, <span class="at">k =</span> <span class="dv">3</span>, <span class="at">predictor_cols =</span> recipe_cols)</span>
+<span id="cb14-3"><a href="#cb14-3" tabindex="-1"></a>high_score <span class="ot">&lt;-</span> <span class="fu">svem_select_from_score_table</span>(unprepared, <span class="at">target =</span> <span class="st">&quot;score&quot;</span>,</span>
+<span id="cb14-4"><a href="#cb14-4" tabindex="-1"></a>                                           <span class="at">top =</span> .<span class="dv">05</span>, <span class="at">k =</span> <span class="dv">3</span>, <span class="at">predictor_cols =</span> recipe_cols)</span></code></pre></div>
+<p>The paper also nominates a recipe for which the modeled means appear
+likely to meet specifications. The product of the three marginal
+probabilities is a ranking proxy. It addresses uncertainty about the
+means; the measurements from an individual future preparation also
+include assay and preparation variation. Rank only unprepared recipes.
+Choosing this alternative would use one of the available slots.</p>
+<div class="sourceCode" id="cb15"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" tabindex="-1"></a>finite <span class="ot">&lt;-</span> <span class="fu">which</span>(<span class="fu">is.finite</span>(unprepared<span class="sc">$</span>p_joint_mean))</span>
+<span id="cb15-2"><a href="#cb15-2" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="fu">length</span>(finite) <span class="sc">&gt;</span> <span class="dv">0</span><span class="dt">L</span>)</span>
+<span id="cb15-3"><a href="#cb15-3" tabindex="-1"></a>by_spec <span class="ot">&lt;-</span> finite[<span class="fu">which.max</span>(unprepared<span class="sc">$</span>p_joint_mean[finite])]</span>
+<span id="cb15-4"><a href="#cb15-4" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(unprepared[by_spec, <span class="fu">c</span>(<span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;score&quot;</span>, <span class="st">&quot;p_joint_mean&quot;</span>)],</span>
+<span id="cb15-5"><a href="#cb15-5" tabindex="-1"></a>             <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="right">score</th>
+<th align="right">p_joint_mean</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0027</td>
+<td align="right">0.8858</td>
+<td align="right">0.995</td>
+</tr>
+</tbody>
+</table>
+<p>Whole-model permutation tests provide another optional diagnostic.
+With WMT enabled, compare <code>score</code> and <code>wmt_score</code>
+on the same recipes. A weak global signal alone is insufficient to
+discard an endpoint. Here the scientist’s nominal weights govern every
+model and both rounds.</p>
+<div class="sourceCode" id="cb16"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" tabindex="-1"></a>forms <span class="ot">&lt;-</span> <span class="fu">setNames</span>(<span class="fu">lapply</span>(endpoints, <span class="cf">function</span>(y) <span class="fu">bigexp_formula</span>(spec, y)), endpoints)</span>
+<span id="cb16-2"><a href="#cb16-2" tabindex="-1"></a>wmt <span class="ot">&lt;-</span> <span class="fu">svem_wmt_multi</span>(forms, <span class="at">data =</span> dat, <span class="at">mixture_groups =</span> mix,</span>
+<span id="cb16-3"><a href="#cb16-3" tabindex="-1"></a>                      <span class="at">wmt_control =</span> <span class="fu">list</span>(<span class="at">seed =</span> <span class="dv">123</span>, <span class="at">nCore =</span> <span class="dv">1</span><span class="dt">L</span>), <span class="at">plot =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb16-4"><a href="#cb16-4" tabindex="-1"></a>svem_specification_scores <span class="ot">&lt;-</span> <span class="fu">svem_score_random</span>(</span>
+<span id="cb16-5"><a href="#cb16-5" tabindex="-1"></a>  fits, <span class="at">goals =</span> goals, <span class="at">data =</span> dat, <span class="at">candidates =</span> pool,</span>
+<span id="cb16-6"><a href="#cb16-6" tabindex="-1"></a>  <span class="at">wmt =</span> wmt, <span class="at">specs =</span> limits)</span>
+<span id="cb16-7"><a href="#cb16-7" tabindex="-1"></a><span class="fu">head</span>(svem_specification_scores<span class="sc">$</span>score_table[<span class="fu">c</span>(<span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;score&quot;</span>, <span class="st">&quot;wmt_score&quot;</span>,</span>
+<span id="cb16-8"><a href="#cb16-8" tabindex="-1"></a>                                             <span class="st">&quot;p_joint_mean&quot;</span>)])</span></code></pre></div>
+</div>
+<div id="change-the-budget-without-refitting" class="section level2">
+<h2>Change the budget without refitting</h2>
+<p>To request specific kinds of runs, set
+<code>n_optima = 3L, n_explore = 2L</code> in the planner call below and
+omit <code>budget</code>. This requests three new model candidates, two
+exploration recipes and the best-observed repeat, for six planned
+preparations. In this worked run, these fitted models nominate only two
+distinct new recipes, so the call returns five preparations and reports
+one unmet model request. Setting <code>incumbent = FALSE</code> removes
+the repeat from the planned total. Inspect selected counts and unused
+places before preparing the runs.</p>
+<p>Forward likelihood and the relaxed elastic net can emphasize
+different terms in the same candidate model. Forward’s validation score
+evaluates each training-fitted Gaussian mean and variance on the
+validation-weighted copy. The wrapper fits this method for each endpoint
+as well as the primary SVEM models. The same physical pool, scientific
+weights and planned operator apply to every nominee.</p>
+<p>For a smaller batch, reuse the fitted models and rescore. These five
+total preparations include a reference repeat; they are separate from
+the first example’s five <strong>new</strong> preparations. We still
+simulate and refit only the eight-preparation batch stored in
+<code>batch</code>.</p>
+<div class="sourceCode" id="cb17"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" tabindex="-1"></a>five_total <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb17-2"><a href="#cb17-2" tabindex="-1"></a>  spec, <span class="at">data =</span> dat, <span class="at">goals =</span> goals, <span class="at">candidates =</span> pool, <span class="at">budget =</span> <span class="dv">5</span><span class="dt">L</span>,</span>
+<span id="cb17-3"><a href="#cb17-3" tabindex="-1"></a>  <span class="at">fits =</span> fits, <span class="at">forward =</span> forward, <span class="at">score_control =</span> score_controls,</span>
+<span id="cb17-4"><a href="#cb17-4" tabindex="-1"></a>  <span class="at">incumbent =</span> incumbent_row, <span class="at">benchmark =</span> fixed_benchmark</span>
+<span id="cb17-5"><a href="#cb17-5" tabindex="-1"></a>)</span>
+<span id="cb17-6"><a href="#cb17-6" tabindex="-1"></a>five_total</span>
+<span id="cb17-7"><a href="#cb17-7" tabindex="-1"></a><span class="co">#&gt; SVEMnet default formulation workflow</span></span>
+<span id="cb17-8"><a href="#cb17-8" tabindex="-1"></a><span class="co">#&gt; 5 of 5 preparations; 4 new recipes; 0 unfilled slots</span></span>
+<span id="cb17-9"><a href="#cb17-9" tabindex="-1"></a><span class="co">#&gt; Reference repeats: 1 | New model candidates: 2 | Exploration runs: 2</span></span>
+<span id="cb17-10"><a href="#cb17-10" tabindex="-1"></a><span class="co">#&gt;  slot recipe_id               role                    nominated_by</span></span>
+<span id="cb17-11"><a href="#cb17-11" tabindex="-1"></a><span class="co">#&gt;     1     R0019   incumbent_repeat                        observed</span></span>
+<span id="cb17-12"><a href="#cb17-12" tabindex="-1"></a><span class="co">#&gt;     2     R0432            optimum svemnet + extra_trees + forward</span></span>
+<span id="cb17-13"><a href="#cb17-13" tabindex="-1"></a><span class="co">#&gt;     3     R0259            optimum                          gaupro</span></span>
+<span id="cb17-14"><a href="#cb17-14" tabindex="-1"></a><span class="co">#&gt;     4     R0037 high_spread_medoid                         svemnet</span></span>
+<span id="cb17-15"><a href="#cb17-15" tabindex="-1"></a><span class="co">#&gt;     5     R0551 high_spread_medoid                         svemnet</span></span>
+<span id="cb17-16"><a href="#cb17-16" tabindex="-1"></a><span class="co">#&gt; Nomination status (including unavailable and budget-dropped roles):</span></span>
+<span id="cb17-17"><a href="#cb17-17" tabindex="-1"></a><span class="co">#&gt;       engine   status fit_status best_ties new_ties new_recipe_id slot</span></span>
+<span id="cb17-18"><a href="#cb17-18" tabindex="-1"></a><span class="co">#&gt;    incumbent selected   observed         1        0          &lt;NA&gt;    1</span></span>
+<span id="cb17-19"><a href="#cb17-19" tabindex="-1"></a><span class="co">#&gt;      svemnet selected         ok         1        1         R0432    2</span></span>
+<span id="cb17-20"><a href="#cb17-20" tabindex="-1"></a><span class="co">#&gt;       gaupro selected         ok         1        1         R0259    3</span></span>
+<span id="cb17-21"><a href="#cb17-21" tabindex="-1"></a><span class="co">#&gt;  extra_trees selected         ok         1        1         R0432    2</span></span>
+<span id="cb17-22"><a href="#cb17-22" tabindex="-1"></a><span class="co">#&gt;      forward selected         ok         1        1         R0432    2</span></span>
+<span id="cb17-23"><a href="#cb17-23" tabindex="-1"></a><span class="co">#&gt; Priority: incumbent &gt; svemnet &gt; gaupro &gt; extra_trees &gt; forward </span></span>
+<span id="cb17-24"><a href="#cb17-24" tabindex="-1"></a><span class="co">#&gt; High-spread exploration fraction: 0.1 </span></span>
+<span id="cb17-25"><a href="#cb17-25" tabindex="-1"></a><span class="co">#&gt; Observed incumbent rule: best </span></span>
+<span id="cb17-26"><a href="#cb17-26" tabindex="-1"></a><span class="co">#&gt; Scientific goals and weights (full settings retained in policy):</span></span>
+<span id="cb17-27"><a href="#cb17-27" tabindex="-1"></a><span class="co">#&gt; $Potency</span></span>
+<span id="cb17-28"><a href="#cb17-28" tabindex="-1"></a><span class="co">#&gt; $Potency$goal</span></span>
+<span id="cb17-29"><a href="#cb17-29" tabindex="-1"></a><span class="co">#&gt; [1] &quot;max&quot;</span></span>
+<span id="cb17-30"><a href="#cb17-30" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-31"><a href="#cb17-31" tabindex="-1"></a><span class="co">#&gt; $Potency$weight</span></span>
+<span id="cb17-32"><a href="#cb17-32" tabindex="-1"></a><span class="co">#&gt; [1] 0.6</span></span>
+<span id="cb17-33"><a href="#cb17-33" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-34"><a href="#cb17-34" tabindex="-1"></a><span class="co">#&gt; $Potency$lower_acceptable</span></span>
+<span id="cb17-35"><a href="#cb17-35" tabindex="-1"></a><span class="co">#&gt; [1] 65</span></span>
+<span id="cb17-36"><a href="#cb17-36" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-37"><a href="#cb17-37" tabindex="-1"></a><span class="co">#&gt; $Potency$upper_acceptable</span></span>
+<span id="cb17-38"><a href="#cb17-38" tabindex="-1"></a><span class="co">#&gt; [1] 95</span></span>
+<span id="cb17-39"><a href="#cb17-39" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-40"><a href="#cb17-40" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-41"><a href="#cb17-41" tabindex="-1"></a><span class="co">#&gt; $Size</span></span>
+<span id="cb17-42"><a href="#cb17-42" tabindex="-1"></a><span class="co">#&gt; $Size$goal</span></span>
+<span id="cb17-43"><a href="#cb17-43" tabindex="-1"></a><span class="co">#&gt; [1] &quot;min&quot;</span></span>
+<span id="cb17-44"><a href="#cb17-44" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-45"><a href="#cb17-45" tabindex="-1"></a><span class="co">#&gt; $Size$weight</span></span>
+<span id="cb17-46"><a href="#cb17-46" tabindex="-1"></a><span class="co">#&gt; [1] 0.3</span></span>
+<span id="cb17-47"><a href="#cb17-47" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-48"><a href="#cb17-48" tabindex="-1"></a><span class="co">#&gt; $Size$lower_acceptable</span></span>
+<span id="cb17-49"><a href="#cb17-49" tabindex="-1"></a><span class="co">#&gt; [1] 40</span></span>
+<span id="cb17-50"><a href="#cb17-50" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-51"><a href="#cb17-51" tabindex="-1"></a><span class="co">#&gt; $Size$upper_acceptable</span></span>
+<span id="cb17-52"><a href="#cb17-52" tabindex="-1"></a><span class="co">#&gt; [1] 210</span></span>
+<span id="cb17-53"><a href="#cb17-53" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-54"><a href="#cb17-54" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-55"><a href="#cb17-55" tabindex="-1"></a><span class="co">#&gt; $PDI</span></span>
+<span id="cb17-56"><a href="#cb17-56" tabindex="-1"></a><span class="co">#&gt; $PDI$goal</span></span>
+<span id="cb17-57"><a href="#cb17-57" tabindex="-1"></a><span class="co">#&gt; [1] &quot;min&quot;</span></span>
+<span id="cb17-58"><a href="#cb17-58" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-59"><a href="#cb17-59" tabindex="-1"></a><span class="co">#&gt; $PDI$weight</span></span>
+<span id="cb17-60"><a href="#cb17-60" tabindex="-1"></a><span class="co">#&gt; [1] 0.1</span></span>
+<span id="cb17-61"><a href="#cb17-61" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-62"><a href="#cb17-62" tabindex="-1"></a><span class="co">#&gt; $PDI$lower_acceptable</span></span>
+<span id="cb17-63"><a href="#cb17-63" tabindex="-1"></a><span class="co">#&gt; [1] 0.04</span></span>
+<span id="cb17-64"><a href="#cb17-64" tabindex="-1"></a><span class="co">#&gt; </span></span>
+<span id="cb17-65"><a href="#cb17-65" tabindex="-1"></a><span class="co">#&gt; $PDI$upper_acceptable</span></span>
+<span id="cb17-66"><a href="#cb17-66" tabindex="-1"></a><span class="co">#&gt; [1] 0.39</span></span></code></pre></div>
+<p>If scientific priorities change, pass a revised <code>goals</code>
+list and the same fits and forward fits to inspect their consequences.
+Keeping the weights visible matters: agreement among fitted models does
+not settle the tradeoff between potency, size and PDI.
+<code>exploration_fraction = .25</code> is an optional wider shortlist
+for medoids, not a demonstrated improvement over .10.</p>
+<div class="sourceCode" id="cb18"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" tabindex="-1"></a><span class="fu">plot</span>(plan)</span></code></pre></div>
+<p><img role="img" aria-label="Follow-up recipe predictions" src="data:image/png;base64,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" alt="Follow-up recipe predictions" style="max-width:100%;" /></p>
+<div class="sourceCode" id="cb19"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" tabindex="-1"></a><span class="fu">plot</span>(plan, <span class="at">type =</span> <span class="st">&quot;responses&quot;</span>)</span></code></pre></div>
+<p><img role="img" aria-label="Follow-up recipe predictions" src="data:image/png;base64,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" alt="Follow-up recipe predictions" style="max-width:100%;" /></p>
+<p>The plots show fitted values available before measurement. Exporting
+the plan preserves every role and nomination, including the incumbent
+repeat. The physical recipe ID can recur in a later round. The optional
+prefix gives each planned preparation its own label; replace it with the
+lab’s actual batch identifier and reconcile labels when executing the
+rows. Use a different prefix for the next batch even if its planned date
+is unchanged. These labels and the planned date are export metadata;
+neither changes the fitted model or adds a day effect.</p>
+<div class="sourceCode" id="cb20"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" tabindex="-1"></a>eight_csv <span class="ot">&lt;-</span> <span class="fu">file.path</span>(<span class="fu">tempdir</span>(), <span class="st">&quot;lipid-screen-eight-total.csv&quot;</span>)</span>
+<span id="cb20-2"><a href="#cb20-2" tabindex="-1"></a><span class="fu">svem_export_candidates_csv</span>(plan, <span class="at">file =</span> eight_csv, <span class="at">overwrite =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb20-3"><a href="#cb20-3" tabindex="-1"></a>  <span class="at">planned_date =</span> <span class="st">&quot;2026-11-02&quot;</span>,</span>
+<span id="cb20-4"><a href="#cb20-4" tabindex="-1"></a>  <span class="at">preparation_prefix =</span> <span class="st">&quot;lipid-screen-20261102-round1&quot;</span>)</span>
+<span id="cb20-5"><a href="#cb20-5" tabindex="-1"></a>eight_readback <span class="ot">&lt;-</span> <span class="fu">read.csv</span>(eight_csv, <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb20-6"><a href="#cb20-6" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="fu">nrow</span>(eight_readback) <span class="sc">==</span> <span class="dv">8</span><span class="dt">L</span>,</span>
+<span id="cb20-7"><a href="#cb20-7" tabindex="-1"></a>          <span class="fu">identical</span>(eight_readback<span class="sc">$</span>recipe_id, batch<span class="sc">$</span>recipe_id),</span>
+<span id="cb20-8"><a href="#cb20-8" tabindex="-1"></a>          <span class="fu">identical</span>(eight_readback<span class="sc">$</span>role, batch<span class="sc">$</span>role),</span>
+<span id="cb20-9"><a href="#cb20-9" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">anyDuplicated</span>(eight_readback<span class="sc">$</span>preparation_id),</span>
+<span id="cb20-10"><a href="#cb20-10" tabindex="-1"></a>          <span class="fu">all</span>(eight_readback<span class="sc">$</span>planned_date <span class="sc">==</span> <span class="st">&quot;2026-11-02&quot;</span>))</span></code></pre></div>
+</div>
+<div id="freeze-predictions-then-reveal-simulated-outcomes" class="section level2">
+<h2>Freeze predictions, then reveal simulated outcomes</h2>
+<div class="sourceCode" id="cb21"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" tabindex="-1"></a>engines <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;svemnet&quot;</span>, enabled, <span class="st">&quot;forward&quot;</span>)</span>
+<span id="cb21-2"><a href="#cb21-2" tabindex="-1"></a>predictions <span class="ot">&lt;-</span> <span class="cf">function</span>(models, rows, forward_models) {</span>
+<span id="cb21-3"><a href="#cb21-3" tabindex="-1"></a>  <span class="fu">setNames</span>(<span class="fu">lapply</span>(engines, <span class="cf">function</span>(e) {</span>
+<span id="cb21-4"><a href="#cb21-4" tabindex="-1"></a>    <span class="cf">if</span> (e <span class="sc">==</span> <span class="st">&quot;forward&quot;</span>) <span class="fu">return</span>(<span class="fu">as.data.frame</span>(<span class="fu">lapply</span>(forward_models, predict, <span class="at">newdata =</span> rows)))</span>
+<span id="cb21-5"><a href="#cb21-5" tabindex="-1"></a>    <span class="fu">as.data.frame</span>(<span class="fu">lapply</span>(models, <span class="cf">function</span>(f) {</span>
+<span id="cb21-6"><a href="#cb21-6" tabindex="-1"></a>      <span class="cf">if</span> (e <span class="sc">!=</span> <span class="st">&quot;svemnet&quot;</span> <span class="sc">&amp;&amp;</span> <span class="sc">!</span><span class="fu">identical</span>(f<span class="sc">$</span>companions[[e]]<span class="sc">$</span>status, <span class="st">&quot;ok&quot;</span>))</span>
+<span id="cb21-7"><a href="#cb21-7" tabindex="-1"></a>        <span class="fu">return</span>(<span class="fu">rep</span>(<span class="cn">NA_real_</span>, <span class="fu">nrow</span>(rows)))</span>
+<span id="cb21-8"><a href="#cb21-8" tabindex="-1"></a>      <span class="fu">as.numeric</span>(<span class="fu">predict</span>(f, rows, <span class="at">engine =</span> e))</span>
+<span id="cb21-9"><a href="#cb21-9" tabindex="-1"></a>    }))</span>
+<span id="cb21-10"><a href="#cb21-10" tabindex="-1"></a>  }), engines)</span>
+<span id="cb21-11"><a href="#cb21-11" tabindex="-1"></a>}</span>
+<span id="cb21-12"><a href="#cb21-12" tabindex="-1"></a>before <span class="ot">&lt;-</span> <span class="fu">predictions</span>(fits, batch, forward)</span></code></pre></div>
+<p>Until this point, only the 23 observed outcomes entered the analysis.
+We now use the example simulator. Potency and Size use the original
+generating surfaces and independent Normal errors with SDs 2 and 3,
+recorded to whole units. This teaching simulation has no additional
+calendar-day shift. Its response means are also the same for both
+operators and contain no operator-by-recipe interaction. The fitted
+companions were allowed to learn such interactions from sparse
+operator-by-lipid cells. This difference matters when interpreting the
+comparison. One batch cannot establish what caused a particular
+prediction error or which model will give better nominees in another
+study. PDI is a negative control. Its example distribution is Beta(4,16)
+for every recipe and operator, with mean 0.20 and SD 0.0873. Those
+moments match the initial PDI measurements reasonably well. The
+historical PDI noise law is unknown. The simulator records PDI to
+hundredths. Each newly prepared run receives one set of measurements,
+however many models nominated it. The explicit preparation IDs key the
+teaching simulator’s reproducible random measurements; changing those
+IDs changes this illustrative realization even with the same seed. They
+do not change the generating mean surfaces.</p>
+<div class="sourceCode" id="cb22"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" tabindex="-1"></a>preparation_id <span class="ot">&lt;-</span> eight_readback<span class="sc">$</span>preparation_id</span>
+<span id="cb22-2"><a href="#cb22-2" tabindex="-1"></a>observed <span class="ot">&lt;-</span> <span class="fu">lipid_screen_simulate</span>(batch, <span class="at">run_id =</span> preparation_id, <span class="at">seed =</span> <span class="dv">731</span>)</span>
+<span id="cb22-3"><a href="#cb22-3" tabindex="-1"></a>latent <span class="ot">&lt;-</span> <span class="fu">setNames</span>(observed[<span class="fu">paste0</span>(endpoints, <span class="st">&quot;_true&quot;</span>)], endpoints)</span>
+<span id="cb22-4"><a href="#cb22-4" tabindex="-1"></a>comparison <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(endpoints, <span class="cf">function</span>(y) {</span>
+<span id="cb22-5"><a href="#cb22-5" tabindex="-1"></a>  out <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">recipe_id =</span> batch<span class="sc">$</span>recipe_id, <span class="at">endpoint =</span> y)</span>
+<span id="cb22-6"><a href="#cb22-6" tabindex="-1"></a>  <span class="cf">for</span> (e <span class="cf">in</span> engines) out[[e]] <span class="ot">&lt;-</span> before[[e]][[y]]</span>
+<span id="cb22-7"><a href="#cb22-7" tabindex="-1"></a>  out<span class="sc">$</span>latent_mean <span class="ot">&lt;-</span> latent[[y]]</span>
+<span id="cb22-8"><a href="#cb22-8" tabindex="-1"></a>  out<span class="sc">$</span>recorded <span class="ot">&lt;-</span> observed[[y]]</span>
+<span id="cb22-9"><a href="#cb22-9" tabindex="-1"></a>  out</span>
+<span id="cb22-10"><a href="#cb22-10" tabindex="-1"></a>}))</span>
+<span id="cb22-11"><a href="#cb22-11" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(comparison, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="13%" />
+<col width="11%" />
+<col width="10%" />
+<col width="10%" />
+<col width="15%" />
+<col width="10%" />
+<col width="15%" />
+<col width="11%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="left">endpoint</th>
+<th align="right">svemnet</th>
+<th align="right">gaupro</th>
+<th align="right">extra_trees</th>
+<th align="right">forward</th>
+<th align="right">latent_mean</th>
+<th align="right">recorded</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="left">Potency</td>
+<td align="right">91.795</td>
+<td align="right">94.649</td>
+<td align="right">86.894</td>
+<td align="right">92.309</td>
+<td align="right">93.689</td>
+<td align="right">97.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="left">Potency</td>
+<td align="right">94.411</td>
+<td align="right">90.989</td>
+<td align="right">85.367</td>
+<td align="right">95.191</td>
+<td align="right">96.487</td>
+<td align="right">98.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="left">Potency</td>
+<td align="right">91.768</td>
+<td align="right">93.555</td>
+<td align="right">84.109</td>
+<td align="right">92.033</td>
+<td align="right">93.387</td>
+<td align="right">91.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="left">Potency</td>
+<td align="right">78.844</td>
+<td align="right">77.881</td>
+<td align="right">73.092</td>
+<td align="right">77.610</td>
+<td align="right">77.398</td>
+<td align="right">77.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="left">Potency</td>
+<td align="right">75.322</td>
+<td align="right">76.234</td>
+<td align="right">76.766</td>
+<td align="right">73.596</td>
+<td align="right">70.186</td>
+<td align="right">70.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="left">Potency</td>
+<td align="right">81.193</td>
+<td align="right">76.932</td>
+<td align="right">79.210</td>
+<td align="right">81.399</td>
+<td align="right">77.469</td>
+<td align="right">76.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="left">Potency</td>
+<td align="right">92.468</td>
+<td align="right">82.761</td>
+<td align="right">81.376</td>
+<td align="right">94.045</td>
+<td align="right">91.851</td>
+<td align="right">94.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="left">Potency</td>
+<td align="right">79.605</td>
+<td align="right">73.568</td>
+<td align="right">73.680</td>
+<td align="right">78.154</td>
+<td align="right">76.585</td>
+<td align="right">77.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="left">Size</td>
+<td align="right">88.103</td>
+<td align="right">95.505</td>
+<td align="right">86.161</td>
+<td align="right">83.691</td>
+<td align="right">82.245</td>
+<td align="right">84.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="left">Size</td>
+<td align="right">68.766</td>
+<td align="right">69.175</td>
+<td align="right">70.365</td>
+<td align="right">64.985</td>
+<td align="right">66.357</td>
+<td align="right">64.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="left">Size</td>
+<td align="right">79.969</td>
+<td align="right">79.429</td>
+<td align="right">81.053</td>
+<td align="right">76.256</td>
+<td align="right">77.302</td>
+<td align="right">76.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="left">Size</td>
+<td align="right">190.319</td>
+<td align="right">185.555</td>
+<td align="right">189.901</td>
+<td align="right">193.133</td>
+<td align="right">193.202</td>
+<td align="right">196.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="left">Size</td>
+<td align="right">71.044</td>
+<td align="right">72.294</td>
+<td align="right">73.972</td>
+<td align="right">66.987</td>
+<td align="right">66.357</td>
+<td align="right">69.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="left">Size</td>
+<td align="right">46.126</td>
+<td align="right">53.431</td>
+<td align="right">56.758</td>
+<td align="right">48.680</td>
+<td align="right">48.897</td>
+<td align="right">48.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="left">Size</td>
+<td align="right">94.634</td>
+<td align="right">95.341</td>
+<td align="right">96.303</td>
+<td align="right">91.601</td>
+<td align="right">90.052</td>
+<td align="right">91.00</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="left">Size</td>
+<td align="right">143.548</td>
+<td align="right">143.021</td>
+<td align="right">148.217</td>
+<td align="right">146.549</td>
+<td align="right">142.365</td>
+<td align="right">144.00</td>
+</tr>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="left">PDI</td>
+<td align="right">0.198</td>
+<td align="right">0.298</td>
+<td align="right">0.223</td>
+<td align="right">0.210</td>
+<td align="right">0.200</td>
+<td align="right">0.12</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="left">PDI</td>
+<td align="right">0.152</td>
+<td align="right">0.208</td>
+<td align="right">0.086</td>
+<td align="right">0.165</td>
+<td align="right">0.200</td>
+<td align="right">0.23</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="left">PDI</td>
+<td align="right">0.166</td>
+<td align="right">0.180</td>
+<td align="right">0.088</td>
+<td align="right">0.172</td>
+<td align="right">0.200</td>
+<td align="right">0.26</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="left">PDI</td>
+<td align="right">0.230</td>
+<td align="right">0.211</td>
+<td align="right">0.165</td>
+<td align="right">0.252</td>
+<td align="right">0.200</td>
+<td align="right">0.16</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="left">PDI</td>
+<td align="right">0.195</td>
+<td align="right">0.131</td>
+<td align="right">0.196</td>
+<td align="right">0.198</td>
+<td align="right">0.200</td>
+<td align="right">0.10</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="left">PDI</td>
+<td align="right">0.164</td>
+<td align="right">0.239</td>
+<td align="right">0.164</td>
+<td align="right">0.193</td>
+<td align="right">0.200</td>
+<td align="right">0.18</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="left">PDI</td>
+<td align="right">0.171</td>
+<td align="right">0.208</td>
+<td align="right">0.173</td>
+<td align="right">0.200</td>
+<td align="right">0.200</td>
+<td align="right">0.20</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="left">PDI</td>
+<td align="right">0.212</td>
+<td align="right">0.192</td>
+<td align="right">0.207</td>
+<td align="right">0.243</td>
+<td align="right">0.200</td>
+<td align="right">0.15</td>
+</tr>
+</tbody>
+</table>
+<p>To compare models with the generating surface we evaluate the
+original desirability at the three <strong>latent means</strong>. The
+<strong>realized desirability</strong> uses the three recorded outcomes
+from one preparation. A noisy winner is a candidate for independent
+confirmation. It supplies little evidence for ranking the engines.</p>
+<div class="sourceCode" id="cb23"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" tabindex="-1"></a>utility <span class="ot">&lt;-</span> <span class="cf">function</span>(y) {</span>
+<span id="cb23-2"><a href="#cb23-2" tabindex="-1"></a>  parts <span class="ot">&lt;-</span> <span class="fu">lapply</span>(endpoints, <span class="cf">function</span>(nm) {</span>
+<span id="cb23-3"><a href="#cb23-3" tabindex="-1"></a>    g <span class="ot">&lt;-</span> goals[[nm]]</span>
+<span id="cb23-4"><a href="#cb23-4" tabindex="-1"></a>    z <span class="ot">&lt;-</span> (y[[nm]] <span class="sc">-</span> g<span class="sc">$</span>lower_acceptable) <span class="sc">/</span> (g<span class="sc">$</span>upper_acceptable <span class="sc">-</span> g<span class="sc">$</span>lower_acceptable)</span>
+<span id="cb23-5"><a href="#cb23-5" tabindex="-1"></a>    <span class="cf">if</span> (g<span class="sc">$</span>goal <span class="sc">==</span> <span class="st">&quot;min&quot;</span>) z <span class="ot">&lt;-</span> <span class="dv">1</span> <span class="sc">-</span> z</span>
+<span id="cb23-6"><a href="#cb23-6" tabindex="-1"></a>    g<span class="sc">$</span>weight <span class="sc">*</span> <span class="fu">log</span>(<span class="fl">1e-6</span> <span class="sc">+</span> (<span class="dv">1</span> <span class="sc">-</span> <span class="fl">1e-6</span>) <span class="sc">*</span> <span class="fu">pmin</span>(<span class="dv">1</span>, <span class="fu">pmax</span>(<span class="dv">0</span>, z)))</span>
+<span id="cb23-7"><a href="#cb23-7" tabindex="-1"></a>  })</span>
+<span id="cb23-8"><a href="#cb23-8" tabindex="-1"></a>  <span class="fu">exp</span>(<span class="fu">Reduce</span>(<span class="st">`</span><span class="at">+</span><span class="st">`</span>, parts) <span class="sc">/</span> <span class="fu">sum</span>(<span class="fu">vapply</span>(goals, <span class="cf">function</span>(g) g<span class="sc">$</span>weight, <span class="fu">numeric</span>(<span class="dv">1</span>))))</span>
+<span id="cb23-9"><a href="#cb23-9" tabindex="-1"></a>}</span>
+<span id="cb23-10"><a href="#cb23-10" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="fu">isTRUE</span>(<span class="fu">all.equal</span>(<span class="fu">utility</span>(before<span class="sc">$</span>svemnet), batch<span class="sc">$</span>score, <span class="at">tolerance =</span> <span class="fl">1e-7</span>,</span>
+<span id="cb23-11"><a href="#cb23-11" tabindex="-1"></a>                           <span class="at">check.attributes =</span> <span class="cn">FALSE</span>)))</span>
+<span id="cb23-12"><a href="#cb23-12" tabindex="-1"></a>pool_truth <span class="ot">&lt;-</span> <span class="fu">lipid_screen_simulate</span>(pool)</span>
+<span id="cb23-13"><a href="#cb23-13" tabindex="-1"></a>best_feasible <span class="ot">&lt;-</span> <span class="fu">max</span>(<span class="fu">utility</span>(<span class="fu">setNames</span>(pool_truth[<span class="fu">paste0</span>(endpoints, <span class="st">&quot;_true&quot;</span>)], endpoints)))</span>
+<span id="cb23-14"><a href="#cb23-14" tabindex="-1"></a>result <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">recipe_id =</span> batch<span class="sc">$</span>recipe_id, <span class="at">latent =</span> <span class="fu">utility</span>(latent),</span>
+<span id="cb23-15"><a href="#cb23-15" tabindex="-1"></a>                     <span class="at">recorded =</span> <span class="fu">utility</span>(observed))</span>
+<span id="cb23-16"><a href="#cb23-16" tabindex="-1"></a>result<span class="sc">$</span>gap_to_best_in_pool <span class="ot">&lt;-</span> best_feasible <span class="sc">-</span> result<span class="sc">$</span>latent</span>
+<span id="cb23-17"><a href="#cb23-17" tabindex="-1"></a><span class="cf">for</span> (e <span class="cf">in</span> engines) {</span>
+<span id="cb23-18"><a href="#cb23-18" tabindex="-1"></a>  result[[<span class="fu">paste0</span>(e, <span class="st">&quot;_pred&quot;</span>)]] <span class="ot">&lt;-</span> <span class="fu">utility</span>(before[[e]])</span>
+<span id="cb23-19"><a href="#cb23-19" tabindex="-1"></a>  fixed_pdi <span class="ot">&lt;-</span> before[[e]]</span>
+<span id="cb23-20"><a href="#cb23-20" tabindex="-1"></a>  fixed_pdi<span class="sc">$</span>PDI <span class="ot">&lt;-</span> <span class="fu">rep</span>(.<span class="dv">20</span>, <span class="fu">nrow</span>(fixed_pdi))</span>
+<span id="cb23-21"><a href="#cb23-21" tabindex="-1"></a>  result[[<span class="fu">paste0</span>(e, <span class="st">&quot;_PDI_fixed&quot;</span>)]] <span class="ot">&lt;-</span> <span class="fu">utility</span>(fixed_pdi)</span>
+<span id="cb23-22"><a href="#cb23-22" tabindex="-1"></a>}</span>
+<span id="cb23-23"><a href="#cb23-23" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(result, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table style="width:100%;">
+<colgroup>
+<col width="5%" />
+<col width="3%" />
+<col width="5%" />
+<col width="11%" />
+<col width="7%" />
+<col width="10%" />
+<col width="6%" />
+<col width="9%" />
+<col width="9%" />
+<col width="12%" />
+<col width="7%" />
+<col width="10%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="right">latent</th>
+<th align="right">recorded</th>
+<th align="right">gap_to_best_in_pool</th>
+<th align="right">svemnet_pred</th>
+<th align="right">svemnet_PDI_fixed</th>
+<th align="right">gaupro_pred</th>
+<th align="right">gaupro_PDI_fixed</th>
+<th align="right">extra_trees_pred</th>
+<th align="right">extra_trees_PDI_fixed</th>
+<th align="right">forward_pred</th>
+<th align="right">forward_PDI_fixed</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="right">0.841</td>
+<td align="right">0.891</td>
+<td align="right">0.054</td>
+<td align="right">0.796</td>
+<td align="right">0.796</td>
+<td align="right">0.771</td>
+<td align="right">0.830</td>
+<td align="right">0.699</td>
+<td align="right">0.708</td>
+<td align="right">0.809</td>
+<td align="right">0.813</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="right">0.894</td>
+<td align="right">0.883</td>
+<td align="right">0.000</td>
+<td align="right">0.899</td>
+<td align="right">0.879</td>
+<td align="right">0.812</td>
+<td align="right">0.816</td>
+<td align="right">0.737</td>
+<td align="right">0.703</td>
+<td align="right">0.912</td>
+<td align="right">0.897</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="right">0.845</td>
+<td align="right">0.774</td>
+<td align="right">0.049</td>
+<td align="right">0.824</td>
+<td align="right">0.811</td>
+<td align="right">0.852</td>
+<td align="right">0.844</td>
+<td align="right">0.692</td>
+<td align="right">0.661</td>
+<td align="right">0.834</td>
+<td align="right">0.822</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="right">0.276</td>
+<td align="right">0.262</td>
+<td align="right">0.618</td>
+<td align="right">0.304</td>
+<td align="right">0.310</td>
+<td align="right">0.315</td>
+<td align="right">0.317</td>
+<td align="right">0.230</td>
+<td align="right">0.226</td>
+<td align="right">0.271</td>
+<td align="right">0.280</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="right">0.312</td>
+<td align="right">0.317</td>
+<td align="right">0.582</td>
+<td align="right">0.468</td>
+<td align="right">0.467</td>
+<td align="right">0.505</td>
+<td align="right">0.490</td>
+<td align="right">0.503</td>
+<td align="right">0.502</td>
+<td align="right">0.422</td>
+<td align="right">0.422</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="right">0.547</td>
+<td align="right">0.513</td>
+<td align="right">0.348</td>
+<td align="right">0.654</td>
+<td align="right">0.643</td>
+<td align="right">0.516</td>
+<td align="right">0.528</td>
+<td align="right">0.593</td>
+<td align="right">0.582</td>
+<td align="right">0.647</td>
+<td align="right">0.645</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="right">0.793</td>
+<td align="right">0.828</td>
+<td align="right">0.102</td>
+<td align="right">0.806</td>
+<td align="right">0.794</td>
+<td align="right">0.608</td>
+<td align="right">0.610</td>
+<td align="right">0.588</td>
+<td align="right">0.580</td>
+<td align="right">0.828</td>
+<td align="right">0.828</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="right">0.403</td>
+<td align="right">0.418</td>
+<td align="right">0.491</td>
+<td align="right">0.458</td>
+<td align="right">0.461</td>
+<td align="right">0.337</td>
+<td align="right">0.335</td>
+<td align="right">0.329</td>
+<td align="right">0.330</td>
+<td align="right">0.416</td>
+<td align="right">0.427</td>
+</tr>
+</tbody>
+</table>
+<p>The paired prediction columns show how much each model’s score
+changes when only its fitted PDI is replaced with 0.20. This is an
+after-selection check. The known PDI mean contributed no information to
+the original nominations. For context, simulate the range of outcomes
+one preparation might produce. These extra draws are kept out of the
+follow-up data.</p>
+<div class="sourceCode" id="cb24"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" tabindex="-1"></a>ref_interval <span class="ot">&lt;-</span> <span class="fu">t</span>(<span class="fu">vapply</span>(<span class="fu">seq_len</span>(<span class="fu">nrow</span>(batch)), <span class="cf">function</span>(i) {</span>
+<span id="cb24-2"><a href="#cb24-2" tabindex="-1"></a>  repeats <span class="ot">&lt;-</span> batch[<span class="fu">rep</span>(i, <span class="dv">500</span><span class="dt">L</span>), , drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb24-3"><a href="#cb24-3" tabindex="-1"></a>  ids <span class="ot">&lt;-</span> <span class="fu">paste0</span>(<span class="st">&quot;interval-&quot;</span>, batch<span class="sc">$</span>recipe_id[i], <span class="st">&quot;-&quot;</span>, <span class="fu">seq_len</span>(<span class="fu">nrow</span>(repeats)))</span>
+<span id="cb24-4"><a href="#cb24-4" tabindex="-1"></a>  sim <span class="ot">&lt;-</span> <span class="fu">lipid_screen_simulate</span>(repeats, <span class="at">run_id =</span> ids, <span class="at">seed =</span> <span class="dv">903</span>)</span>
+<span id="cb24-5"><a href="#cb24-5" tabindex="-1"></a>  <span class="fu">unname</span>(<span class="fu">quantile</span>(<span class="fu">utility</span>(sim), <span class="fu">c</span>(.<span class="dv">05</span>, .<span class="dv">95</span>)))</span>
+<span id="cb24-6"><a href="#cb24-6" tabindex="-1"></a>}, <span class="fu">numeric</span>(<span class="dv">2</span>)))</span>
+<span id="cb24-7"><a href="#cb24-7" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="fu">data.frame</span>(<span class="at">recipe_id =</span> batch<span class="sc">$</span>recipe_id, <span class="at">lower_90 =</span> ref_interval[, <span class="dv">1</span>],</span>
+<span id="cb24-8"><a href="#cb24-8" tabindex="-1"></a>                       <span class="at">recorded =</span> result<span class="sc">$</span>recorded, <span class="at">upper_90 =</span> ref_interval[, <span class="dv">2</span>]),</span>
+<span id="cb24-9"><a href="#cb24-9" tabindex="-1"></a>             <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="right">lower_90</th>
+<th align="right">recorded</th>
+<th align="right">upper_90</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="right">0.704</td>
+<td align="right">0.891</td>
+<td align="right">0.900</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="right">0.746</td>
+<td align="right">0.883</td>
+<td align="right">0.937</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="right">0.680</td>
+<td align="right">0.774</td>
+<td align="right">0.907</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="right">0.203</td>
+<td align="right">0.262</td>
+<td align="right">0.327</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="right">0.118</td>
+<td align="right">0.317</td>
+<td align="right">0.423</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="right">0.380</td>
+<td align="right">0.513</td>
+<td align="right">0.638</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="right">0.676</td>
+<td align="right">0.828</td>
+<td align="right">0.865</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="right">0.304</td>
+<td align="right">0.418</td>
+<td align="right">0.472</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="refit-using-the-eight-new-measurements" class="section level2">
+<h2>Refit using the eight new measurements</h2>
+<div class="sourceCode" id="cb25"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" tabindex="-1"></a>analysis_cols <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;RunID&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>, predictors, endpoints)</span>
+<span id="cb25-2"><a href="#cb25-2" tabindex="-1"></a>followup <span class="ot">&lt;-</span> <span class="fu">cbind</span>(<span class="at">RunID =</span> preparation_id, batch[<span class="fu">c</span>(<span class="st">&quot;recipe_id&quot;</span>, predictors)],</span>
+<span id="cb25-3"><a href="#cb25-3" tabindex="-1"></a>                  observed[endpoints])</span>
+<span id="cb25-4"><a href="#cb25-4" tabindex="-1"></a>augmented <span class="ot">&lt;-</span> <span class="fu">rbind</span>(dat[analysis_cols], followup[analysis_cols])</span>
+<span id="cb25-5"><a href="#cb25-5" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="sc">!</span><span class="fu">anyDuplicated</span>(augmented<span class="sc">$</span>RunID))</span>
+<span id="cb25-6"><a href="#cb25-6" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">2301</span>)</span>
+<span id="cb25-7"><a href="#cb25-7" tabindex="-1"></a>next_plan <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb25-8"><a href="#cb25-8" tabindex="-1"></a>  spec, <span class="at">data =</span> augmented, <span class="at">goals =</span> goals, <span class="at">candidates =</span> pool, <span class="at">budget =</span> <span class="dv">8</span><span class="dt">L</span>,</span>
+<span id="cb25-9"><a href="#cb25-9" tabindex="-1"></a>  <span class="at">fit_control =</span> fit_controls, <span class="at">score_control =</span> score_controls,</span>
+<span id="cb25-10"><a href="#cb25-10" tabindex="-1"></a>  <span class="at">reference =</span> <span class="fu">list</span>(<span class="at">Operator =</span> <span class="st">&quot;A&quot;</span>), <span class="at">benchmark =</span> fixed_benchmark</span>
+<span id="cb25-11"><a href="#cb25-11" tabindex="-1"></a>)</span>
+<span id="cb25-12"><a href="#cb25-12" tabindex="-1"></a>updated <span class="ot">&lt;-</span> next_plan<span class="sc">$</span>fits</span>
+<span id="cb25-13"><a href="#cb25-13" tabindex="-1"></a>updated_forward <span class="ot">&lt;-</span> next_plan<span class="sc">$</span>forward</span>
+<span id="cb25-14"><a href="#cb25-14" tabindex="-1"></a>after <span class="ot">&lt;-</span> <span class="fu">predictions</span>(updated, batch, updated_forward)</span>
+<span id="cb25-15"><a href="#cb25-15" tabindex="-1"></a>refit_scores <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">recipe_id =</span> batch<span class="sc">$</span>recipe_id)</span>
+<span id="cb25-16"><a href="#cb25-16" tabindex="-1"></a><span class="cf">for</span> (e <span class="cf">in</span> engines) {</span>
+<span id="cb25-17"><a href="#cb25-17" tabindex="-1"></a>  refit_scores[[<span class="fu">paste0</span>(e, <span class="st">&quot;_before&quot;</span>)]] <span class="ot">&lt;-</span> <span class="fu">utility</span>(before[[e]])</span>
+<span id="cb25-18"><a href="#cb25-18" tabindex="-1"></a>  refit_scores[[<span class="fu">paste0</span>(e, <span class="st">&quot;_after&quot;</span>)]] <span class="ot">&lt;-</span> <span class="fu">utility</span>(after[[e]])</span>
+<span id="cb25-19"><a href="#cb25-19" tabindex="-1"></a>}</span>
+<span id="cb25-20"><a href="#cb25-20" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(refit_scores, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table>
+<colgroup>
+<col width="7%" />
+<col width="11%" />
+<col width="10%" />
+<col width="10%" />
+<col width="9%" />
+<col width="14%" />
+<col width="13%" />
+<col width="11%" />
+<col width="10%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">recipe_id</th>
+<th align="right">svemnet_before</th>
+<th align="right">svemnet_after</th>
+<th align="right">gaupro_before</th>
+<th align="right">gaupro_after</th>
+<th align="right">extra_trees_before</th>
+<th align="right">extra_trees_after</th>
+<th align="right">forward_before</th>
+<th align="right">forward_after</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">R0019</td>
+<td align="right">0.796</td>
+<td align="right">0.840</td>
+<td align="right">0.771</td>
+<td align="right">0.889</td>
+<td align="right">0.699</td>
+<td align="right">0.887</td>
+<td align="right">0.809</td>
+<td align="right">0.851</td>
+</tr>
+<tr class="even">
+<td align="left">R0432</td>
+<td align="right">0.899</td>
+<td align="right">0.899</td>
+<td align="right">0.812</td>
+<td align="right">0.883</td>
+<td align="right">0.737</td>
+<td align="right">0.881</td>
+<td align="right">0.912</td>
+<td align="right">0.897</td>
+</tr>
+<tr class="odd">
+<td align="left">R0259</td>
+<td align="right">0.824</td>
+<td align="right">0.832</td>
+<td align="right">0.852</td>
+<td align="right">0.814</td>
+<td align="right">0.692</td>
+<td align="right">0.746</td>
+<td align="right">0.834</td>
+<td align="right">0.828</td>
+</tr>
+<tr class="even">
+<td align="left">R0171</td>
+<td align="right">0.304</td>
+<td align="right">0.264</td>
+<td align="right">0.315</td>
+<td align="right">0.277</td>
+<td align="right">0.230</td>
+<td align="right">0.277</td>
+<td align="right">0.271</td>
+<td align="right">0.257</td>
+</tr>
+<tr class="odd">
+<td align="left">R0600</td>
+<td align="right">0.468</td>
+<td align="right">0.351</td>
+<td align="right">0.505</td>
+<td align="right">0.342</td>
+<td align="right">0.503</td>
+<td align="right">0.393</td>
+<td align="right">0.422</td>
+<td align="right">0.354</td>
+</tr>
+<tr class="even">
+<td align="left">R0444</td>
+<td align="right">0.654</td>
+<td align="right">0.569</td>
+<td align="right">0.516</td>
+<td align="right">0.514</td>
+<td align="right">0.593</td>
+<td align="right">0.573</td>
+<td align="right">0.647</td>
+<td align="right">0.580</td>
+</tr>
+<tr class="odd">
+<td align="left">R0384</td>
+<td align="right">0.806</td>
+<td align="right">0.806</td>
+<td align="right">0.608</td>
+<td align="right">0.818</td>
+<td align="right">0.588</td>
+<td align="right">0.814</td>
+<td align="right">0.828</td>
+<td align="right">0.820</td>
+</tr>
+<tr class="even">
+<td align="left">R0466</td>
+<td align="right">0.458</td>
+<td align="right">0.415</td>
+<td align="right">0.337</td>
+<td align="right">0.404</td>
+<td align="right">0.329</td>
+<td align="right">0.406</td>
+<td align="right">0.416</td>
+<td align="right">0.407</td>
+</tr>
+</tbody>
+</table>
+<div class="sourceCode" id="cb26"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" tabindex="-1"></a>next_batch <span class="ot">&lt;-</span> next_plan<span class="sc">$</span>worklist</span>
+<span id="cb26-2"><a href="#cb26-2" tabindex="-1"></a><span class="fu">stopifnot</span>(next_plan<span class="sc">$</span>shortfall <span class="sc">==</span> <span class="dv">0</span><span class="dt">L</span>,</span>
+<span id="cb26-3"><a href="#cb26-3" tabindex="-1"></a>          <span class="sc">!</span><span class="fu">any</span>(next_batch<span class="sc">$</span>recipe_id[next_batch<span class="sc">$</span>new_recipe] <span class="sc">%in%</span> augmented<span class="sc">$</span>recipe_id))</span>
+<span id="cb26-4"><a href="#cb26-4" tabindex="-1"></a>knitr<span class="sc">::</span><span class="fu">kable</span>(next_batch[<span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;role&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;new_recipe&quot;</span>, recipe_cols)],</span>
+<span id="cb26-5"><a href="#cb26-5" tabindex="-1"></a>             <span class="at">digits =</span> <span class="dv">4</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>)</span></code></pre></div>
+<table style="width:100%;">
+<colgroup>
+<col width="4%" />
+<col width="15%" />
+<col width="8%" />
+<col width="9%" />
+<col width="5%" />
+<col width="5%" />
+<col width="8%" />
+<col width="9%" />
+<col width="17%" />
+<col width="8%" />
+<col width="8%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="right">slot</th>
+<th align="left">role</th>
+<th align="left">recipe_id</th>
+<th align="left">new_recipe</th>
+<th align="right">PEG</th>
+<th align="right">Helper</th>
+<th align="right">Ionizable</th>
+<th align="right">Cholesterol</th>
+<th align="left">Ionizable_Lipid_Type</th>
+<th align="right">N_P_ratio</th>
+<th align="right">flow_rate</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="left">incumbent_repeat</td>
+<td align="left">R0019</td>
+<td align="left">FALSE</td>
+<td align="right">0.0474</td>
+<td align="right">0.4297</td>
+<td align="right">0.1396</td>
+<td align="right">0.3833</td>
+<td align="left">H101</td>
+<td align="right">6</td>
+<td align="right">2.5</td>
+</tr>
+<tr class="even">
+<td align="right">2</td>
+<td align="left">optimum</td>
+<td align="left">R0071</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.5000</td>
+<td align="right">0.1000</td>
+<td align="right">0.3500</td>
+<td align="left">H101</td>
+<td align="right">12</td>
+<td align="right">3.0</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="left">optimum</td>
+<td align="left">R0509</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.5500</td>
+<td align="right">0.1000</td>
+<td align="right">0.3000</td>
+<td align="left">H101</td>
+<td align="right">8</td>
+<td align="right">1.5</td>
+</tr>
+<tr class="even">
+<td align="right">4</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">R0503</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.1500</td>
+<td align="right">0.5500</td>
+<td align="right">0.2500</td>
+<td align="left">H101</td>
+<td align="right">12</td>
+<td align="right">1.0</td>
+</tr>
+<tr class="odd">
+<td align="right">5</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">R0374</td>
+<td align="left">TRUE</td>
+<td align="right">0.0400</td>
+<td align="right">0.1000</td>
+<td align="right">0.3000</td>
+<td align="right">0.5600</td>
+<td align="left">H101</td>
+<td align="right">8</td>
+<td align="right">2.5</td>
+</tr>
+<tr class="even">
+<td align="right">6</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">R0506</td>
+<td align="left">TRUE</td>
+<td align="right">0.0400</td>
+<td align="right">0.1000</td>
+<td align="right">0.5000</td>
+<td align="right">0.3600</td>
+<td align="left">H103</td>
+<td align="right">6</td>
+<td align="right">1.0</td>
+</tr>
+<tr class="odd">
+<td align="right">7</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">R0355</td>
+<td align="left">TRUE</td>
+<td align="right">0.0200</td>
+<td align="right">0.1000</td>
+<td align="right">0.6000</td>
+<td align="right">0.2800</td>
+<td align="left">H102</td>
+<td align="right">10</td>
+<td align="right">2.5</td>
+</tr>
+<tr class="even">
+<td align="right">8</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">R0117</td>
+<td align="left">TRUE</td>
+<td align="right">0.0500</td>
+<td align="right">0.5500</td>
+<td align="right">0.2500</td>
+<td align="right">0.1500</td>
+<td align="left">H103</td>
+<td align="right">12</td>
+<td align="right">3.0</td>
+</tr>
+</tbody>
+</table>
+<p>The next round returns to automatic selection within operator A.
+Inspect <code>next_plan$incumbent$by_context</code> to see the best raw
+observed scores in each context; a larger score elsewhere does not make
+raw block outcomes directly comparable. An explicit incumbent override
+remains available when the scientist wants a deliberate bridge across
+contexts.</p>
+<p>Within the reference context, the default
+<code>incumbent_summary = &quot;best&quot;</code> retains the best observed
+<strong>individual preparation</strong>. An older high observation can
+therefore remain the incumbent after a poorer repeat; the rule does not
+erase that older measurement or average confirmation results
+automatically. Inspect <code>incumbent$recipe_n_preparations</code> for
+all attempts at that physical recipe in its source context,
+<code>recipe_n_complete</code> for complete preparations, and
+<code>recipe_mean_score</code> for desirability evaluated at their mean
+responses. These diagnostics do not change the selected statistic:
+<code>n_preparations</code> is still one for the default best individual
+preparation. To compare recipe means over repeated independent
+preparations in the same context instead, rescore the updated fits
+explicitly:</p>
+<div class="sourceCode" id="cb27"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" tabindex="-1"></a>mean_reference <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb27-2"><a href="#cb27-2" tabindex="-1"></a>  spec, augmented, goals, pool, <span class="at">budget =</span> <span class="dv">8</span><span class="dt">L</span>,</span>
+<span id="cb27-3"><a href="#cb27-3" tabindex="-1"></a>  <span class="at">fits =</span> updated, <span class="at">forward =</span> updated_forward, <span class="at">score_control =</span> score_controls,</span>
+<span id="cb27-4"><a href="#cb27-4" tabindex="-1"></a>  <span class="at">reference =</span> <span class="fu">list</span>(<span class="at">Operator =</span> <span class="st">&quot;A&quot;</span>), <span class="at">incumbent_summary =</span> <span class="st">&quot;mean&quot;</span>,</span>
+<span id="cb27-5"><a href="#cb27-5" tabindex="-1"></a>  <span class="at">benchmark =</span> fixed_benchmark</span>
+<span id="cb27-6"><a href="#cb27-6" tabindex="-1"></a>)</span></code></pre></div>
+<p>This optional rule averages measured response values for each recipe
+before applying the goal maps. Keep technical readings summarized within
+preparation and keep distinct preparation IDs. Reusing fitted lists is
+appropriate for this choice or changed scientific weights on unchanged
+data. Adding or correcting measurements requires refitting; the planner
+checks the stored training rows before accepting supplied models.</p>
+<p>Review optional-engine diagnostics as well as the nominations. A
+diagnostic such as a fitted nugget reaching its optimization bound
+warrants inspecting the affected fit; it is not evidence that any
+nominated recipe has been confirmed. The prospective comparisons still
+use the predictions frozen before these new measurements were
+revealed.</p>
+<p>The after columns are fitted on data that include the follow-up
+preparations. Only the before columns are prospective predictions for
+this batch. With real measurements, replace
+<code>observed[endpoints]</code> with the laboratory results, record the
+calendar date and operator with each unique preparation ID, and refit
+with the same declared goals and candidate domain. Operator is a model
+factor here; the teaching simulation has no additional calendar-day
+shift. The planner does not add a round or batch factor automatically.
+Declare intended blocks from physical conditions, such as a changed lot,
+operator or instrument, before seeing the results. Do not add or remove
+a block because a round looked good or bad. Once a new level has
+measurements, rebuild the specification from the augmented data and
+refit. Primary SVEM then uses additive penalized block effects without
+recipe-by-block interactions.</p>
+<p>The portfolio already reserves the selected incumbent repeat; the
+optional fixed benchmark can connect successive contexts even when the
+incumbent changes. Exploration also broadens recipe coverage. Neither
+guarantees separation of block effects from recipe effects, so plan
+bridging preparations deliberately. Compare new recipes with the repeats
+prepared in the same batch, rather than only with their earlier
+measurements. Under an additive batch shift, that within-batch contrast
+removes the shift without relying on a fitted block term. A fixed
+benchmark chosen in advance avoids choosing the reference for an
+unusually high observed response; it still has preparation and
+measurement noise. A deliberate challenge run to revisit a poor response
+remains a manual choice.</p>
+<p>For the <strong>first follow-up round</strong>, suppose the operator
+had been unknown and A and B equally likely. Using the original 23
+preparations, score each physical recipe twice and average its two
+scores before ranking. This answers a different operational question
+from preparing every recipe with A. The same recipe IDs align the two
+tables.</p>
+<div class="sourceCode" id="cb28"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb28-1"><a href="#cb28-1" tabindex="-1"></a>pool_b <span class="ot">&lt;-</span> pool</span>
+<span id="cb28-2"><a href="#cb28-2" tabindex="-1"></a>pool_b<span class="sc">$</span>Operator <span class="ot">&lt;-</span> <span class="fu">factor</span>(<span class="st">&quot;B&quot;</span>, <span class="at">levels =</span> <span class="fu">levels</span>(pool<span class="sc">$</span>Operator))</span>
+<span id="cb28-3"><a href="#cb28-3" tabindex="-1"></a>by_b <span class="ot">&lt;-</span> <span class="fu">svem_score_random</span>(fits, <span class="at">goals =</span> goals, <span class="at">data =</span> dat, <span class="at">candidates =</span> pool_b,</span>
+<span id="cb28-4"><a href="#cb28-4" tabindex="-1"></a>                          <span class="at">increments =</span> increments, <span class="at">budget =</span> <span class="dv">3</span><span class="dt">L</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb28-5"><a href="#cb28-5" tabindex="-1"></a>idx <span class="ot">&lt;-</span> <span class="fu">match</span>(tab<span class="sc">$</span>recipe_id, by_b<span class="sc">$</span>score_table<span class="sc">$</span>recipe_id)</span>
+<span id="cb28-6"><a href="#cb28-6" tabindex="-1"></a><span class="fu">stopifnot</span>(<span class="sc">!</span><span class="fu">anyNA</span>(idx))</span>
+<span id="cb28-7"><a href="#cb28-7" tabindex="-1"></a>cols <span class="ot">&lt;-</span> <span class="fu">intersect</span>(<span class="fu">c</span>(<span class="st">&quot;score&quot;</span>, <span class="st">&quot;gaupro_score&quot;</span>, <span class="st">&quot;extra_trees_score&quot;</span>), <span class="fu">names</span>(tab))</span>
+<span id="cb28-8"><a href="#cb28-8" tabindex="-1"></a>eligible <span class="ot">&lt;-</span> <span class="sc">!</span>tab<span class="sc">$</span>recipe_id <span class="sc">%in%</span> dat<span class="sc">$</span>recipe_id</span>
+<span id="cb28-9"><a href="#cb28-9" tabindex="-1"></a>avg <span class="ot">&lt;-</span> (tab[cols] <span class="sc">+</span> by_b<span class="sc">$</span>score_table[idx, cols, <span class="at">drop =</span> <span class="cn">FALSE</span>]) <span class="sc">/</span> <span class="dv">2</span></span>
+<span id="cb28-10"><a href="#cb28-10" tabindex="-1"></a><span class="fu">vapply</span>(avg, <span class="cf">function</span>(s) {</span>
+<span id="cb28-11"><a href="#cb28-11" tabindex="-1"></a>  use <span class="ot">&lt;-</span> <span class="fu">which</span>(eligible <span class="sc">&amp;</span> <span class="fu">is.finite</span>(s))</span>
+<span id="cb28-12"><a href="#cb28-12" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">length</span>(use)) <span class="fu">as.character</span>(tab<span class="sc">$</span>recipe_id[use[<span class="fu">which.max</span>(s[use])]]) <span class="cf">else</span> <span class="cn">NA_character_</span></span>
+<span id="cb28-13"><a href="#cb28-13" tabindex="-1"></a>}, <span class="fu">character</span>(<span class="dv">1</span>))</span>
+<span id="cb28-14"><a href="#cb28-14" tabindex="-1"></a><span class="co">#&gt;             score      gaupro_score extra_trees_score </span></span>
+<span id="cb28-15"><a href="#cb28-15" tabindex="-1"></a><span class="co">#&gt;           &quot;R0432&quot;           &quot;R0259&quot;           &quot;R0112&quot;</span></span></code></pre></div>
+</div>
+<div id="a-spline-nominee-on-a-two-factor-process" class="section level2">
+<h2>A spline nominee on a two-factor process</h2>
+<p>The full lipid experiment above has four mixture components, two
+numeric process settings and a nominal ingredient type. The optional
+general spline can now represent that factor specification, including
+its five independent numeric coordinates and additive operator shifts. A
+final optional comparison below adds its nomination to the same initial
+data. This separate teaching experiment keeps two continuous coordinates
+so its fitted ridge is easy to display and compare with the known
+simulated response.</p>
+<p>Both coded process settings run from zero to one. A response ridge
+follows a line through the interior of the feasible grid. We know its
+noiseless response for teaching and can check the nominations against it
+after fitting. In the laboratory the measured follow-up supplies that
+check.</p>
+<div class="sourceCode" id="cb29"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb29-1"><a href="#cb29-1" tabindex="-1"></a>process_grid <span class="ot">&lt;-</span> <span class="fu">expand.grid</span>(<span class="at">rate =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">9</span>),</span>
+<span id="cb29-2"><a href="#cb29-2" tabindex="-1"></a>                            <span class="at">time =</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">1</span>, <span class="at">length.out =</span> <span class="dv">9</span>))</span>
+<span id="cb29-3"><a href="#cb29-3" tabindex="-1"></a>process_grid<span class="sc">$</span>recipe_id <span class="ot">&lt;-</span> <span class="fu">sprintf</span>(<span class="st">&quot;P%03d&quot;</span>, <span class="fu">seq_len</span>(<span class="fu">nrow</span>(process_grid)))</span>
+<span id="cb29-4"><a href="#cb29-4" tabindex="-1"></a>process_mean <span class="ot">&lt;-</span> <span class="cf">function</span>(rate, time) {</span>
+<span id="cb29-5"><a href="#cb29-5" tabindex="-1"></a>  along <span class="ot">&lt;-</span> <span class="fu">exp</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">*</span> ((rate <span class="sc">-</span> <span class="fl">0.65</span>) <span class="sc">/</span> <span class="fl">0.35</span>)<span class="sc">^</span><span class="dv">2</span>)</span>
+<span id="cb29-6"><a href="#cb29-6" tabindex="-1"></a>  across <span class="ot">&lt;-</span> <span class="fu">exp</span>(<span class="sc">-</span><span class="fl">0.5</span> <span class="sc">*</span> ((time <span class="sc">-</span> <span class="fl">0.2</span> <span class="sc">-</span> <span class="fl">0.6</span> <span class="sc">*</span> rate) <span class="sc">/</span> <span class="fl">0.13</span>)<span class="sc">^</span><span class="dv">2</span>)</span>
+<span id="cb29-7"><a href="#cb29-7" tabindex="-1"></a>  <span class="fl">0.15</span> <span class="sc">*</span> rate <span class="sc">+</span> along <span class="sc">*</span> across</span>
+<span id="cb29-8"><a href="#cb29-8" tabindex="-1"></a>}</span>
+<span id="cb29-9"><a href="#cb29-9" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">7312</span>)</span>
+<span id="cb29-10"><a href="#cb29-10" tabindex="-1"></a>process_data <span class="ot">&lt;-</span> process_grid[<span class="fu">sample.int</span>(<span class="fu">nrow</span>(process_grid), <span class="dv">24</span><span class="dt">L</span>), ]</span>
+<span id="cb29-11"><a href="#cb29-11" tabindex="-1"></a>process_data<span class="sc">$</span>yield <span class="ot">&lt;-</span> <span class="fu">with</span>(process_data, <span class="fu">process_mean</span>(rate, time)) <span class="sc">+</span></span>
+<span id="cb29-12"><a href="#cb29-12" tabindex="-1"></a>  <span class="fu">rnorm</span>(<span class="fu">nrow</span>(process_data), <span class="at">sd =</span> <span class="fl">0.08</span>)</span>
+<span id="cb29-13"><a href="#cb29-13" tabindex="-1"></a>process_spec <span class="ot">&lt;-</span> <span class="fu">bigexp_terms</span>(yield <span class="sc">~</span> rate <span class="sc">+</span> time, <span class="at">data =</span> process_data,</span>
+<span id="cb29-14"><a href="#cb29-14" tabindex="-1"></a>                             <span class="at">report =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb29-15"><a href="#cb29-15" tabindex="-1"></a>process_goals <span class="ot">&lt;-</span> <span class="fu">list</span>(<span class="at">yield =</span> <span class="fu">list</span>(<span class="at">goal =</span> <span class="st">&quot;max&quot;</span>, <span class="at">weight =</span> <span class="dv">1</span>))</span></code></pre></div>
+<p>Specify both counts when you know how many new candidates to test and
+how many runs to spend on exploration. The planner adds the
+best-observed repeat and any distinct fixed benchmark. With both
+optional companions available, five requested model candidates and two
+exploration runs plus the incumbent give eight planned preparations. Set
+<code>incumbent = FALSE</code> to request the same numbers of new
+recipes without that repeat. To impose a lab limit, supply
+<code>budget</code>. The worklist can be shorter if model nominees
+coincide. The standard order tries elastic-net SVEM, GauPro, Extra
+Trees, forward SVEM and then the optional spline. When two models
+nominate the same recipe, their endorsements share one physical place.
+The planner considers later model nominees before declaring a model
+shortfall. An explicit exploration request reserves those places for
+exploration.</p>
+<div class="sourceCode" id="cb30"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb30-1"><a href="#cb30-1" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">&quot;mgcv&quot;</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
+<span id="cb30-2"><a href="#cb30-2" tabindex="-1"></a>  n_models <span class="ot">&lt;-</span> <span class="dv">3</span><span class="dt">L</span> <span class="sc">+</span> <span class="fu">length</span>(enabled)  <span class="co"># Elastic net, forward, spline, and enabled companions</span></span>
+<span id="cb30-3"><a href="#cb30-3" tabindex="-1"></a>  <span class="fu">set.seed</span>(<span class="dv">7313</span>)</span>
+<span id="cb30-4"><a href="#cb30-4" tabindex="-1"></a>  process_plan <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb30-5"><a href="#cb30-5" tabindex="-1"></a>    process_spec, process_data, process_goals, <span class="at">candidates =</span> process_grid,</span>
+<span id="cb30-6"><a href="#cb30-6" tabindex="-1"></a>    <span class="at">incumbent =</span> <span class="cn">TRUE</span>, <span class="at">n_optima =</span> n_models, <span class="at">n_explore =</span> <span class="dv">2</span><span class="dt">L</span>,</span>
+<span id="cb30-7"><a href="#cb30-7" tabindex="-1"></a>    <span class="at">spline =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb30-8"><a href="#cb30-8" tabindex="-1"></a>    <span class="at">fit_control =</span> <span class="fu">list</span>(<span class="at">companions =</span> <span class="cf">if</span> (<span class="fu">length</span>(enabled)) enabled <span class="cf">else</span> <span class="cn">FALSE</span>),</span>
+<span id="cb30-9"><a href="#cb30-9" tabindex="-1"></a>    <span class="at">score_control =</span> <span class="fu">list</span>(<span class="at">verbose =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb30-10"><a href="#cb30-10" tabindex="-1"></a>  )</span>
+<span id="cb30-11"><a href="#cb30-11" tabindex="-1"></a>  counts <span class="ot">&lt;-</span> process_plan<span class="sc">$</span>allocation_counts</span>
+<span id="cb30-12"><a href="#cb30-12" tabindex="-1"></a>  <span class="fu">print</span>(<span class="fu">data.frame</span>(<span class="at">type =</span> <span class="fu">c</span>(<span class="st">&quot;Reference repeats&quot;</span>, <span class="st">&quot;New model candidates&quot;</span>, <span class="st">&quot;Exploration&quot;</span>),</span>
+<span id="cb30-13"><a href="#cb30-13" tabindex="-1"></a>    <span class="at">requested =</span> <span class="fu">c</span>(<span class="dv">1</span><span class="dt">L</span>, n_models, <span class="dv">2</span><span class="dt">L</span>),</span>
+<span id="cb30-14"><a href="#cb30-14" tabindex="-1"></a>    <span class="at">selected =</span> <span class="fu">c</span>(counts<span class="sc">$</span>distinct_repeats, counts<span class="sc">$</span>selected_optima, counts<span class="sc">$</span>selected_explore)))</span>
+<span id="cb30-15"><a href="#cb30-15" tabindex="-1"></a>  <span class="fu">print</span>(process_plan<span class="sc">$</span>nominations[, <span class="fu">c</span>(<span class="st">&quot;engine&quot;</span>, <span class="st">&quot;status&quot;</span>, <span class="st">&quot;new_recipe_id&quot;</span>, <span class="st">&quot;slot&quot;</span>)])</span>
+<span id="cb30-16"><a href="#cb30-16" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">nrow</span>(process_plan<span class="sc">$</span>merged_nominations)) <span class="fu">print</span>(process_plan<span class="sc">$</span>merged_nominations)</span>
+<span id="cb30-17"><a href="#cb30-17" tabindex="-1"></a>  process_runs <span class="ot">&lt;-</span> process_plan<span class="sc">$</span>worklist[, <span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;role&quot;</span>, <span class="st">&quot;nominated_by&quot;</span>,</span>
+<span id="cb30-18"><a href="#cb30-18" tabindex="-1"></a>    <span class="st">&quot;recipe_id&quot;</span>, <span class="st">&quot;rate&quot;</span>, <span class="st">&quot;time&quot;</span>, <span class="st">&quot;yield_spline_pred&quot;</span>)]</span>
+<span id="cb30-19"><a href="#cb30-19" tabindex="-1"></a>  process_runs<span class="sc">$</span>example_mean <span class="ot">&lt;-</span> <span class="fu">with</span>(process_runs, <span class="fu">process_mean</span>(rate, time))</span>
+<span id="cb30-20"><a href="#cb30-20" tabindex="-1"></a>  <span class="fu">print</span>(process_runs)</span>
+<span id="cb30-21"><a href="#cb30-21" tabindex="-1"></a>} <span class="cf">else</span> {</span>
+<span id="cb30-22"><a href="#cb30-22" tabindex="-1"></a>  <span class="fu">message</span>(<span class="st">&quot;Install the suggested mgcv package to run the spline example.&quot;</span>)</span>
+<span id="cb30-23"><a href="#cb30-23" tabindex="-1"></a>}</span>
+<span id="cb30-24"><a href="#cb30-24" tabindex="-1"></a><span class="co">#&gt; Warning: Requested allocation is short by 2 model and 0 exploration</span></span>
+<span id="cb30-25"><a href="#cb30-25" tabindex="-1"></a><span class="co">#&gt; preparation(s).</span></span>
+<span id="cb30-26"><a href="#cb30-26" tabindex="-1"></a><span class="co">#&gt;                   type requested selected</span></span>
+<span id="cb30-27"><a href="#cb30-27" tabindex="-1"></a><span class="co">#&gt; 1    Reference repeats         1        1</span></span>
+<span id="cb30-28"><a href="#cb30-28" tabindex="-1"></a><span class="co">#&gt; 2 New model candidates         5        3</span></span>
+<span id="cb30-29"><a href="#cb30-29" tabindex="-1"></a><span class="co">#&gt; 3          Exploration         2        2</span></span>
+<span id="cb30-30"><a href="#cb30-30" tabindex="-1"></a><span class="co">#&gt;        engine   status new_recipe_id slot</span></span>
+<span id="cb30-31"><a href="#cb30-31" tabindex="-1"></a><span class="co">#&gt; 1   incumbent selected          &lt;NA&gt;    1</span></span>
+<span id="cb30-32"><a href="#cb30-32" tabindex="-1"></a><span class="co">#&gt; 2     svemnet selected          P054    2</span></span>
+<span id="cb30-33"><a href="#cb30-33" tabindex="-1"></a><span class="co">#&gt; 3      gaupro selected          P042    3</span></span>
+<span id="cb30-34"><a href="#cb30-34" tabindex="-1"></a><span class="co">#&gt; 4 extra_trees selected          P054    2</span></span>
+<span id="cb30-35"><a href="#cb30-35" tabindex="-1"></a><span class="co">#&gt; 5     forward selected          P054    2</span></span>
+<span id="cb30-36"><a href="#cb30-36" tabindex="-1"></a><span class="co">#&gt; 6      spline selected          P061    4</span></span>
+<span id="cb30-37"><a href="#cb30-37" tabindex="-1"></a><span class="co">#&gt;   slot recipe_id             role      source previous_nominated_by</span></span>
+<span id="cb30-38"><a href="#cb30-38" tabindex="-1"></a><span class="co">#&gt; 1    2      P054          optimum extra_trees               svemnet</span></span>
+<span id="cb30-39"><a href="#cb30-39" tabindex="-1"></a><span class="co">#&gt; 2    2      P054          optimum     forward svemnet + extra_trees</span></span>
+<span id="cb30-40"><a href="#cb30-40" tabindex="-1"></a><span class="co">#&gt; 3    1      P051 incumbent_repeat      gaupro              observed</span></span>
+<span id="cb30-41"><a href="#cb30-41" tabindex="-1"></a><span class="co">#&gt; 4    1      P051 incumbent_repeat extra_trees     observed + gaupro</span></span>
+<span id="cb30-42"><a href="#cb30-42" tabindex="-1"></a><span class="co">#&gt;    slot               role                    nominated_by recipe_id  rate</span></span>
+<span id="cb30-43"><a href="#cb30-43" tabindex="-1"></a><span class="co">#&gt; 51    1   incumbent_repeat observed + gaupro + extra_trees      P051 0.625</span></span>
+<span id="cb30-44"><a href="#cb30-44" tabindex="-1"></a><span class="co">#&gt; 54    2            optimum svemnet + extra_trees + forward      P054 1.000</span></span>
+<span id="cb30-45"><a href="#cb30-45" tabindex="-1"></a><span class="co">#&gt; 42    3            optimum                          gaupro      P042 0.625</span></span>
+<span id="cb30-46"><a href="#cb30-46" tabindex="-1"></a><span class="co">#&gt; 61    4            optimum                          spline      P061 0.750</span></span>
+<span id="cb30-47"><a href="#cb30-47" tabindex="-1"></a><span class="co">#&gt; 74    5 high_spread_medoid                         svemnet      P074 0.125</span></span>
+<span id="cb30-48"><a href="#cb30-48" tabindex="-1"></a><span class="co">#&gt; 81    6 high_spread_medoid                         svemnet      P081 1.000</span></span>
+<span id="cb30-49"><a href="#cb30-49" tabindex="-1"></a><span class="co">#&gt;     time yield_spline_pred example_mean</span></span>
+<span id="cb30-50"><a href="#cb30-50" tabindex="-1"></a><span class="co">#&gt; 51 0.625        0.68821923   1.02008854</span></span>
+<span id="cb30-51"><a href="#cb30-51" tabindex="-1"></a><span class="co">#&gt; 54 0.625        0.56499915   0.39510586</span></span>
+<span id="cb30-52"><a href="#cb30-52" tabindex="-1"></a><span class="co">#&gt; 42 0.500        0.63176544   0.93828328</span></span>
+<span id="cb30-53"><a href="#cb30-53" tabindex="-1"></a><span class="co">#&gt; 61 0.750        0.63999195   0.82664139</span></span>
+<span id="cb30-54"><a href="#cb30-54" tabindex="-1"></a><span class="co">#&gt; 74 1.000        0.09754001   0.01875006</span></span>
+<span id="cb30-55"><a href="#cb30-55" tabindex="-1"></a><span class="co">#&gt; 81 1.000        0.44148405   0.33573545</span></span></code></pre></div>
+<p>This run requested 5 distinct model candidates and obtained 3.
+Overlapping nominations share a preparation. Counting reference repeats
+(1) and exploration settings (2), the worklist contains 6 distinct
+preparations. The number of unused places is 2.</p>
+<p>The <code>yield_spline_pred</code> column is the fitted ensemble mean
+for the recipe in that row. <code>example_mean</code> is the noiseless
+response used to generate this teaching experiment. Neither column is a
+new assay. Check the actual number of distinct preparations and obtain
+independent measurements before adopting a model nominee. With
+<code>n_explore = NULL</code>, the existing high-spread medoid policy
+fills spare places. With an explicit count, inspect the returned
+allocation for any unused capacity or unavailable nominations.</p>
+<p>To fit the same spline independently, the shared response-fitting
+helper accepts the original factor specification and the response-free
+feasible grid. Set this reference grid before looking at outcomes and
+keep it fixed across refits. Its physical coordinates determine the
+basis. The declared factor bounds separately determine which recipes are
+legal. If the planner fits the spline itself, its
+<code>candidates</code> table supplies the reference grid. To score a
+different pool on the existing basis, supply the saved spline fits.
+Prediction at recipes off the saved grid requires <code>mgcv</code>,
+including after reload.</p>
+<div class="sourceCode" id="cb31"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb31-1"><a href="#cb31-1" tabindex="-1"></a>spline_fits <span class="ot">&lt;-</span> <span class="fu">svem_fit_responses</span>(process_spec, process_data, <span class="st">&quot;yield&quot;</span>,</span>
+<span id="cb31-2"><a href="#cb31-2" tabindex="-1"></a>                                  <span class="at">method =</span> <span class="st">&quot;spline&quot;</span>, <span class="at">domain_grid =</span> process_grid)</span>
+<span id="cb31-3"><a href="#cb31-3" tabindex="-1"></a><span class="fu">predict</span>(spline_fits[[<span class="st">&quot;yield&quot;</span>]], <span class="at">newdata =</span> process_grid[<span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, ])</span></code></pre></div>
+<p>The spline regularizes curvature and chooses a smoothing strength for
+each paired training and validation weighting. A member scores its
+training-fitted Gaussian mean and residual variance on the
+validation-weighted copy. The capacity limit uses the smoother’s
+effective degrees of freedom. The basis follows the thin-plate
+regression spline construction of <a href="https://doi.org/10.1111/1467-9868.00374">Wood (2003)</a>.</p>
+</div>
+<div id="an-optional-general-spline-on-the-full-lipid-experiment" class="section level2">
+<h2>An optional general spline on the full lipid experiment</h2>
+<p>Return to the original 23 preparations for this comparison. The
+specification, goals, mixture bounds, ingredient types, process settings
+and operator remain visible in the earlier code. Reuse the four fitted
+learners and add the spline. Five requested model optima, two
+exploration medoids and one incumbent repeat give a nominal budget of
+eight preparations. Distinct model nominees can be fewer than five when
+learners agree; the returned shortfall and endorsements show what can
+actually be prepared.</p>
+<div class="sourceCode" id="cb32"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb32-1"><a href="#cb32-1" tabindex="-1"></a><span class="cf">if</span> (<span class="fu">requireNamespace</span>(<span class="st">&quot;mgcv&quot;</span>, <span class="at">quietly =</span> <span class="cn">TRUE</span>)) {</span>
+<span id="cb32-2"><a href="#cb32-2" tabindex="-1"></a>  <span class="fu">set.seed</span>(<span class="dv">2401</span>)</span>
+<span id="cb32-3"><a href="#cb32-3" tabindex="-1"></a>  spline_plan <span class="ot">&lt;-</span> <span class="fu">svem_plan_runs</span>(</span>
+<span id="cb32-4"><a href="#cb32-4" tabindex="-1"></a>    spec, <span class="at">data =</span> dat, <span class="at">goals =</span> goals, <span class="at">candidates =</span> pool,</span>
+<span id="cb32-5"><a href="#cb32-5" tabindex="-1"></a>    <span class="at">fits =</span> plan<span class="sc">$</span>fits, <span class="at">forward =</span> plan<span class="sc">$</span>forward, <span class="at">spline =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb32-6"><a href="#cb32-6" tabindex="-1"></a>    <span class="at">incumbent =</span> incumbent_row, <span class="at">benchmark =</span> fixed_benchmark,</span>
+<span id="cb32-7"><a href="#cb32-7" tabindex="-1"></a>    <span class="at">n_optima =</span> <span class="dv">5</span><span class="dt">L</span>, <span class="at">n_explore =</span> <span class="dv">2</span><span class="dt">L</span>,</span>
+<span id="cb32-8"><a href="#cb32-8" tabindex="-1"></a>    <span class="at">spline_control =</span> <span class="fu">list</span>(<span class="at">nBoot =</span> <span class="dv">200</span><span class="dt">L</span>), <span class="at">score_control =</span> score_controls</span>
+<span id="cb32-9"><a href="#cb32-9" tabindex="-1"></a>  )</span>
+<span id="cb32-10"><a href="#cb32-10" tabindex="-1"></a>  capacity <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, <span class="fu">lapply</span>(<span class="fu">names</span>(spline_plan<span class="sc">$</span>spline), <span class="cf">function</span>(r) {</span>
+<span id="cb32-11"><a href="#cb32-11" tabindex="-1"></a>    f <span class="ot">&lt;-</span> spline_plan<span class="sc">$</span>spline[[r]]</span>
+<span id="cb32-12"><a href="#cb32-12" tabindex="-1"></a>    <span class="fu">data.frame</span>(<span class="at">response =</span> r, <span class="at">numeric_coordinates =</span> f<span class="sc">$</span>spec<span class="sc">$</span>dimension,</span>
+<span id="cb32-13"><a href="#cb32-13" tabindex="-1"></a>               <span class="at">model_columns =</span> <span class="fu">length</span>(f<span class="sc">$</span>penalty),</span>
+<span id="cb32-14"><a href="#cb32-14" tabindex="-1"></a>               <span class="at">median_effective_df =</span> <span class="fu">median</span>(f<span class="sc">$</span>member_diagnostics<span class="sc">$</span>effective_df),</span>
+<span id="cb32-15"><a href="#cb32-15" tabindex="-1"></a>               <span class="at">intercept_member_fraction =</span> <span class="fu">mean</span>(f<span class="sc">$</span>member_diagnostics<span class="sc">$</span>intercept_only))</span>
+<span id="cb32-16"><a href="#cb32-16" tabindex="-1"></a>  }))</span>
+<span id="cb32-17"><a href="#cb32-17" tabindex="-1"></a>  <span class="fu">print</span>(knitr<span class="sc">::</span><span class="fu">kable</span>(capacity, <span class="at">digits =</span> <span class="dv">3</span>, <span class="at">row.names =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb32-18"><a href="#cb32-18" tabindex="-1"></a>  <span class="fu">print</span>(knitr<span class="sc">::</span><span class="fu">kable</span>(spline_plan<span class="sc">$</span>worklist[<span class="fu">c</span>(<span class="st">&quot;slot&quot;</span>, <span class="st">&quot;role&quot;</span>, <span class="st">&quot;nominated_by&quot;</span>, <span class="st">&quot;recipe_id&quot;</span>)],</span>
+<span id="cb32-19"><a href="#cb32-19" tabindex="-1"></a>               <span class="at">row.names =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb32-20"><a href="#cb32-20" tabindex="-1"></a>  notes <span class="ot">&lt;-</span> spline_plan<span class="sc">$</span>scores<span class="sc">$</span>engine_status</span>
+<span id="cb32-21"><a href="#cb32-21" tabindex="-1"></a>  notes <span class="ot">&lt;-</span> notes[notes<span class="sc">$</span>engine <span class="sc">==</span> <span class="st">&quot;spline&quot;</span> <span class="sc">&amp;</span> <span class="fu">nzchar</span>(notes<span class="sc">$</span>message), , drop <span class="ot">=</span> <span class="cn">FALSE</span>]</span>
+<span id="cb32-22"><a href="#cb32-22" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">nrow</span>(notes)) <span class="fu">print</span>(knitr<span class="sc">::</span><span class="fu">kable</span>(notes, <span class="at">row.names =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb32-23"><a href="#cb32-23" tabindex="-1"></a>  cc <span class="ot">&lt;-</span> spline_plan<span class="sc">$</span>allocation_counts</span>
+<span id="cb32-24"><a href="#cb32-24" tabindex="-1"></a>  <span class="fu">print</span>(knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="fu">data.frame</span>(<span class="at">reference_repeats =</span> cc<span class="sc">$</span>distinct_repeats,</span>
+<span id="cb32-25"><a href="#cb32-25" tabindex="-1"></a>    <span class="at">model_candidates =</span> cc<span class="sc">$</span>selected_optima, <span class="at">exploration =</span> cc<span class="sc">$</span>selected_explore,</span>
+<span id="cb32-26"><a href="#cb32-26" tabindex="-1"></a>    <span class="at">unused_capacity =</span> cc<span class="sc">$</span>unused_capacity, <span class="at">shortfall =</span> spline_plan<span class="sc">$</span>shortfall),</span>
+<span id="cb32-27"><a href="#cb32-27" tabindex="-1"></a>    <span class="at">row.names =</span> <span class="cn">FALSE</span>))</span>
+<span id="cb32-28"><a href="#cb32-28" tabindex="-1"></a>}</span>
+<span id="cb32-29"><a href="#cb32-29" tabindex="-1"></a><span class="co">#&gt; Warning: Requested allocation is short by 2 model and 0 exploration</span></span>
+<span id="cb32-30"><a href="#cb32-30" tabindex="-1"></a><span class="co">#&gt; preparation(s).</span></span></code></pre></div>
+<table>
+<colgroup>
+<col width="10%" />
+<col width="22%" />
+<col width="15%" />
+<col width="22%" />
+<col width="29%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">response</th>
+<th align="right">numeric_coordinates</th>
+<th align="right">model_columns</th>
+<th align="right">median_effective_df</th>
+<th align="right">intercept_member_fraction</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Potency</td>
+<td align="right">5</td>
+<td align="right">75</td>
+<td align="right">6.87</td>
+<td align="right">0.21</td>
+</tr>
+<tr class="even">
+<td align="left">Size</td>
+<td align="right">5</td>
+<td align="right">75</td>
+<td align="right">10.51</td>
+<td align="right">0.11</td>
+</tr>
+<tr class="odd">
+<td align="left">PDI</td>
+<td align="right">5</td>
+<td align="right">75</td>
+<td align="right">1.00</td>
+<td align="right">0.70</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr class="header">
+<th align="right">slot</th>
+<th align="left">role</th>
+<th align="left">nominated_by</th>
+<th align="left">recipe_id</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="left">incumbent_repeat</td>
+<td align="left">observed</td>
+<td align="left">R0019</td>
+</tr>
+<tr class="even">
+<td align="right">2</td>
+<td align="left">optimum</td>
+<td align="left">svemnet + extra_trees + forward</td>
+<td align="left">R0432</td>
+</tr>
+<tr class="odd">
+<td align="right">3</td>
+<td align="left">optimum</td>
+<td align="left">gaupro</td>
+<td align="left">R0259</td>
+</tr>
+<tr class="even">
+<td align="right">4</td>
+<td align="left">optimum</td>
+<td align="left">spline</td>
+<td align="left">R0112</td>
+</tr>
+<tr class="odd">
+<td align="right">5</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0037</td>
+</tr>
+<tr class="even">
+<td align="right">6</td>
+<td align="left">high_spread_medoid</td>
+<td align="left">svemnet</td>
+<td align="left">R0551</td>
+</tr>
+</tbody>
+</table>
+<table>
+<colgroup>
+<col width="5%" />
+<col width="6%" />
+<col width="5%" />
+<col width="82%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">engine</th>
+<th align="left">response</th>
+<th align="left">status</th>
+<th align="left">message</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">spline</td>
+<td align="left">PDI</td>
+<td align="left">ok</td>
+<td align="left">70% of members selected the intercept-only fit; the
+directional nomination comes from the remaining members.</td>
+</tr>
+</tbody>
+</table>
+<table style="width:100%;">
+<colgroup>
+<col width="24%" />
+<col width="23%" />
+<col width="16%" />
+<col width="21%" />
+<col width="13%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="right">reference_repeats</th>
+<th align="right">model_candidates</th>
+<th align="right">exploration</th>
+<th align="right">unused_capacity</th>
+<th align="right">shortfall</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="right">1</td>
+<td align="right">3</td>
+<td align="right">2</td>
+<td align="right">2</td>
+<td align="right">2</td>
+</tr>
+</tbody>
+</table>
+<p>The stored general surface uses a shared Duchon basis and modest
+one-factor curvature here. Ingredient levels add penalized shifts and
+deviations; the operator remains an additive block. The smoothing
+strength is selected separately for each self-validated member using its
+training-fitted Gaussian mean and variance on the validation copy. The
+self-validation score and effective-df cap can favor a simple fit in a
+small experiment. A flat general surface supplies predictions but no
+directional optimum. This extends factor coverage; it does not transfer
+the earlier two-coordinate simulation results to every formulation
+problem. Confirm the proposed recipes experimentally.</p>
+<p>For a new experiment, the same call uses its own shared
+<code>bigexp_terms()</code> specification and response-free candidate
+grid. Multiple disjoint mixture groups and fixed components are
+supported. With no varying numeric coordinate, the general smoother
+reduces to penalized categorical effects or an intercept. The default
+four-learner workflow remains available without a spline request.</p>
+</div>
+
+
+
+<!-- code folding -->
+
+
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+  (function () {
+    var script = document.createElement("script");
+    script.type = "text/javascript";
+    script.src  = "https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML";
+    document.getElementsByTagName("head")[0].appendChild(script);
+  })();
+</script>
+
+</body>
+</html>

@@ -8,7 +8,7 @@ svem_forward(
   formula,
   data,
   nBoot = 200,
-  objective = c("auto", "wAIC", "wBIC", "wSSE"),
+  objective = c("auto", "gaussian_likelihood", "wAIC", "wBIC", "wSSE"),
   weight_scheme = c("SVEM", "FRW_plain", "Identity"),
   response = NULL,
   unseen = c("warn_na", "error"),
@@ -23,20 +23,21 @@ svem_forward(
 
 \item{nBoot}{Integer. Number of bootstrap replicates (default \code{200}).}
 
-\item{objective}{Character. One of \code{"auto"} (resolves to
-\code{"wAIC"}), \code{"wAIC"}, \code{"wBIC"}, or \code{"wSSE"}, with the
-same definitions as in \code{\link{SVEMnet}} (Gaussian case): the model
-size \eqn{k} counts the fitted coefficients of the path point including
-the intercept.}
+\item{objective}{Character. The default and \code{"auto"} select
+\code{"gaussian_likelihood"}. Use \code{objective = "wAIC"} to reproduce
+the former forward default. Explicit \code{"wBIC"} and \code{"wSSE"}
+are also available. The information criteria count fitted coefficients
+including the intercept. This likelihood option is specific to
+Gaussian forward selection.}
 
 \item{weight_scheme}{Character. \code{"SVEM"} (default),
 \code{"FRW_plain"}, or \code{"Identity"}, as in \code{\link{SVEMnet}}.
 \code{"Identity"} with \code{nBoot = 1} yields a single deterministic
-forward-selection fit tuned by the chosen information criterion on the
+forward-selection fit tuned by the chosen objective on the
 training data.
 The support guard does not guarantee positive residual degrees of
 freedom. In particular, \code{"Identity"} gives \eqn{n_{eff,adm} = n},
-so the wAIC/wBIC rule admits saturated path points with \eqn{k = n}.
+so the Kish cap admits saturated path points with \eqn{k = n}.
 A forward path can then interpolate the training data and be selected
 by the log-scale criterion. Such members are flagged in
 \code{member_diagnostics}. By comparison, \code{forward_aicc()} skips
@@ -77,7 +78,7 @@ admissibility warnings.
 \item \code{diagnostics$path_length_max}: longest grown path (points,
 including the intercept-only point).
 \item \code{diagnostics$admissibility_truncation_rate}: fraction of
-replicates whose path growth was stopped by the wAIC/wBIC
+replicates whose path growth was stopped by the Kish
 admissibility ceiling.
 \item \code{diagnostics$selection_frequencies}: fraction of replicates
 in which each model term was part of the winning model.
@@ -86,13 +87,10 @@ in which each model term was part of the winning model.
 \description{
 Fit a Self-Validated Ensemble Model in which each bootstrap replicate's
 base learner is greedy forward selection on training-weighted least
-squares, instead of the glmnet elastic-net path used by
-\code{\link{SVEMnet}}. The forward path (intercept-only model up to the
-full greedy path) plays the lambda-path role: every path point is scored
-on the fractional-random-weight validation copy with the same
-validation-weighted criteria as \code{SVEMnet()} (\code{"wAIC"} by
-default, or \code{"wBIC"} / \code{"wSSE"}), and the minimizing path point
-wins that replicate. Winning coefficient vectors are averaged across
+squares. By default, each path point's training-fitted Gaussian mean and
+variance are evaluated on the validation-weighted copy. The first path
+point attaining the lowest admissible score wins that replicate.
+Winning coefficient vectors are averaged across
 bootstrap replicates exactly as in \code{SVEMnet()}.
 }
 \details{
@@ -107,12 +105,29 @@ the forward path is grown on rows scaled by \code{sqrt(w_train)}, greedy
 steps add the whole model term (multi-column factor blocks move as a
 unit) that most reduces training RSS, and each path point is refit and
 scored by validation-weighted residuals on the original (unweighted)
-rows. For \code{"wAIC"}/\code{"wBIC"}, path growth stops once the slope
-count reaches the Kish admissible effective sample size
-\eqn{n_{eff,adm}}, because all further path points would be inadmissible;
-\code{"wSSE"} paths are never truncated. Replicates with no admissible
+rows. Gaussian validation likelihood, wAIC and wBIC admit only models
+whose number of slope coefficients is strictly below the bounded
+validation Kish effective size. All columns of a term count toward the
+cap. Growth stops once the current support reaches the ceiling.
+The wSSE criterion uses the uncapped path. Replicates with no admissible
 finite path point fall back to a weighted intercept-only model, as in
 \code{SVEMnet()}.
+
+For Gaussian validation likelihood let \eqn{t} and \eqn{v} be the
+training- and validation-weighted mean squared residuals of the same
+training fit. Each uses its own sum of weights. Minimize
+\eqn{\log(t) + v/t} over all admissible points, including the intercept.
+A fit that understates residual variation can receive a poor validation
+log score. The score omits the common Gaussian constant and factor of one half.
+
+For this objective the response is centered at its midrange and divided
+by the largest absolute centered value. The training variance is floored at
+\code{.Machine$double.eps^2} in these units in both parts of the score.
+A constant response has zero centered residuals and selects its exact
+intercept. In \code{member_diagnostics}, \code{objective_value} uses
+conditioned units. Away from the floor, adding twice the log of the
+response scale gives the score in original units. Coefficients, fitted
+means, predictions and validation SSE are returned on the original scale.
 
 Only Gaussian responses are supported. There is no debias argument at fit
 time: as in \code{SVEMnet()}, a linear calibration \code{lm(y ~ y_pred)}
@@ -131,8 +146,11 @@ X1 <- rnorm(n); X2 <- rnorm(n); X3 <- rnorm(n)
 y  <- 1 + 2 * X1 - 1.5 * X2 + 0.8 * X1 * X2 + rnorm(n, 0, 0.5)
 dat <- data.frame(y, X1, X2, X3)
 
+## Validate each training-fitted Gaussian mean and variance on the weighted copy.
 fit <- svem_forward(y ~ (X1 + X2 + X3)^2, dat, nBoot = 8)
+fit$member_diagnostics[1:3, c("objective", "objective_value")]
 preds <- predict(fit, dat)
+## To reproduce the former forward default, supply objective = "wAIC".
 
 ## bigexp_spec front end, as in SVEMnet()
 spec <- bigexp_terms(y ~ X1 + X2 + X3, dat, factorial_order = 2)

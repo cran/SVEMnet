@@ -597,7 +597,8 @@
 
 .glmnet_prepare_call_args <- function(args, fun, default_control = list(),
                                       direct_control = .glmnet_direct_control_args(),
-                                      old_control = .glmnet_direct_control_args()) {
+                                      old_control = .glmnet_direct_control_args(),
+                                      scoped_legacy = FALSE) {
   if (!length(args)) args <- list()
 
   arg_names <- names(args)
@@ -638,6 +639,21 @@
       control <- utils::modifyList(control, direct_values, keep.null = TRUE)
     }
     if (length(control)) args$control <- control
+    return(args)
+  }
+
+  if (isTRUE(scoped_legacy)) {
+    control <- default_control
+    for (overrides in list(user_control, ctl_only_values, direct_values))
+      if (length(overrides)) control <- utils::modifyList(control, overrides, keep.null = TRUE)
+    global_keys <- setdiff(names(formals(glmnet::glmnet.control)), c("factory", old_control))
+    unsupported <- setdiff(names(control), c(old_control, global_keys))
+    if (length(unsupported)) stop("Unsupported glmnet control entr",
+      if (length(unsupported) == 1L) "y: " else "ies: ",
+      paste(unsupported, collapse = ", "), ".", call. = FALSE)
+    for (nm in intersect(names(control), old_control)) args[[nm]] <- control[[nm]]
+    global <- control[intersect(names(control), global_keys)]
+    if (length(global)) attr(args, "svem_legacy_control") <- global
     return(args)
   }
 

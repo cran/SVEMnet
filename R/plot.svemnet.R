@@ -111,7 +111,9 @@ plot.svem_model <- function(x, plot_debiased = FALSE, ...) {
 #' @param x An object of class \code{svem_binomial}.
 #' @param type One of \code{"calibration"}, \code{"roc"}, or \code{"pr"} (default \code{"calibration"}).
 #' @param bins Integer number of equal-frequency bins for calibration (default \code{10}).
-#' @param jitter_width Vertical jitter amplitude for raw points in calibration (default \code{0.05}).
+#' @param jitter_width Vertical jitter amplitude for raw points in calibration
+#'   (default \code{0.05}). A positive width draws random offsets and advances
+#'   the caller's random-number stream. Set it to zero to omit jitter.
 #' @param ... Additional aesthetics passed to \code{ggplot2::geom_line()} or \code{ggplot2::geom_point()}.
 #'
 #' @return A \code{ggplot2} object.

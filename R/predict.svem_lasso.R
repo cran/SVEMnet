@@ -104,6 +104,13 @@
 #'   limits from member predictions (requires \code{coef_matrix}). Not
 #'   available for \code{type = "class"}. For Gaussian models, this forces use
 #'   of bootstrap member predictions instead of aggregate coefficients.
+#' @param engine Default \code{"svemnet"} uses the original SVEM prediction.
+#'   \code{"gaupro"} or \code{"extra_trees"} returns one companion mean.
+#'   For GauPro, \code{se.fit = TRUE} returns the conditional latent-mean
+#'   standard deviation in \code{$se.fit}. \code{"all"} returns a data frame
+#'   of means with one column per requested engine plus SVEMnet. A failed
+#'   companion has missing means and its diagnostic in the \code{engine_status}
+#'   attribute. Calibration, intervals, and binomial companions are unsupported.
 #' @param level Central probability mass for member-percentile intervals. Default
 #'   \code{0.95}.
 #' @param ... Currently unused.
@@ -201,7 +208,7 @@ predict.svem_model <- function(object, newdata,
                                se.fit = FALSE,
                                interval = FALSE,
                                level = 0.95,
-                               ...) {
+                               ..., engine = c("svemnet", "gaupro", "extra_trees", "all")) {
   if (!is.data.frame(newdata)) stop("newdata must be a data frame.")
   if (is.null(object$terms) || is.null(object$parms)) {
     stop("The fitted object is missing required components (terms/parms).")
@@ -211,6 +218,11 @@ predict.svem_model <- function(object, newdata,
   debias <- .svem_logical_scalar(debias, "debias")
   se.fit <- .svem_logical_scalar(se.fit, "se.fit")
   interval <- .svem_logical_scalar(interval, "interval")
+  engine <- match.arg(engine)
+  if (engine != "svemnet") {
+    return(.svem_predict_engine(object, newdata, engine, match.arg(type),
+                                debias, se.fit, interval))
+  }
   newdata <- .svem_validate_newdata_classes(object, newdata)
 
   `%||%` <- function(a, b) if (!is.null(a)) a else b

@@ -1,7 +1,7 @@
 #' Select diverse candidate rows via PAM medoids
 #'
 #' @description
-#' Internal utility to select a small set of diverse candidate rows from a
+#' Select a small set of diverse candidate rows from a
 #' scored table. The function:
 #' \enumerate{
 #'   \item Orders rows according to a score column \code{by}, with larger or
@@ -49,7 +49,17 @@
 #' treated as better depending on \code{direction} ("max" or "min").
 #' Rows whose \code{by} value is \code{NA}, \code{NaN}, \code{Inf}, or
 #' \code{-Inf} are excluded before ranking and cannot enter the top fraction.
-#' The function errors when no finite ranking values remain.
+#' The function errors when no finite ranking values remain. Exact score ties
+#' retain input order. Supply a stable row order for reproducible ties.
+#' This function selects medoids only: it does not add a best row, check
+#' feasibility, exclude historical preparations, or deduplicate recipes.
+#' Supply an already filtered table with physical design factors only in
+#' \code{predictor_cols}; omit blocking factors. To request at least \code{k}
+#' shortlist rows, enlarge \code{top_frac} to at least \code{k / nrow(table)}.
+#' Logical design factors are treated as symmetric nominal factors, including
+#' FALSE-FALSE matches. Clustering shortlists above 65,536 rows are rejected
+#' before allocating a dissimilarity matrix.
+#' The default workflow performs these steps through [svem_plan_runs()].
 #'
 #' @examples
 #' set.seed(1)
@@ -81,8 +91,7 @@
 #' )
 #'
 #' @importFrom cluster daisy pam
-#' @keywords internal
-#' @noRd
+#' @export
 svem_select_candidates <- function(table,
                                    by,
                                    top_frac,
@@ -154,7 +163,7 @@ svem_select_candidates <- function(table,
 
   # Coerce problematic types for daisy() (character -> factor; integer64 -> numeric)
   for (nm in names(top_X)) {
-    if (is.character(top_X[[nm]])) {
+    if (is.character(top_X[[nm]]) || is.logical(top_X[[nm]])) {
       top_X[[nm]] <- factor(top_X[[nm]])
     } else if (inherits(top_X[[nm]], "integer64")) {
       top_X[[nm]] <- as.numeric(top_X[[nm]])
@@ -173,6 +182,11 @@ svem_select_candidates <- function(table,
   if (k >= nrow(top_X)) {
     return(top_idx)
   }
+
+  # Check before allocating the quadratic dissimilarity matrix.
+  if (nrow(top_X) > 65536L) stop(
+    "PAM shortlist exceeds 65,536 rows; reduce top_frac (exploration_fraction in svem_plan_runs) or preselect a smaller feasible candidate pool.",
+    call. = FALSE)
 
   # Critical: reset rownames so pam id.med maps to positions 1..m_top reliably
   rownames(top_X) <- as.character(seq_len(nrow(top_X)))

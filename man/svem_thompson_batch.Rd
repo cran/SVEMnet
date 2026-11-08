@@ -40,8 +40,10 @@ columns); collisions are rejected to preserve candidate settings.}
 \code{NULL}. Default \code{5000}.}
 
 \item{mixture_groups}{Optional mixture and simplex constraints passed to
-\code{\link{svem_random_table_multi}} (ignored when \code{candidates}
-is supplied).}
+\code{\link{svem_random_table_multi}} when generating candidates. For
+supplied candidates, groups declared in the fitted factor specification
+are enforced and an explicit declaration must agree. For older fits
+without declared groups, the caller supplies an already feasible table.}
 
 \item{numeric_sampler}{Character; how numeric predictors are sampled when
 \code{candidates = NULL}: \code{"random"} (Latin hypercube when

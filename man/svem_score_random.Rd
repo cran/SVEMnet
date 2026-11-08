@@ -15,7 +15,22 @@ svem_score_random(
   numeric_sampler = c("random", "uniform"),
   wmt = NULL,
   verbose = TRUE,
-  specs = NULL
+  specs = NULL,
+  candidates = NULL,
+  budget = NULL,
+  gp_endpoint = NULL,
+  increments = NULL,
+  forward = NULL,
+  allocation = c("legacy", "portfolio"),
+  incumbent = FALSE,
+  reference = NULL,
+  priority = c("incumbent", "svemnet", "gaupro", "extra_trees", "forward"),
+  exploration_fraction = 0.1,
+  incumbent_summary = c("best", "mean"),
+  benchmark = NULL,
+  spline = NULL,
+  n_optima = NULL,
+  n_explore = NULL
 )
 }
 \arguments{
@@ -112,6 +127,102 @@ Names of \code{specs}, when provided, should be a subset of
 \code{names(objects)} or of the model response names (left-hand sides).
 The specification structure matches that used by
 \code{svem_append_design_space_cols}.}
+
+\item{candidates}{Optional feasible recipe data frame to score in place of
+random sampling. Include all predictors. A unique \code{recipe_id} is optional.
+Repeated physical recipes collapse to the smallest supplied ID (numeric
+order or bytewise order for character IDs). Without IDs the scorer assigns
+ranks of sorted unique recipe keys, independent of the input row order.
+For a worklist, hold each block at its planned operating level. Physical
+recipe keys exclude those nuisance blocks.}
+
+\item{budget}{Optional positive physical preparation count for a worklist.
+Under \code{allocation = "legacy"} it counts distinct new preparations. The
+order is elastic-net SVEM, GauPro, Extra Trees, forward and spline optima
+when supplied, then SVEM spread, GP latent SD and high-spread medoids.
+Under \code{allocation = "portfolio"} it counts all physical preparations,
+including incumbent and benchmark repeats. Shared optima use one place.
+With unspecified exploration count, exploration can fill remaining slots.
+Supply \code{data} to exclude previously prepared recipes across all blocks,
+or use the recorded preparation settings in companion fits. A worklist's
+\code{history_source} reports the coverage available for this exclusion.
+For the legacy allocation, budget required controls separately.}
+
+\item{gp_endpoint}{Optional response name for GP exploration by latent SD.
+A single Gaussian response is inferred automatically when GauPro was fitted.}
+
+\item{increments}{Optional named numeric vector of positive preparation
+increments for an already discretized supplied pool, measured from zero.
+For example, use 0.0001 for component fractions in basis points.}
+
+\item{forward}{Optional named list of Gaussian forward fits for the same
+responses. They use the same desirability anchors and scientific weights.}
+
+\item{allocation}{\code{"legacy"} preserves the existing new-recipe allocation.
+\code{"portfolio"} uses the declared priority, then uncertainty medoids. The
+default formulation workflow in \code{\link[=svem_plan_runs]{svem_plan_runs()}} selects this policy.}
+
+\item{incumbent}{For portfolio allocation, \code{TRUE} repeats the best observed
+preparation in the reference block context; \code{FALSE} omits it. A positive
+integer specifies a row of \code{data} explicitly. The repeat consumes one slot.
+Each historical row must represent an independent preparation; summarize
+technical readings first. Selection uses observed outcomes, not fitted
+historical means. Missing positively weighted outcomes are ineligible.}
+
+\item{reference}{Named list with one historical level of every blocking
+factor for automatic incumbent selection. By default uses the planned
+levels in \code{candidates}; raw observations from different blocks are not
+pooled. An explicit incumbent row instead supplies its own source context.}
+
+\item{priority}{Portfolio nomination order. The usual order is incumbent,
+elastic net, GauPro, Extra Trees and forward. The default order appends
+spline after forward only when a spline fit list is supplied to this scorer.
+A custom order can omit or reorder models. Shared optima consume one place.}
+
+\item{exploration_fraction}{Fraction of remaining eligible recipes offered
+to uncertainty medoid selection in portfolio allocation, default 0.1.
+The shortlist expands only enough to fill available slots when necessary;
+\code{allocation_details} records that expansion. Use 0.25 for a wider sensitivity.}
+
+\item{incumbent_summary}{How repeated independent preparations within a
+reference context are ranked. The default \code{"best"} retains the
+highest individual observation. A poor repeat cannot demote that stored
+maximum. Use \code{"mean"} to score each physical recipe's mean observed
+responses over complete preparations; technical readings must be summarized
+beforehand. An explicit incumbent row always uses that row alone.}
+
+\item{benchmark}{Optional fixed historical benchmark, carried in addition to
+the selected incumbent. Supply one row index of \code{data}, or a named
+one-element list identifying a unique row, such as
+\code{list(RunID = "original-control")}. The identifier form is convenient
+across refits. The recipe must satisfy the current preparation constraints;
+it need not have complete response observations. A requested benchmark is
+mandatory and consumes a slot. If it is the same physical recipe as the
+incumbent, one preparation carries both roles. Too small a budget errors.}
+
+\item{spline}{Optional named list of \code{\link[=svem_spline]{svem_spline()}} fits, one per response.
+Scoring uses the same physical factors, block declarations, mixture
+constraints, scientific weights and desirability anchors as the primary
+fits. Supplying a spline adds its fitted means, joint score and nomination.
+A spline treats known block levels as categories and is incompatible with
+a primary fit that declares a continuous companion block.
+This scorer uses previously fitted objects. Use \code{\link[=svem_plan_runs]{svem_plan_runs()}} to fit
+models and prepare a worklist together.}
+
+\item{n_optima}{Optional number of distinct new model nominations in
+portfolio allocation. Duplicate model optima share one preparation and
+the next distinct prioritized model can fill the requested count. With
+\code{n_optima = NULL}, available models fill places left after required
+repeats and reserved exploration. An unfilled automatic model place is
+recorded as capacity.}
+
+\item{n_explore}{Optional exact number of uncertainty-medoid preparations.
+If both counts are supplied, an omitted budget is their sum plus the
+distinct required reference repeats. Supply a total \code{budget} when only
+one count is specified. Reference repeats consume budget first. With \code{n_explore = NULL}, remaining
+eligible slots are filled by exploration. Explicit counts can leave
+capacity unused. Inspect \code{allocation_counts} and \code{merged_nominations}
+for requested and obtained roles, shortages and shared physical recipes.}
 }
 \value{
 A list with components:
@@ -126,7 +237,11 @@ and \code{uncertainty_measure}. For each response \code{r} in
 \code{uncertainty_measure}) are appended. When \code{specs} is supplied
 and the spec-limit augmentation succeeds, additional columns
 \code{<resp>_p_in_spec_mean}, \code{<resp>_in_spec_point},
-\code{p_joint_mean}, and \code{joint_in_spec_point} are appended.}
+\code{p_joint_mean}, and \code{joint_in_spec_point} are appended.
+A supplied candidate pool or a worklist adds \code{recipe_id}.
+A worklist also includes \code{<resp>_<engine>_pred} for each
+requested companion, \code{<engine>_score} for its joint goal and,
+when requested, \code{<resp>_gp_latent_sd} for GP exploration.}
 \item{\code{original_data_scored}}{If \code{data} is supplied, that data
 augmented with prediction columns \code{<resp>_pred}, per-response
 desirabilities, \code{score}, optional \code{wmt_score}, and
@@ -143,13 +258,54 @@ otherwise \code{NULL}.}
 \item{\code{wmt_multipliers}}{Named vector of per-response WMT multipliers
 when \code{wmt} is supplied; otherwise \code{NULL}.}
 }
+With companions, \code{budget} or \code{gp_endpoint}, the result also includes:
+\describe{
+\item{\code{worklist}}{Scored recipes in preparation order, with \code{slot},
+\code{role}, \code{nominated_by} (all endorsing engines) and
+\code{nearest_distance} to a previously prepared or earlier selected recipe.
+SVEM spread exploration uses \code{maximum_spread} for a unique maximum and
+\code{best_predicted_tie} when predicted desirability breaks a spread tie.}
+\item{\code{nominations}}{One row per engine with its unrestricted and best
+unprepared recipe IDs and tie counts. Status is \code{selected},
+\code{dropped_by_budget}, \code{dropped_by_model_count},
+\code{not_prioritized}, \code{not_supplied}, \code{no_finite_score} or
+\code{no_unprepared_recipe}.
+The \code{slot} column identifies the selected preparation and is missing
+for omitted optima. Engines endorsing the same recipe share a slot.}
+\item{\code{engine_status}}{Fit or prediction status and a diagnostic
+message for each engine and response. A companion needs finite predictions
+for every positively weighted response on the same recipe to nominate it.}
+\item{\code{exploration}}{The best predicted and widest-spread recipes among
+the maximum SVEM spread ties, with tie counts and desirability ranges.}
+\item{\code{tie_endpoint_ranges}}{Ranges of endpoint predictions, raw
+interval widths and weighted spread contributions among those ties.}
+\item{\code{selections}}{Worklist rows formatted for \code{svem_export_candidates_csv()}.}
+\item{\code{shortfall}}{Without explicit counts, the number of budgeted
+preparations left unfilled. With \code{n_optima} or \code{n_explore},
+the total model and exploration shortfall. Only an explicitly requested
+model count can contribute a model shortfall. Unused physical capacity
+is reported separately in \code{allocation_counts$unused_capacity}.}
+\item{\code{historical_unmatched}}{Number of history rows with missing or
+off-increment settings that could not be matched.}
+\item{\code{history_source}}{Whether previous preparations came from supplied
+data, all fitted response histories, some histories, or no history.}
+}
+With explicit counts, the result also includes:
+\describe{
+\item{\code{allocation_counts}}{Requested, targeted and selected model
+and exploration counts, distinct required repeats, role shortfalls,
+unfilled model capacity and unused physical capacity.}
+\item{\code{merged_nominations}}{Endorsements sharing a physical
+preparation with an earlier role.}
+}
 }
 \description{
 Draw random points from the SVEM sampling schema, compute multi-response
 desirability scores and (optionally) whole-model-test (WMT) reweighted
 scores, and attach a scalar uncertainty measure based on percentile CI
-widths. This function does \emph{not} choose candidates; see
-\code{\link{svem_select_from_score_table}} for selection and clustering.
+widths. Companion fits or an explicit preparation budget also return a
+worklist of recipes to test. For other selections from the scored table,
+see \code{\link{svem_select_from_score_table}}.
 
 Predictions used inside this scorer are always generated with debiasing
 disabled (i.e., \code{debias = FALSE}) regardless of whether the underlying
@@ -316,6 +472,50 @@ columns or incompatible models), the error is caught with a warning
 regardless of \code{verbose}, and \code{score_table} and/or
 \code{original_data_scored} are returned without the spec-related columns.
 }
+
+When companions or a budget are requested, \code{score_table} also
+contains one set of endpoint means and one comparable desirability per
+available engine. The returned \code{worklist} has one row per distinct
+nomination after excluding known preparations. Its
+\code{selections} can be passed to \code{svem_export_candidates_csv()}.
+\code{nominations} reports each engine's unrestricted and best unprepared
+candidate. \code{exploration} contrasts best predicted desirability among tied
+maximum SVEM spread scores with an unclipped standardized-width tie-break.
+All engines use the original scientific weights and the same SVEM-resolved
+desirability anchors. A sole max/min endpoint ranks by the raw fitted mean.
+For several endpoints, equally desirable candidates remain tied even when
+their predictions differ outside the specified desirability limits; a
+stable recipe key resolves those ties. The scorer does not invent extra
+utility beyond the declared goals. Mean-interval, WMT and specification
+diagnostics remain specific to SVEM.
+
+Portfolio results also return \code{uncertainty_anchors} and a
+\code{uncertainty_eligibility} table with recipe IDs, informative-width
+flags and unclipped standardized widths. Constant or unavailable interval
+widths cannot support exploration. The worklist records its prediction
+context and the incumbent's observed source context and rows. The
+incumbent's \code{by_context} table reports observed winners separately,
+without pooling or adjusting outcomes across blocks. The incumbent object
+(not its \code{by_context} table) also records
+\code{recipe_n_preparations} (all attempted preparations of the selected
+physical recipe in its source context), \code{recipe_n_complete}, and
+\code{recipe_mean_score}, the desirability of its complete-preparation
+mean responses. These diagnostics do not change the default best-row
+selection. \code{n_preparations} counts the source rows used by the selected
+statistic, so it remains one for a best individual observation. The worklist
+exposes the recipe counts and mean score with the prefix
+\code{incumbent_recipe_}.
+
+The companion worklist is a custom experimental confirmation workflow.
+GauPro nominates an optimum by the fitted response mean or joint
+desirability. A separate optional slot uses the largest latent standard
+deviation for a chosen endpoint. A full Bayesian optimization workflow
+specifies an acquisition rule and updates the choice as data arrive.
+Expected improvement, for example, combines improvement and uncertainty
+in one acquisition value (Jones, Schonlau and Welch, 1998,
+\doi{10.1023/A:1008306431147}; Frazier, 2018,
+\url{https://arxiv.org/abs/1807.02811}). Here the scientist allocates
+preparations, measures the responses and requests the refit.
 }
 \section{Acknowledgments}{
 

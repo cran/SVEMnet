@@ -1,12 +1,23 @@
 #' Export SVEM candidate sets to CSV
 #'
 #' @description
-#' Given one or more selection objects returned by
+#' A plan from \code{\link{svem_plan_runs}}, or a scored result from
+#' \code{\link{svem_score_random}} with a budgeted
+#' \code{$worklist}, or that worklist data frame itself, exports the selected
+#' preparations in \code{slot} order. This path preserves \code{recipe_id},
+#' \code{slot}, \code{role}, \code{nominated_by}, and all other columns as
+#' supplied. It does not relabel exploration rows as best candidates. A direct
+#' worklist must have all four identity columns, unique nonmissing recipe IDs,
+#' positive unique integer-valued slots, and nonempty roles and endorsements.
+#' A short worklist exports only the available preparations; an empty worklist
+#' exports column headers. No rows are invented to fill a budget shortfall.
+#'
+#' Alternatively, given one or more selection objects returned by
 #' \code{\link{svem_select_from_score_table}}, concatenate their
 #' \code{$best} rows and \code{$candidates} and export a CSV suitable for
 #' planning new experimental runs.
 #'
-#' Each row is tagged with:
+#' On the legacy selection-object path, each row is tagged with:
 #' \itemize{
 #'   \item \code{candidate_type}: \code{"best"} or \code{"medoid"}.
 #'   \item \code{selection_label}: derived from the \code{label} argument
@@ -18,13 +29,17 @@
 #' columns across inputs (adding \code{NA}-filled columns where necessary),
 #' concatenates rows, and reorders a few metadata columns for readability.
 #'
-#' Any columns named \code{candidate_type}, \code{selection_label}, or
+#' On that legacy path, columns named \code{candidate_type}, \code{selection_label}, or
 #' \code{Notes_from_SVEMnet} that are present in the final data frame are moved to the
 #' leftmost positions in that order.
 #'
 #' @param ... One or more objects returned by
 #'   \code{\link{svem_select_from_score_table}}. You may also pass a single
-#'   list of such objects.
+#'   list of such objects. Alternatively, pass one run plan, budgeted scored result or
+#'   its recognizable worklist data frame. These worklist forms cannot be
+#'   combined with other arguments in \code{...}. A score result without a
+#'   worklist is not exported: request \code{budget} when scoring or select
+#'   rows with \code{svem_select_from_score_table()} first.
 #' @param file Character scalar; path to the CSV file to be written.
 #'   Required only when \code{write_file = TRUE}.
 #' @param overwrite Logical; if \code{FALSE} (default) and \code{file}
@@ -34,6 +49,25 @@
 #'   table to \code{file} as CSV and print the full path. If \code{FALSE},
 #'   no file is written and \code{file} may be \code{NULL}; the concatenated
 #'   \code{data.frame} is still returned (invisibly).
+#'
+#' @param planned_date Optional planned preparation date: one \code{Date} or
+#'   an ISO date string such as \code{"2026-11-02"}. Adds a
+#'   \code{planned_date} column. This is scheduling metadata, not the actual
+#'   execution date, a predictor, or an automatically added blocking factor.
+#' @param preparation_prefix Optional nonempty string identifying this batch,
+#'   for example \code{"studyA-20261102-round1"}. Adds \code{preparation_id}
+#'   values formed from the prefix and \code{-001}, \code{-002}, and so on,
+#'   in exported row order. Use a distinct prefix for every physical batch,
+#'   including batches on the same date. IDs are unique within this export;
+#'   the function does not maintain a global laboratory ID registry. Re-exporting
+#'   the same plan with the same prefix reproduces its labels. Exporting an
+#'   unlabeled subset renumbers its rows; to preserve previously assigned IDs,
+#'   filter the returned labeled table and omit these labeling options on export.
+#'   For a laboratory's
+#'   own IDs, add a \code{preparation_id} column to the worklist instead.
+#'   Existing columns are preserved; supplying either option when its output
+#'   column already exists errors rather than overwriting it. With both options
+#'   omitted, export columns and labels are unchanged, including legacy exports.
 #'
 #' @return Invisibly, the \code{data.frame} that was written to CSV (or
 #'   would be written, when \code{write_file = FALSE}).
@@ -66,13 +100,20 @@
 #' # Inspect the combined table without writing a file.
 #' cand_tbl <- svem_export_candidates_csv(optimal, exploratory, write_file = FALSE)
 #' head(cand_tbl)
+#' # Optional scheduling labels, separate from the formulation's recipe_id:
+#' labelled <- svem_export_candidates_csv(optimal, exploratory, write_file = FALSE,
+#'   planned_date = as.Date("2026-11-02"),
+#'   preparation_prefix = "studyA-20261102-round1")
+#' labelled[c("planned_date", "preparation_id", "selection_label")]
 
 #'
 #' @export
 svem_export_candidates_csv <- function(...,
                                        file       = NULL,
                                        overwrite  = FALSE,
-                                       write_file = TRUE) {
+                                       write_file = TRUE,
+                                       planned_date = NULL,
+                                       preparation_prefix = NULL) {
 
   # Validate file only if we are actually writing
   if (isTRUE(write_file)) {
@@ -87,7 +128,39 @@ svem_export_candidates_csv <- function(...,
     }
   }
 
+  write_output <- function(out) {
+    out <- .svem_export_labels(out, planned_date, preparation_prefix)
+    if (isTRUE(write_file)) {
+      utils::write.csv(out, file = file, row.names = FALSE)
+      full_path <- tryCatch(
+        normalizePath(file, winslash = "/", mustWork = FALSE),
+        error = function(e) file
+      )
+      message("svem_export_candidates_csv(): wrote candidates to: ", full_path)
+    }
+    invisible(out)
+  }
+
   sels_raw <- list(...)
+  if (length(sels_raw) == 1L) {
+    input <- sels_raw[[1L]]
+    if (inherits(input, "svem_run_plan")) {
+      if (is.null(input$worklist)) stop("This run plan has no worklist to export.", call. = FALSE)
+      return(write_output(.svem_export_worklist(input$worklist)))
+    }
+    if (is.list(input) && !is.data.frame(input) && "score_table" %in% names(input)) {
+      if (is.null(input$worklist)) {
+        stop("This scored result has no worklist. Request `budget` in ",
+             "svem_score_random(), or select rows with svem_select_from_score_table() ",
+             "and export that selection. The entire candidate pool is not exported.",
+             call. = FALSE)
+      }
+      return(write_output(.svem_export_worklist(input$worklist)))
+    }
+    if (is.data.frame(input)) {
+      return(write_output(.svem_export_worklist(input)))
+    }
+  }
 
   if (!length(sels_raw)) {
     stop("Provide at least one svem_select_from_score_table() object.")
@@ -215,17 +288,81 @@ svem_export_candidates_csv <- function(...,
     out <- out[, c(meta_present, other_cols), drop = FALSE]
   }
 
-  # Only write to disk if requested
-  if (isTRUE(write_file)) {
-    utils::write.csv(out, file = file, row.names = FALSE)
+  write_output(out)
+}
 
-    # Informative message with the normalized (absolute) path
-    full_path <- tryCatch(
-      normalizePath(file, winslash = "/", mustWork = FALSE),
-      error = function(e) file
-    )
-    message("svem_export_candidates_csv(): wrote candidates to: ", full_path)
+# Recognize a worklist by its complete identity schema, not by prediction or
+# score columns that also occur in an unselected candidate pool.
+.svem_export_worklist <- function(work) {
+  identity <- c("recipe_id", "slot", "role", "nominated_by")
+  if (!is.data.frame(work) || anyDuplicated(names(work)) ||
+      !all(identity %in% names(work))) {
+    stop("A worklist must be a data frame with unique column names including ",
+         "recipe_id, slot, role, and nominated_by. Export a budgeted scored ",
+         "result or select rows with svem_select_from_score_table() first.",
+         call. = FALSE)
   }
+  ids <- work$recipe_id
+  if (!is.atomic(ids) || !is.null(dim(ids)) || anyNA(ids) ||
+      any(!nzchar(as.character(ids))) || anyDuplicated(as.character(ids))) {
+    stop("Worklist `recipe_id` values must be unique, nonmissing, and nonempty.",
+         call. = FALSE)
+  }
+  slots <- work$slot
+  if (!is.numeric(slots) || !is.null(dim(slots)) || anyNA(slots) ||
+      any(!is.finite(slots)) || any(slots < 1 | slots != floor(slots)) ||
+      anyDuplicated(slots)) {
+    stop("Worklist `slot` values must be unique positive whole numbers.", call. = FALSE)
+  }
+  for (name in c("role", "nominated_by")) {
+    value <- work[[name]]
+    if ((!is.character(value) && !is.factor(value)) || !is.null(dim(value)) ||
+        anyNA(value) || any(!nzchar(trimws(as.character(value))))) {
+      stop("Worklist `", name, "` values must be nonmissing, nonempty labels.",
+           call. = FALSE)
+    }
+  }
+  out <- work[order(slots, method = "radix"), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
 
-  invisible(out)
+# Explicit laboratory labels are applied only on export, never to model input.
+.svem_export_labels <- function(out, planned_date, preparation_prefix) {
+  if (is.null(planned_date) && is.null(preparation_prefix)) return(out)
+  if (!is.null(planned_date)) {
+    if ("planned_date" %in% names(out)) {
+      stop("The export already has planned_date; preserve it or remove that column explicitly.", call. = FALSE)
+    }
+    if (length(planned_date) != 1L || is.na(planned_date)) {
+      stop("planned_date must be one nonmissing Date or ISO date string.", call. = FALSE)
+    }
+    if (is.character(planned_date)) {
+      if (!grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$", planned_date)) {
+        stop("planned_date must use the unambiguous YYYY-MM-DD format.", call. = FALSE)
+      }
+      value <- tryCatch(as.Date(planned_date, format = "%Y-%m-%d"), error = function(e) NA)
+      if (is.na(value) || !identical(format(value, "%Y-%m-%d"), planned_date)) {
+        stop("planned_date must use the unambiguous YYYY-MM-DD format.", call. = FALSE)
+      }
+      planned_date <- value
+    }
+    if (!inherits(planned_date, "Date") || !is.finite(as.numeric(planned_date))) {
+      stop("planned_date must be one nonmissing Date or ISO date string.", call. = FALSE)
+    }
+    out$planned_date <- rep(planned_date, nrow(out))
+  }
+  if (!is.null(preparation_prefix)) {
+    if (!is.character(preparation_prefix) || length(preparation_prefix) != 1L ||
+        is.na(preparation_prefix) || !nzchar(trimws(preparation_prefix)) ||
+        grepl("[\r\n]", preparation_prefix)) {
+      stop("preparation_prefix must be one nonempty single-line string.", call. = FALSE)
+    }
+    if ("preparation_id" %in% names(out)) {
+      stop("The export already has preparation_id; preserve it or remove that column explicitly.", call. = FALSE)
+    }
+    out$preparation_id <- if (nrow(out)) paste0(preparation_prefix, "-",
+      sprintf("%03d", seq_len(nrow(out)))) else character()
+  }
+  out
 }
